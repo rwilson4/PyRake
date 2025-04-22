@@ -1,38 +1,54 @@
+"""Bias/Variance Tradeoff."""
+
 import numpy as np
 import matplotlib.pyplot as plt
 
+from .core import Rake
+
 
 class EfficientFrontierResults:
-    def __init__(self, weights, phis, divergences):
+    """Wrapper for bias/variance tradeoff."""
+
+    def __init__(self, weights, phis, distances):
         self.weights = weights
         self.phis = phis
-        self.divergences = divergences
+        self.distances = distances
 
     def plot(self, ax=None):
+        """Plot bias/variance tradeoff."""
         if ax is None:
-            fig, ax = plt.subplots()
-        ax.plot(self.phis, self.divergences, marker="o")
-        ax.set_xlabel(r"$\|w\|_2^2$ (variance proxy)")
-        ax.set_ylabel(r"$D(w, v)$ (bias proxy)")
+            _, ax = plt.subplots()
+        ax.plot(self.phis, self.distances, marker="o")
+        ax.set_xlabel("Variance")
+        ax.set_ylabel("Bias")
         ax.set_title("Efficient Frontier: Bias-Variance Tradeoff")
         return ax
 
 
 class EfficientFrontier:
-    def __init__(self, rake):
+    r"""Class for tracing out the bias/variance tradeoff.
+
+    Solves:
+           minimize    D(w, v)
+           subject to  (1/M) * X^T * w = \mu
+                        \| w \|_2^2 \leq \phi
+                        w >= 0,
+    for a sequence of values for \phi. Increasing \phi involves more variance,
+    but potentially more bias.
+
+    """
+
+    def __init__(self, rake: Rake):
         self.rake = rake
 
-    def trace(self, X, mu, v=None, phi_max=None, num_points=20):
-        M, _ = X.shape
-        if v is None:
-            v = np.ones(M)
-
-        w0 = solve_phase1(X, mu, phi=np.inf)
-        min_phi = np.sum(w0**2)
+    def trace(self, phi_max=None, num_points=20):
+        """Trace bias/variance tradeoff."""
+        w0 = self.rake.solve_phase1()
+        min_phi = np.dot(w0, w0)
 
         weights = [w0]
         phis = [min_phi]
-        divergences = [self.rake._objective_D(w0, v)]
+        distances = [self.rake.distance.evaluate(w0)]
 
         if phi_max is None:
             phi_max = min_phi * 100
@@ -41,9 +57,9 @@ class EfficientFrontier:
         w = w0
         for phi in phi_grid:
             self.rake.phi = phi
-            w = self.rake.interior_point(X, mu, phi, v=v)
+            w = self.rake.solve(w0=w)
             weights.append(w)
-            phis.append(np.sum(w**2))
-            divergences.append(self.rake._objective_D(w, v))
+            phis.append(phi)
+            distances.append(self.rake.distance.evaluate(w))
 
-        return EfficientFrontierResults(weights, phis, divergences)
+        return EfficientFrontierResults(weights, phis, distances)

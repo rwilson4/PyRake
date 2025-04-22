@@ -1,7 +1,7 @@
 """Numerical linear algebra routines."""
 
 import numpy as np
-import scipy.linalg as linalg
+from scipy import linalg
 
 
 def solve_diagonal_plus_rank_one(

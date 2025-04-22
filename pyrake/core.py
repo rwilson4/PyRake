@@ -26,7 +26,15 @@ class OptimizationSettings:
 
 
 class Rake:
-    """Solve optimization problem."""
+    r"""Solve optimization problem.
+
+    Class for solving problems of the form:
+           minimize    D(w, v)
+           subject to  (1/M) * X^T * w = \mu
+                        \| w \|_2^2 \leq \phi
+                        w >= 0,
+
+    """
 
     def __init__(
         self,
@@ -36,7 +44,7 @@ class Rake:
         phi: float,
         settings: Optional[OptimizationSettings] = None,
     ):
-        M, p = X.shape
+        p = X.shape[1]
         assert mu.shape[0] == p
 
         self.distance = distance
@@ -48,7 +56,7 @@ class Rake:
         else:
             self.settings = settings
 
-    def interior_point(self):
+    def solve(self, w0: Optional[np.ndarray] = None) -> np.ndarray:
         r"""Solve optimization problem.
 
         Uses an interior point method with a logarithmic barrier penalty to
@@ -60,6 +68,11 @@ class Rake:
         where D is a distance metric than penalizes deviations from baseline
         weights v.
 
+        Parameters
+        ----------
+         w0 : vector
+            Initial guess.
+
         Returns
         -------
          w : vector
@@ -67,7 +80,7 @@ class Rake:
 
         """
         p = self.X.shape[1]
-        w = self.solve_phase1()
+        w = self.solve_phase1(w0=w0)
         t = 1.0
         for _ in range(20):
             if p / t < self.settings.outer_tolerance:
@@ -187,7 +200,7 @@ class Rake:
 
         return s
 
-    def solve_phase1(self) -> np.ndarray:
+    def solve_phase1(self, w0: Optional[np.ndarray] = None) -> np.ndarray:
         r"""Find a feasible point.
 
         A point, w, is feasible if:
@@ -195,13 +208,20 @@ class Rake:
            \| w \|_2^2 \leq \phi
            w >= 0
 
-        We look for such a point by solving:
+        We look for such a point by checking if an initial guess, w0, is
+        feasible. If it is, we simply return w0. Otherwise we solve:
            minimize   \| w \|_2^2
            subject to (1/M) * X^T w = \mu
                       w >= 0.
 
         If the solution satisfies \| w_star \|_2^2 \leq \phi, this point is
         feasible, otherwise the problem is infeasible.
+
+        Parameters
+        ----------
+         w0 : np.ndarray, optional
+            If specified, use this as the starting point. Otherwise use a
+            vector of all 1s.
 
         Returns
         -------
@@ -210,6 +230,17 @@ class Rake:
 
         """
         M = self.X.shape[0]
+        if w0 is None:
+            w0 = np.ones((M,))
+
+        # Check whether w0 is feasible:
+        if (
+            np.all(w0 > 0)
+            and ((1 / M) * np.dot(self.X.T, w0) == self.mu)
+            and np.dot(w0, w0) < self.phi
+        ):
+            return w0
+
         res = minimize(
             objective=lambda w: np.dot(w, w),
             w0=np.ones((M,)),
@@ -229,7 +260,7 @@ class Rake:
             raise ProblemInfeasibleError("Phase I problem did not converge.")
 
         w = res.x
-        if np.dot(w, w) > self.phi:
+        if np.dot(w, w) >= self.phi:
             raise ProblemInfeasibleError(
                 "Minimum feasible norm exceeds variance budget (phi)."
             )
