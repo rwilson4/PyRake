@@ -1,7 +1,7 @@
-
 import numpy as np
 from scipy.optimize import minimize, LinearConstraint, Bounds
 from .exceptions import ProblemInfeasibleError
+
 
 def solve_phase1(X, mu, phi):
     M, p = X.shape
@@ -26,7 +26,7 @@ def solve_phase1(X, mu, phi):
         jac=grad,
         constraints=[eq_constraint],
         bounds=bounds,
-        options={"verbose": 0}
+        options={"verbose": 0},
     )
 
     if not res.success:
@@ -36,6 +36,8 @@ def solve_phase1(X, mu, phi):
     norm_sq = np.sum(w**2)
 
     if norm_sq > phi:
-        raise ProblemInfeasibleError("Minimum feasible norm exceeds variance budget (phi).")
+        raise ProblemInfeasibleError(
+            "Minimum feasible norm exceeds variance budget (phi)."
+        )
 
     return w

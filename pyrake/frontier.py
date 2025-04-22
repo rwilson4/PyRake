@@ -1,7 +1,7 @@
-
 import numpy as np
 import matplotlib.pyplot as plt
 from .phase1 import solve_phase1
+
 
 class EfficientFrontierResults:
     def __init__(self, weights, phis, divergences):
@@ -12,11 +12,12 @@ class EfficientFrontierResults:
     def plot(self, ax=None):
         if ax is None:
             fig, ax = plt.subplots()
-        ax.plot(self.phis, self.divergences, marker='o')
+        ax.plot(self.phis, self.divergences, marker="o")
         ax.set_xlabel(r"$\|w\|_2^2$ (variance proxy)")
         ax.set_ylabel(r"$D(w, v)$ (bias proxy)")
         ax.set_title("Efficient Frontier: Bias-Variance Tradeoff")
         return ax
+
 
 class EfficientFrontier:
     def __init__(self, rake):

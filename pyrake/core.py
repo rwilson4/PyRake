@@ -1,9 +1,9 @@
-
 import numpy as np
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from .phase1 import solve_phase1
 from .exceptions import ProblemInfeasibleError
+
 
 @dataclass
 class OptimizationSettings:
@@ -14,11 +14,15 @@ class OptimizationSettings:
     backtracking_alpha: float = 0.01
     backtracking_beta: float = 0.5
 
+
 class Distance(ABC):
     @abstractmethod
-    def eta(self, w, v): pass
+    def eta(self, w, v):
+        pass
+
     @abstractmethod
-    def zeta(self, w): pass
+    def zeta(self, w):
+        pass
 
     def solve(self, w, v, b):
         eta = self.eta(w, v)
@@ -30,25 +34,45 @@ class Distance(ABC):
         zDb = np.dot(zeta, Db)
         return Db - Dz * (zDb / (1 + zDz))
 
+
 class SquaredL2(Distance):
-    def eta(self, w, v): return np.ones_like(w)
-    def zeta(self, w): return 2 * w / (1 - np.sum(w**2))
+    def eta(self, w, v):
+        return np.ones_like(w)
+
+    def zeta(self, w):
+        return 2 * w / (1 - np.sum(w**2))
+
 
 class KL(Distance):
-    def eta(self, w, v): return 1.0 / w
-    def zeta(self, w): return 2 * w / (1 - np.sum(w**2))
+    def eta(self, w, v):
+        return 1.0 / w
+
+    def zeta(self, w):
+        return 2 * w / (1 - np.sum(w**2))
+
 
 class L1(Distance):
-    def __init__(self, epsilon=1e-6): self.epsilon = epsilon
-    def eta(self, w, v): return 1.0 / (self.epsilon + np.abs(w - v))
-    def zeta(self, w): return 2 * w / (1 - np.sum(w**2))
+    def __init__(self, epsilon=1e-6):
+        self.epsilon = epsilon
+
+    def eta(self, w, v):
+        return 1.0 / (self.epsilon + np.abs(w - v))
+
+    def zeta(self, w):
+        return 2 * w / (1 - np.sum(w**2))
+
 
 class Huber(Distance):
-    def __init__(self, delta=0.1): self.delta = delta
+    def __init__(self, delta=0.1):
+        self.delta = delta
+
     def eta(self, w, v):
         d = w - v
         return np.where(np.abs(d) <= self.delta, 1.0, self.delta / np.abs(d))
-    def zeta(self, w): return 2 * w / (1 - np.sum(w**2))
+
+    def zeta(self, w):
+        return 2 * w / (1 - np.sum(w**2))
+
 
 class Rake:
     def __init__(self, distance, phi, settings=None):
@@ -89,7 +113,10 @@ class Rake:
         w = w0.copy()
         for _ in range(self.settings.max_inner_iterations):
             delta_w = self.calculate_newton_step(w, v, X, mu, t)
-            if 0.5 * np.dot(delta_w, self._grad_f(w, v, t)) < self.settings.inner_tolerance:
+            if (
+                0.5 * np.dot(delta_w, self._grad_f(w, v, t))
+                < self.settings.inner_tolerance
+            ):
                 return w
             s = self.backtracking_line_search(w, v, delta_w, t)
             w += s * delta_w
@@ -110,9 +137,12 @@ class Rake:
         raise RuntimeError("Interior point method did not converge")
 
     def _grad_D(self, w, v):
-        if isinstance(self.distance, SquaredL2): return w - v
-        elif isinstance(self.distance, KL): return np.log(w / v)
-        elif isinstance(self.distance, L1): return np.sign(w - v)
+        if isinstance(self.distance, SquaredL2):
+            return w - v
+        elif isinstance(self.distance, KL):
+            return np.log(w / v)
+        elif isinstance(self.distance, L1):
+            return np.sign(w - v)
         elif isinstance(self.distance, Huber):
             d = w - v
             delta = self.distance.delta
@@ -126,13 +156,20 @@ class Rake:
         return t * self._objective_D(w, v) - np.sum(np.log(w)) - np.log(S)
 
     def _objective_D(self, w, v):
-        if isinstance(self.distance, SquaredL2): return 0.5 * np.sum((w - v)**2)
-        elif isinstance(self.distance, KL): return np.sum(w * np.log(w / v) - w + v)
-        elif isinstance(self.distance, L1): return np.sum(np.abs(w - v))
+        if isinstance(self.distance, SquaredL2):
+            return 0.5 * np.sum((w - v) ** 2)
+        elif isinstance(self.distance, KL):
+            return np.sum(w * np.log(w / v) - w + v)
+        elif isinstance(self.distance, L1):
+            return np.sum(np.abs(w - v))
         elif isinstance(self.distance, Huber):
             d = w - v
             delta = self.distance.delta
-            return np.sum(np.where(np.abs(d) <= delta, 0.5 * d**2, delta * (np.abs(d) - 0.5 * delta)))
+            return np.sum(
+                np.where(
+                    np.abs(d) <= delta, 0.5 * d**2, delta * (np.abs(d) - 0.5 * delta)
+                )
+            )
         raise NotImplementedError()
 
     def _grad_f(self, w, v, t):
