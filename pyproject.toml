@@ -1,0 +1,20 @@
+[tool.poetry]
+name = "pyrake"
+version = "0.1.0"
+description = "Balancing Weights and Raking"
+authors = ["Bob Wilson <bob.wilson@convexanalytics.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+numpy = "^2.2.5"
+scipy = "^1.15.2"
+matplotlib = "^3.10.1"
+
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.3.5"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
