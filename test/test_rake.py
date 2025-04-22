@@ -1,4 +1,5 @@
 """Test Rake."""
+
 import numpy as np
 import pytest
 from pyrake.core import Rake

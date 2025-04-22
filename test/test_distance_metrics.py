@@ -1,4 +1,5 @@
 """Test distance metrics."""
+
 import numpy as np
 from pyrake.distance_metrics import SquaredL2, KLDivergence, Huber
 

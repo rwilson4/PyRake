@@ -1,4 +1,5 @@
 """Test numerical helpers."""
+
 import time
 import numpy as np
 from pyrake.numerical_helpers import (
