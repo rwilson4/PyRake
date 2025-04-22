@@ -236,14 +236,14 @@ class Rake:
         # Check whether w0 is feasible:
         if (
             np.all(w0 > 0)
-            and ((1 / M) * np.dot(self.X.T, w0) == self.mu)
+            and np.allclose((1 / M) * np.dot(self.X.T, w0), self.mu)
             and np.dot(w0, w0) < self.phi
         ):
             return w0
 
         res = minimize(
-            objective=lambda w: np.dot(w, w),
-            w0=np.ones((M,)),
+            fun=lambda w: np.dot(w, w),
+            x0=w0,
             method="trust-constr",
             jac=lambda w: 2 * w,
             constraints=[

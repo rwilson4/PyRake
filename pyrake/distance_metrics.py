@@ -71,7 +71,7 @@ class SquaredL2(Distance):
         return 2.0 * np.ones_like(w)
 
 
-class KL(Distance):
+class KLDivergence(Distance):
     r"""Distance metric with D(w, v) = KL Divergence.
 
     In this case, D(w, v) = \sum_{i=1}^M w_i * log(w_i / v_i) - w_i + v_i, so
