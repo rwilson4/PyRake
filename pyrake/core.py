@@ -1,6 +1,7 @@
-import numpy as np
-from abc import ABC, abstractmethod
 from dataclasses import dataclass
+
+import numpy as np
+
 from .phase1 import solve_phase1
 from .exceptions import ProblemInfeasibleError
 
@@ -13,65 +14,6 @@ class OptimizationSettings:
     max_inner_iterations: int = 100
     backtracking_alpha: float = 0.01
     backtracking_beta: float = 0.5
-
-
-class Distance(ABC):
-    @abstractmethod
-    def eta(self, w, v):
-        pass
-
-    @abstractmethod
-    def zeta(self, w):
-        pass
-
-    def solve(self, w, v, b):
-        eta = self.eta(w, v)
-        zeta = self.zeta(w)
-        Dinv = 1.0 / eta
-        Dz = Dinv * zeta
-        zDz = np.dot(zeta, Dz)
-        Db = Dinv * b
-        zDb = np.dot(zeta, Db)
-        return Db - Dz * (zDb / (1 + zDz))
-
-
-class SquaredL2(Distance):
-    def eta(self, w, v):
-        return np.ones_like(w)
-
-    def zeta(self, w):
-        return 2 * w / (1 - np.sum(w**2))
-
-
-class KL(Distance):
-    def eta(self, w, v):
-        return 1.0 / w
-
-    def zeta(self, w):
-        return 2 * w / (1 - np.sum(w**2))
-
-
-class L1(Distance):
-    def __init__(self, epsilon=1e-6):
-        self.epsilon = epsilon
-
-    def eta(self, w, v):
-        return 1.0 / (self.epsilon + np.abs(w - v))
-
-    def zeta(self, w):
-        return 2 * w / (1 - np.sum(w**2))
-
-
-class Huber(Distance):
-    def __init__(self, delta=0.1):
-        self.delta = delta
-
-    def eta(self, w, v):
-        d = w - v
-        return np.where(np.abs(d) <= self.delta, 1.0, self.delta / np.abs(d))
-
-    def zeta(self, w):
-        return 2 * w / (1 - np.sum(w**2))
 
 
 class Rake:
