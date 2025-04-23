@@ -117,6 +117,9 @@ results.plot()
 ```
 
 ## Development
+I used ChatGPT to write the original commit (it did a pretty good
+job!)
+
 ### Architecture
 We use [poetry](https://python-poetry.org/) to manage dependencies.
 Test cases use [pytest](https://docs.pytest.org/en/latest/). We use
