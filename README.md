@@ -54,6 +54,49 @@ PyRake can also be used to solve a sequence of these problems, with
 varying $` \phi `$. This allows the user to visualize the bias/variance
 tradeoff.
 
+## Connection with Other Methods
+Popular methods for reweighting include Raking, Entropy Balancing, and
+Stable Balancing Weights. These can be seen as special cases or
+modifications of the problem family PyRake solves.
+
+Raking (Deming and Stephan, 1940) solves:<br />
+$`
+\begin{array}{ll}
+\textrm{minimize}    & D(w, v) \\
+\textrm{subject to}  & (1/M) X^T w = \mu \\
+           &  \| w \|_2^2 \leq \phi \\
+           & w \succeq 0,
+\end{array}
+`$<br />
+where D(w, v) is the KL divergence; v is typically chosen to be
+uniform. Raking sets $` \phi `$ to be large enough so that the
+variance constraint is not active; equivalently the constraint is
+simply omitted. As the name implies, PyRake can be used to calculate
+Raking weights.
+
+Like Raking, Entropy Balancing (Hainmuller, 2012) uses KL divergence
+as the distance metric and omits the variance constraint. An
+additional constraint is applied: $` 1^T w = 1^T v`$. This constraint
+can be accommodated by adding an extra column to X having all ones;
+the corresponding entry in $`\mu`$ should be $` M \cdot 1^T v`$. This
+could be handled more conveniently, but it's there.
+
+Stable Balancing Weights (Zubizarreta, 2015) uses
+$` D(w, v) = \| w - v \|_2^2, `$ which is supported by PyRake.
+
+### References
+W. Edwards Deming and Frederick F. Stephan, "On a least squares
+adjustment of a sampled frequency table when the expected marginal
+totals are known" (1940). Annals of Mathematical Statistics.
+
+Jens Hainmuller, "Entropy balancing for causal effects: A multivariate
+reweighting method to produce balanced samples in observational
+studies" (2012). Political Analysis.
+
+José R. Zubizarreta, "Stable weights that balance covariates for
+estimation with incomplete outcome data." (2015). Journal of the
+American Statistical Association.
+
 ## Installation
 
 ```bash
