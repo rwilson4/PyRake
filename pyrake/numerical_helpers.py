@@ -64,7 +64,7 @@ def solve_kkt_system_hessian_diagonal_plus_rank_one(
     ----------
      A : p-by-M matrix.
         Parameter.
-     g : vector of length p
+     g : vector of length M
         Right-hand-side.
      eta : vector of length M
         Diagonal component of H. See Notes.
@@ -75,7 +75,7 @@ def solve_kkt_system_hessian_diagonal_plus_rank_one(
     -------
      delta_w : vector of length M
         Solution to system. See Notes.
-     xi : vector of length p
+     nu : vector of length p
         Solution to system. See Notes.
 
     Notes
@@ -83,7 +83,7 @@ def solve_kkt_system_hessian_diagonal_plus_rank_one(
     Solves:
            _       _   _       _     _   _
           | H   A^T | | delta_w |   |  g  |
-          | A    0  | |   xi    | = |  0  |
+          | A    0  | |   nu    | = |  0  |
            -       -   -       -     -   -
     where H = diag(eta) + zeta * zeta^T.
 
@@ -99,12 +99,15 @@ def solve_kkt_system_hessian_diagonal_plus_rank_one(
       2. Form S = -A * B and c = -A * b. Since A is p-by-M and B is M-by-p,
          forming S involves p^2 dot products of length M, which takes (p^2 * M)
          time. Forming c takes O(p * M) time.
-      3. Solve S * xi = c via Cholesky decomposition. (S is negative definite,
-         so we instead solve -S * xi = -c.) This takes O(p^3) time.
-      4. Solve H * delta_w = g - A^T * xi. This takes O(M) time.
+      3. Solve S * nu = c via Cholesky decomposition. (S is negative definite,
+         so we instead solve -S * nu = -c.) This takes O(p^3) time.
+      4. Solve H * delta_w = g - A^T * nu. This takes O(M) time.
 
     """
     p, M = A.shape
+    assert len(g) == M
+    assert len(eta) == M
+    assert len(zeta) == M
 
     # Step 1: form B = H^{-1} * A^T and b = H^{-1} * g
     B = np.zeros((M, p))
@@ -117,9 +120,9 @@ def solve_kkt_system_hessian_diagonal_plus_rank_one(
     neg_c = np.dot(A, b)
 
     # Step 3: Solve -S * xi = -c
-    xi = linalg.solve(neg_S, neg_c, assume_a="pos")
+    nu = linalg.solve(neg_S, neg_c, assume_a="pos")
 
     # Step 4: Solve H * delta_w = -grad_ft - A^T * xi
-    delta_w = solve_diagonal_plus_rank_one(eta, zeta, g - np.dot(A.T, xi))
+    delta_w = solve_diagonal_plus_rank_one(eta, zeta, g - np.dot(A.T, nu))
 
-    return delta_w, xi
+    return delta_w, nu

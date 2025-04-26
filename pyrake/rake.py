@@ -1,13 +1,18 @@
 """Solve optimization problem."""
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Tuple
 
 import numpy as np
 from scipy.optimize import Bounds, LinearConstraint, minimize
 
 from .distance_metrics import Distance
-from .exceptions import BacktrackingLineSearchError, ProblemInfeasibleError
+from .exceptions import (
+    BacktrackingLineSearchError,
+    CenteringStepError,
+    InteriorPointMethodError,
+    ProblemInfeasibleError,
+)
 from .numerical_helpers import (
     solve_kkt_system_hessian_diagonal_plus_rank_one,
 )
@@ -20,6 +25,7 @@ class OptimizationSettings:
     outer_tolerance: float = 1e-6
     barrier_multiplier: float = 10.0
     inner_tolerance: float = 1e-8
+    inner_tolerance_soft: float = 1e-4
     max_inner_iterations: int = 100
     backtracking_alpha: float = 0.01
     backtracking_beta: float = 0.5
@@ -74,7 +80,8 @@ class Rake:
         Parameters
         ----------
          w0 : vector
-            Initial guess.
+            Initial guess. If infeasible, a Phase I method will be used to find a
+            feasible point close to w0.
 
         Returns
         -------
@@ -85,14 +92,24 @@ class Rake:
         p = self.covariates_balanced
         w = self.solve_phase1(w0=w0)
         t = 1.0
-        for _ in range(20):
-            if p / t < self.settings.outer_tolerance:
-                return w
-            w = self.centering_step(w, t)
+        num_steps = (
+            int(
+                np.ceil(
+                    np.log(p / (t * self.settings.outer_tolerance))
+                    / np.log(self.settings.barrier_multiplier)
+                )
+            )
+            + 1
+        )
+        for ii in range(num_steps):
+            w = self.centering_step(w, t, last_step=(ii + 1 == num_steps))
             t *= self.settings.barrier_multiplier
-        raise RuntimeError("Interior point method did not converge")
 
-    def centering_step(self, w0: np.ndarray, t: float) -> np.ndarray:
+        return w
+
+    def centering_step(
+        self, w0: np.ndarray, t: float, last_step: bool
+    ) -> np.ndarray:
         r"""Solve centering step.
 
         The centering step solves:
@@ -104,18 +121,32 @@ class Rake:
         Parameters
         ----------
          w0 : vector
-            Initial guess.
-         v : vector
+            Initial guess. Must be strictly feasible.
+         t : float
+            Barrier parameter.
+         last_step: bool
+             Indicates whether this is the last centering step. See Notes.
 
         Returns
         -------
          w : vector
             Solution to centering step.
 
+        Notes
+        -----
+        Uses Newton's method with a feasible starting point. It isn't always possible to
+        solve this to high precision, so we use a "soft" threshold as a fallback. If we
+        can solve the problem to high precision, great; otherwise we're content if we
+        have solved it to medium precision.
+
+        The exception is on the very last step, where the overall suboptimality of the
+        interior point method relies on the last centering step being solved to high
+        precision. So this "soft" threshold does not apply in this last step.
+
         """
         w = w0.copy()
         for _ in range(self.settings.max_inner_iterations):
-            delta_w = self.calculate_newton_step(w, t)
+            delta_w, _ = self.calculate_newton_step(w, t)
 
             # Check for convergence
             lmbda = self._newton_decrement(w, t, delta_w)
@@ -123,12 +154,24 @@ class Rake:
                 return w
 
             # Update
-            s = self.backtracking_line_search(w, delta_w, t)
+            try:
+                s = self.backtracking_line_search(w, delta_w, t)
+            except BacktrackingLineSearchError:
+                if (
+                    not last_step
+                    and 0.5 * lmbda * lmbda
+                    < self.settings.inner_tolerance_soft
+                ):
+                    return w
+                raise
+
             w += s * delta_w
 
-        raise RuntimeError("Centering step did not converge")
+        raise CenteringStepError("Centering step did not converge.")
 
-    def calculate_newton_step(self, w: np.array, t: float) -> np.ndarray:
+    def calculate_newton_step(
+        self, w: np.array, t: float
+    ) -> Tuple[np.ndarray, np.ndarray]:
         r"""Calculate Newton step.
 
         Calculates Newton step for the "inner" problem:
@@ -137,35 +180,41 @@ class Rake:
                               - \sum_i log(w_i)
           subject to (1 / M) * X^T * w = \mu.
 
+        Parameters
+        ----------
+         w : vector
+            Current estimate.
+         t : float
+            Barrier parameter.
 
         Returns
         -------
          delta_w : vector
             Newton step.
+         nu : vector
+            Lagrange multiplier associated with equality constraints.
 
         Notes
         -----
         The Newton step, delta_w, is the solution of the system:
            _       _   _       _     _         _
           | H   A^T | | delta_w |   | - grad_ft |
-          | A    0  | |   xi    | = |      0    |
+          | A    0  | |   nu    | = |      0    |
            -       -   -       -     -         -
-        where H is the Hessian of ft evaluated at w, A = (1/M) * X^T, grad_f is
-        the gradient of ft evaluated at w, and xi is a auxiliary variable that
-        enforces the constraints. We use
-        `solve_kkt_system_hessian_diagonal_plus_rank_one` to solve this system
-        in O(p^3 + p^2 * M) time.
+        where H is the Hessian of ft evaluated at w, A = (1/M) * X^T, grad_f is the
+        gradient of ft evaluated at w, and nu is the Lagrange multiplier associated with
+        the equality constraints. We use
+        `solve_kkt_system_hessian_diagonal_plus_rank_one` to solve this system in
+        O(p^3 + p^2 * M) time.
 
         """
         M = self.dimension
-        delta_w, _ = solve_kkt_system_hessian_diagonal_plus_rank_one(
+        return solve_kkt_system_hessian_diagonal_plus_rank_one(
             A=(1.0 / M) * self.X.T,
             g=-self._grad_ft(w, t),
             eta=self._hessian_ft_diagonal(w, t),
             zeta=self._hessian_ft_rank_one(w),
         )
-
-        return delta_w
 
     def backtracking_line_search(
         self, w: np.ndarray, delta_w: np.ndarray, t: float
@@ -179,7 +228,7 @@ class Rake:
          delta_w : np.ndarray
             Descent direction.
          t : float
-            Barrier penalty.
+            Barrier parameter.
 
         Returns
         -------
@@ -197,9 +246,7 @@ class Rake:
         while np.any(w_new <= 0) or np.sum(w_new * w_new) >= M * self.phi:
             s *= beta
             if s < min_step:
-                raise BacktrackingLineSearchError(
-                    "Step size got too small."
-                )
+                raise BacktrackingLineSearchError("Step size got too small.")
 
             w_new = w + s * delta_w
 
@@ -210,9 +257,7 @@ class Rake:
         while self._ft(w_new, t) > fw + alpha * s * grad_ft_dot_delta_w:
             s *= beta
             if s < min_step:
-                raise BacktrackingLineSearchError(
-                    "Step size got too small."
-                )
+                raise BacktrackingLineSearchError("Step size got too small.")
             w_new = w + s * delta_w
 
         return s
