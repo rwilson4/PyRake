@@ -7,7 +7,7 @@ import numpy as np
 from scipy.optimize import Bounds, LinearConstraint, minimize
 
 from .distance_metrics import Distance
-from .exceptions import ProblemInfeasibleError
+from .exceptions import BacktrackingLineSearchError, ProblemInfeasibleError
 from .numerical_helpers import (
     solve_kkt_system_hessian_diagonal_plus_rank_one,
 )
@@ -23,6 +23,7 @@ class OptimizationSettings:
     max_inner_iterations: int = 100
     backtracking_alpha: float = 0.01
     backtracking_beta: float = 0.5
+    backtracking_min_step: float = 1e-3
 
 
 class Rake:
@@ -189,11 +190,17 @@ class Rake:
         M = self.dimension
         alpha = self.settings.backtracking_alpha
         beta = self.settings.backtracking_beta
+        min_step = self.settings.backtracking_min_step
 
         s = 1.0
         w_new = w + s * delta_w
         while np.any(w_new <= 0) or np.sum(w_new * w_new) >= M * self.phi:
             s *= beta
+            if s < min_step:
+                raise BacktrackingLineSearchError(
+                    "Step size got too small."
+                )
+
             w_new = w + s * delta_w
 
         fw = self._ft(w, t)
@@ -202,6 +209,10 @@ class Rake:
 
         while self._ft(w_new, t) > fw + alpha * s * grad_ft_dot_delta_w:
             s *= beta
+            if s < min_step:
+                raise BacktrackingLineSearchError(
+                    "Step size got too small."
+                )
             w_new = w + s * delta_w
 
         return s
