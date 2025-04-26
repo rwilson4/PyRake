@@ -31,7 +31,7 @@ class Rake:
     Class for solving problems of the form:
            minimize    D(w, v)
            subject to  (1/M) * X^T * w = \mu
-                        \| w \|_2^2 \leq \phi
+                       (1/M) * \| w \|_2^2 <= \phi
                         w >= 0,
 
     """
@@ -44,10 +44,12 @@ class Rake:
         phi: float,
         settings: Optional[OptimizationSettings] = None,
     ):
-        p = X.shape[1]
+        M, p = X.shape
         assert mu.shape[0] == p
 
         self.distance = distance
+        self.dimension = M
+        self.covariates_balanced = p
         self.X = X
         self.mu = mu
         self.phi = phi
@@ -63,7 +65,7 @@ class Rake:
         solve:
            minimize    D(w, v)
            subject to  (1/M) * X^T * w = \mu
-                        \| w \|_2^2 \leq \phi
+                       (1/M) * \| w \|_2^2 <= \phi
                         w >= 0,
         where D is a distance metric than penalizes deviations from baseline
         weights v.
@@ -79,7 +81,7 @@ class Rake:
             The optimal weights.
 
         """
-        p = self.X.shape[1]
+        p = self.covariates_balanced
         w = self.solve_phase1(w0=w0)
         t = 1.0
         for _ in range(20):
@@ -93,7 +95,8 @@ class Rake:
         r"""Solve centering step.
 
         The centering step solves:
-          minimize   ft(w) := t * D(w, v) - log(1 - (1/phi) \| w \|_2^2)
+          minimize   ft(w) := t * D(w, v)
+                              - log(1 - (1 / (M * phi)) \| w \|_2^2)
                               - \sum_i log(w_i)
           subject to (1 / M) * X^T * w = \mu.
 
@@ -128,7 +131,8 @@ class Rake:
         r"""Calculate Newton step.
 
         Calculates Newton step for the "inner" problem:
-          minimize   ft(w) := t * D(w, v) - log(1 - (1/phi) \| w \|_2^2)
+          minimize   ft(w) := t * D(w, v)
+                              - log(1 - (1 / (M * phi)) \| w \|_2^2)
                               - \sum_i log(w_i)
           subject to (1 / M) * X^T * w = \mu.
 
@@ -152,8 +156,9 @@ class Rake:
         in O(p^3 + p^2 * M) time.
 
         """
+        M = self.dimension
         delta_w, _ = solve_kkt_system_hessian_diagonal_plus_rank_one(
-            A=(1.0 / self.X.shape[0]) * self.X.T,
+            A=(1.0 / M) * self.X.T,
             g=-self._grad_ft(w, t),
             eta=self._hessian_ft_diagonal(w, t),
             zeta=self._hessian_ft_rank_one(w),
@@ -181,12 +186,13 @@ class Rake:
             Step modifier.
 
         """
+        M = self.dimension
         alpha = self.settings.backtracking_alpha
         beta = self.settings.backtracking_beta
 
         s = 1.0
         w_new = w + s * delta_w
-        while np.any(w_new <= 0) or np.sum(w_new * w_new) >= self.phi:
+        while np.any(w_new <= 0) or np.sum(w_new * w_new) >= M * self.phi:
             s *= beta
             w_new = w + s * delta_w
 
@@ -205,7 +211,7 @@ class Rake:
 
         A point, w, is feasible if:
            (1/M) * X^T w = \mu
-           \| w \|_2^2 \leq \phi
+           (1/M) * \| w \|_2^2 <= \phi
            w >= 0
 
         We look for such a point by checking if an initial guess, w0, is
@@ -214,8 +220,8 @@ class Rake:
            subject to (1/M) * X^T w = \mu
                       w >= 0.
 
-        If the solution satisfies \| w_star \|_2^2 \leq \phi, this point is
-        feasible, otherwise the problem is infeasible.
+        If the solution satisfies (1/M) * \| w_star \|_2^2 <= \phi, this point
+        is feasible, otherwise the problem is infeasible.
 
         Parameters
         ----------
@@ -229,7 +235,7 @@ class Rake:
            Feasible point.
 
         """
-        M = self.X.shape[0]
+        M = self.dimension
         if w0 is None:
             w0 = np.ones((M,))
 
@@ -237,7 +243,7 @@ class Rake:
         if (
             np.all(w0 > 0)
             and np.allclose((1 / M) * np.dot(self.X.T, w0), self.mu)
-            and np.dot(w0, w0) < self.phi
+            and np.dot(w0, w0) < M * self.phi
         ):
             return w0
 
@@ -260,7 +266,7 @@ class Rake:
             raise ProblemInfeasibleError("Phase I problem did not converge.")
 
         w = res.x
-        if np.dot(w, w) >= self.phi:
+        if np.dot(w, w) >= M * self.phi:
             raise ProblemInfeasibleError(
                 "Minimum feasible norm exceeds variance budget (phi)."
             )
@@ -269,31 +275,35 @@ class Rake:
 
     def _ft(self, w: np.ndarray, t: float) -> float:
         """Calculate ft at w."""
+        M = self.dimension
         return (
             t * self.distance.evaluate(w)
-            - np.log(1.0 - (1.0 / self.phi) * np.dot(w, w))
+            - np.log(1.0 - (1.0 / (M * self.phi)) * np.dot(w, w))
             - np.sum(np.log(w))
         )
 
     def _grad_ft(self, w: np.ndarray, t: float) -> np.ndarray:
         """Calculate gradient of ft at w."""
-        den = 1.0 - (1.0 / self.phi) * np.dot(w, w)
-        grad_constraints = w * ((2.0 / self.phi) / den) - 1.0 / w
+        M = self.dimension
+        den = 1.0 - (1.0 / (M * self.phi)) * np.dot(w, w)
+        grad_constraints = w * ((2.0 / (M * self.phi)) / den) - 1.0 / w
         return t * self.distance.gradient(w) + grad_constraints
 
     def _hessian_ft_diagonal(self, w: np.ndarray, t: float) -> np.ndarray:
         """Calculate diagonal component of Hessian of ft at w."""
-        den = 1.0 - (1.0 / self.phi) * np.dot(w, w)
+        M = self.dimension
+        den = 1.0 - (1.0 / (M * self.phi)) * np.dot(w, w)
         return (
             t * self.distance.hessian_diagonal(w)
-            + ((2.0 / self.phi) / den) * np.ones_like(w)
+            + ((2.0 / (M * self.phi)) / den) * np.ones_like(w)
             + 1.0 / (w * w)
         )
 
     def _hessian_ft_rank_one(self, w: np.ndarray) -> np.ndarray:
         """Calculate rank one component of Hessian of ft at w."""
-        den = 1.0 - (1.0 / self.phi) * np.dot(w, w)
-        return w * ((2.0 / self.phi) / den)
+        M = self.dimension
+        den = 1.0 - (1.0 / (M * self.phi)) * np.dot(w, w)
+        return w * ((2.0 / (M * self.phi)) / den)
 
     def _newton_decrement(
         self, w: np.ndarray, t: float, delta_w: np.ndarray

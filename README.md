@@ -41,7 +41,7 @@ $`
 \begin{array}{ll}
 \textrm{minimize}    & D(w, v) \\
 \textrm{subject to}  & (1/M) X^T w = \mu \\
-           &  \| w \|_2^2 \leq \phi \\
+           &  (1/M) \| w \|_2^2 \leq \phi \\
            & w \succeq 0,
 \end{array}
 `$<br />
@@ -64,7 +64,7 @@ $`
 \begin{array}{ll}
 \textrm{minimize}    & D(w, v) \\
 \textrm{subject to}  & (1/M) X^T w = \mu \\
-           &  \| w \|_2^2 \leq \phi \\
+           &  (1/M) \| w \|_2^2 \leq \phi \\
            & w \succeq 0,
 \end{array}
 `$<br />

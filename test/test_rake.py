@@ -14,7 +14,7 @@ def test_rake_solve_returns_feasible_weights(distance_class):
     M, p = 200, 5
     X = np.random.rand(M, p)
     mu = X.mean(axis=0)
-    phi = 300.0
+    phi = 1.5
 
     dist = distance_class()
     rake = Rake(distance=dist, X=X, mu=mu, phi=phi)
@@ -23,7 +23,7 @@ def test_rake_solve_returns_feasible_weights(distance_class):
     # Feasibility checks
     assert np.all(w > 0)
     np.testing.assert_allclose((X.T @ w) / M, mu, atol=1e-6)
-    assert np.sum(w**2) < phi + 1e-6
+    assert np.sum(w**2) / M < phi + 1e-6
 
 
 def test_phase1_infeasible():
