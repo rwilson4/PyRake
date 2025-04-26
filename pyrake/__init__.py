@@ -1,9 +1,9 @@
 """Balancing Weights and Raking."""
 
-from .core import OptimizationSettings, Rake
 from .distance_metrics import KLDivergence, Huber, SquaredL2
 from .exceptions import ProblemInfeasibleError
 from .frontier import EfficientFrontier, EfficientFrontierResults
+from .rake import OptimizationSettings, Rake
 
 __all__ = [
     "Rake",

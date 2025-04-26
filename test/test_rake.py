@@ -2,9 +2,10 @@
 
 import numpy as np
 import pytest
-from pyrake.core import Rake
+
 from pyrake.distance_metrics import KLDivergence, SquaredL2, Huber
 from pyrake.exceptions import ProblemInfeasibleError
+from pyrake.rake import Rake
 
 
 @pytest.mark.parametrize("distance_class", [KLDivergence, SquaredL2, Huber])
