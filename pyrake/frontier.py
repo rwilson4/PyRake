@@ -1,7 +1,11 @@
 """Bias/Variance Tradeoff."""
 
+from typing import List, Optional
+
 import numpy as np
+import numpy.typing as npt
 import matplotlib.pyplot as plt
+from matplotlib.axes import Axes
 
 from .rake import Rake
 
@@ -9,12 +13,17 @@ from .rake import Rake
 class EfficientFrontierResults:
     """Wrapper for bias/variance tradeoff."""
 
-    def __init__(self, weights, phis, distances):
+    def __init__(
+        self,
+        weights: List[npt.NDArray[np.float64]],
+        phis: List[float],
+        distances: List[float],
+    ) -> None:
         self.weights = weights
         self.phis = phis
         self.distances = distances
 
-    def plot(self, ax=None):
+    def plot(self, ax: Optional[Axes] = None) -> Axes:
         """Plot bias/variance tradeoff."""
         if ax is None:
             _, ax = plt.subplots()
@@ -38,10 +47,12 @@ class EfficientFrontier:
 
     """
 
-    def __init__(self, rake: Rake):
+    def __init__(self, rake: Rake) -> None:
         self.rake = rake
 
-    def trace(self, phi_max=None, num_points=20):
+    def trace(
+        self, phi_max: Optional[float] = None, num_points: int = 20
+    ) -> EfficientFrontierResults:
         """Trace bias/variance tradeoff."""
         w0 = self.rake.solve_phase1()
         min_phi = np.dot(w0, w0)

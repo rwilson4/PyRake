@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Optional, Tuple
 
 import numpy as np
+import numpy.typing as npt
 from scipy.optimize import Bounds, LinearConstraint, minimize
 
 from .distance_metrics import Distance
@@ -46,11 +47,11 @@ class Rake:
     def __init__(
         self,
         distance: Distance,
-        X: np.ndarray,
-        mu: np.ndarray,
+        X: npt.NDArray[np.float64],
+        mu: npt.NDArray[np.float64],
         phi: float,
         settings: Optional[OptimizationSettings] = None,
-    ):
+    ) -> None:
         M, p = X.shape
         assert mu.shape[0] == p
 
@@ -65,7 +66,9 @@ class Rake:
         else:
             self.settings = settings
 
-    def solve(self, w0: Optional[np.ndarray] = None) -> np.ndarray:
+    def solve(
+        self, w0: Optional[npt.NDArray[np.float64]] = None
+    ) -> npt.NDArray[np.float64]:
         r"""Solve optimization problem.
 
         Uses an interior point method with a logarithmic barrier penalty to
@@ -102,14 +105,18 @@ class Rake:
             + 1
         )
         for ii in range(num_steps):
-            w = self.centering_step(w, t, last_step=(ii + 1 == num_steps))
+            try:
+                w = self.centering_step(w, t, last_step=(ii + 1 == num_steps))
+            except CenteringStepError as e:
+                raise InteriorPointMethodError("Centering step failed", e.last_iterate)
+
             t *= self.settings.barrier_multiplier
 
         return w
 
     def centering_step(
-        self, w0: np.ndarray, t: float, last_step: bool
-    ) -> np.ndarray:
+        self, w0: npt.NDArray[np.float64], t: float, last_step: bool
+    ) -> npt.NDArray[np.float64]:
         r"""Solve centering step.
 
         The centering step solves:
@@ -159,19 +166,18 @@ class Rake:
             except BacktrackingLineSearchError:
                 if (
                     not last_step
-                    and 0.5 * lmbda * lmbda
-                    < self.settings.inner_tolerance_soft
+                    and 0.5 * lmbda * lmbda < self.settings.inner_tolerance_soft
                 ):
                     return w
-                raise
+                raise CenteringStepError("Backtracking line search failed", w)
 
             w += s * delta_w
 
-        raise CenteringStepError("Centering step did not converge.")
+        raise CenteringStepError("Centering step did not converge.", w)
 
     def calculate_newton_step(
-        self, w: np.array, t: float
-    ) -> Tuple[np.ndarray, np.ndarray]:
+        self, w: npt.NDArray[np.float64], t: float
+    ) -> Tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
         r"""Calculate Newton step.
 
         Calculates Newton step for the "inner" problem:
@@ -217,15 +223,18 @@ class Rake:
         )
 
     def backtracking_line_search(
-        self, w: np.ndarray, delta_w: np.ndarray, t: float
+        self,
+        w: npt.NDArray[np.float64],
+        delta_w: npt.NDArray[np.float64],
+        t: float,
     ) -> float:
         """Perform backtracking line search.
 
         Parameters
         ----------
-         w : np.ndarray
+         w : npt.NDArray[np.float64]
             Current estimate.
-         delta_w : np.ndarray
+         delta_w : npt.NDArray[np.float64]
             Descent direction.
          t : float
             Barrier parameter.
@@ -262,7 +271,9 @@ class Rake:
 
         return s
 
-    def solve_phase1(self, w0: Optional[np.ndarray] = None) -> np.ndarray:
+    def solve_phase1(
+        self, w0: Optional[npt.NDArray[np.float64]] = None
+    ) -> npt.NDArray[np.float64]:
         r"""Find a feasible point.
 
         A point, w, is feasible if:
@@ -281,13 +292,13 @@ class Rake:
 
         Parameters
         ----------
-         w0 : np.ndarray, optional
+         w0 : npt.NDArray[np.float64], optional
             If specified, use this as the starting point. Otherwise use a
             vector of all 1s.
 
         Returns
         -------
-         w : np.ndarray
+         w : npt.NDArray[np.float64]
            Feasible point.
 
         """
@@ -303,11 +314,17 @@ class Rake:
         ):
             return w0
 
+        def fun(w: npt.NDArray[np.float64]) -> float:
+            return np.dot(w, w)
+
+        def jac(w: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+            return 2.0 * w
+
         res = minimize(
-            fun=lambda w: np.dot(w, w),
+            fun=fun,
             x0=w0,
             method="trust-constr",
-            jac=lambda w: 2 * w,
+            jac=jac,
             constraints=[
                 LinearConstraint(
                     (1.0 / M) * (self.X.T),
@@ -329,7 +346,7 @@ class Rake:
 
         return w
 
-    def _ft(self, w: np.ndarray, t: float) -> float:
+    def _ft(self, w: npt.NDArray[np.float64], t: float) -> float:
         """Calculate ft at w."""
         M = self.dimension
         return (
@@ -338,14 +355,16 @@ class Rake:
             - np.sum(np.log(w))
         )
 
-    def _grad_ft(self, w: np.ndarray, t: float) -> np.ndarray:
+    def _grad_ft(self, w: npt.NDArray[np.float64], t: float) -> npt.NDArray[np.float64]:
         """Calculate gradient of ft at w."""
         M = self.dimension
         den = 1.0 - (1.0 / (M * self.phi)) * np.dot(w, w)
         grad_constraints = w * ((2.0 / (M * self.phi)) / den) - 1.0 / w
         return t * self.distance.gradient(w) + grad_constraints
 
-    def _hessian_ft_diagonal(self, w: np.ndarray, t: float) -> np.ndarray:
+    def _hessian_ft_diagonal(
+        self, w: npt.NDArray[np.float64], t: float
+    ) -> npt.NDArray[np.float64]:
         """Calculate diagonal component of Hessian of ft at w."""
         M = self.dimension
         den = 1.0 - (1.0 / (M * self.phi)) * np.dot(w, w)
@@ -355,14 +374,19 @@ class Rake:
             + 1.0 / (w * w)
         )
 
-    def _hessian_ft_rank_one(self, w: np.ndarray) -> np.ndarray:
+    def _hessian_ft_rank_one(
+        self, w: npt.NDArray[np.float64]
+    ) -> npt.NDArray[np.float64]:
         """Calculate rank one component of Hessian of ft at w."""
         M = self.dimension
         den = 1.0 - (1.0 / (M * self.phi)) * np.dot(w, w)
         return w * ((2.0 / (M * self.phi)) / den)
 
     def _newton_decrement(
-        self, w: np.ndarray, t: float, delta_w: np.ndarray
+        self,
+        w: npt.NDArray[np.float64],
+        t: float,
+        delta_w: npt.NDArray[np.float64],
     ) -> float:
         """Calculate Newton decrement.
 

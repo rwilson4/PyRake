@@ -8,7 +8,7 @@ from pyrake.numerical_helpers import (
 )
 
 
-def test_solve_diagonal_plus_rank_one():
+def test_solve_diagonal_plus_rank_one() -> None:
     """Test solving H*x = b by doing it the slow way."""
     np.random.seed(42)
     M = 100
@@ -23,8 +23,8 @@ def test_solve_diagonal_plus_rank_one():
     x = solve_diagonal_plus_rank_one(eta, zeta, b)
     et = time.time()
 
-    print(f"Slow way completed in {1e6*(mt-st):.03f} us")
-    print(f"Fast way completed in {1e6*(et-mt):.03f} us")
+    print(f"Slow way completed in {1e6 * (mt - st):.03f} us")
+    print(f"Fast way completed in {1e6 * (et - mt):.03f} us")
 
     np.testing.assert_allclose(x, x_expected, rtol=1e-8, atol=1e-8)
 
@@ -32,7 +32,7 @@ def test_solve_diagonal_plus_rank_one():
     np.testing.assert_allclose(H.dot(x), b, rtol=1e-8, atol=1e-8)
 
 
-def test_solve_kkt_system_hessian_diagonal_plus_rank_one():
+def test_solve_kkt_system_hessian_diagonal_plus_rank_one() -> None:
     """Test solving KKT system and checking answer."""
     np.random.seed(123)
     M = 80
@@ -56,13 +56,11 @@ def test_solve_kkt_system_hessian_diagonal_plus_rank_one():
     delta_w_expected = x_expected[0:M]
     xi_expected = x_expected[M:]
 
-    delta_w, xi = solve_kkt_system_hessian_diagonal_plus_rank_one(
-        A, g, eta, zeta
-    )
+    delta_w, xi = solve_kkt_system_hessian_diagonal_plus_rank_one(A, g, eta, zeta)
     et = time.time()
 
-    print(f"Slow way completed in {1e6*(mt-st):.03f} us")
-    print(f"Fast way completed in {1e6*(et-mt):.03f} us")
+    print(f"Slow way completed in {1e6 * (mt - st):.03f} us")
+    print(f"Fast way completed in {1e6 * (et - mt):.03f} us")
 
     np.testing.assert_allclose(delta_w, delta_w_expected, rtol=1e-8, atol=1e-8)
     np.testing.assert_allclose(xi, xi_expected, rtol=1e-8, atol=1e-8)

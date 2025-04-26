@@ -8,15 +8,14 @@ from pyrake.exceptions import ProblemInfeasibleError
 from pyrake.rake import Rake
 
 
-@pytest.mark.parametrize("distance_class", [KLDivergence, SquaredL2, Huber])
-def test_rake_solve_returns_feasible_weights(distance_class):
+@pytest.mark.parametrize("dist", [KLDivergence(), SquaredL2(), Huber()])
+def test_rake_solve_returns_feasible_weights(dist) -> None:
     np.random.seed(0)
     M, p = 200, 5
     X = np.random.rand(M, p)
     mu = X.mean(axis=0)
     phi = 1.5
 
-    dist = distance_class()
     rake = Rake(distance=dist, X=X, mu=mu, phi=phi)
     w = rake.solve()
 
@@ -26,7 +25,7 @@ def test_rake_solve_returns_feasible_weights(distance_class):
     assert np.sum(w**2) / M < phi + 1e-6
 
 
-def test_phase1_infeasible():
+def test_phase1_infeasible() -> None:
     X = np.array([[1.0, 2.0], [3.0, 4.0]])
     mu = np.array([100.0, 100.0])  # clearly infeasible
     phi = 1.0

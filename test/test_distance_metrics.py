@@ -4,7 +4,7 @@ import numpy as np
 from pyrake.distance_metrics import SquaredL2, KLDivergence, Huber
 
 
-def test_squared_l2():
+def test_squared_l2() -> None:
     """Test SquaredL2."""
     np.random.seed(0)
     w = np.random.rand(100)
@@ -24,7 +24,7 @@ def test_squared_l2():
     np.testing.assert_allclose(hess_diag, expected_hess)
 
 
-def test_kl():
+def test_kl() -> None:
     """Test KLDivergence."""
     np.random.seed(1)
     w = np.random.rand(100) + 0.1  # ensure strictly positive
@@ -44,7 +44,7 @@ def test_kl():
     np.testing.assert_allclose(hess_diag, expected_hess)
 
 
-def test_huber():
+def test_huber() -> None:
     """Test Huber."""
     np.random.seed(2)
     w = np.random.rand(100)
@@ -60,9 +60,7 @@ def test_huber():
     np.testing.assert_allclose(val, expected_val)
 
     grad = metric.gradient(w)
-    expected_grad = np.where(
-        np.abs(d) <= delta, 2.0 * d, 2.0 * delta * np.sign(d)
-    )
+    expected_grad = np.where(np.abs(d) <= delta, 2.0 * d, 2.0 * delta * np.sign(d))
     np.testing.assert_allclose(grad, expected_grad)
 
     hess_diag = metric.hessian_diagonal(w)

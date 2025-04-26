@@ -1,45 +1,49 @@
 """Numerical linear algebra routines."""
 
+from typing import Tuple
+
 import numpy as np
+import numpy.typing as npt
 from scipy import linalg
 
 
 def solve_diagonal_plus_rank_one(
-    eta: np.ndarray, zeta: np.ndarray, b: np.ndarray
-) -> np.ndarray:
+    eta: npt.NDArray[np.float64],
+    zeta: npt.NDArray[np.float64],
+    b: npt.NDArray[np.float64],
+) -> npt.NDArray[np.float64]:
     """Solve H * x = b.
 
-    Solves a linear system of equations where H is diagonal plus a rank one
-    matrix,
+    Solves a linear system of equations where H is diagonal plus a rank one matrix,
        H = diag(eta) + zeta * zeta^T.
-    Because of this structure, we can solve the system in linear time. See
-    Notes for more details.
+    Because of this structure, we can solve the system in linear time. See Notes for
+    more details.
 
     Parameters
     ----------
-     eta : np.ndarray
+     eta : npt.NDArray[np.float64]
         Diagonal component of H.
-     zeta : np.ndarray
+     zeta : npt.NDArray[np.float64]
         Rank-one component of H.
-     b : np.ndarray
+     b : npt.NDArray[np.float64]
         Right hand side.
 
     Returns
     -------
-     x : np.ndarray
+     x : npt.NDArray[np.float64]
         The solution.
 
     Notes
     -----
-    Let H = diag(eta) + zeta * zeta^T, where eta and zeta are both vectors of
-    length M. We can solve H * x = b in O(M) time as follows:
+    Let H = diag(eta) + zeta * zeta^T, where eta and zeta are both vectors of length M.
+    We can solve H * x = b in O(M) time as follows:
        1. Solve diag(eta) * x' = b. This is just x' = b / eta, elementwise (M
           divisions).
        2. Solve diag(eta) * xi = zeta, or xi = zeta / eta (M divisions).
-       3. Calculate x as x' - ((zeta^T * x') / (1 + zeta^T * xi)) * xi. This is
-          2 dot products (each involving M multiplies and M-1 adds) plus M
-          multiplies and M subtractions, or O(3M) multiplies plus O(3M) adds,
-          plus a single add and a division.
+       3. Calculate x as x' - ((zeta^T * x') / (1 + zeta^T * xi)) * xi. This is 2 dot
+          products (each involving M multiplies and M-1 adds) plus M multiplies and M
+          subtractions, or O(3M) multiplies plus O(3M) adds, plus a single add and a
+          division.
     In total that's 2M divisions, 3M multiplies, and 3M adds.
 
     """
@@ -53,11 +57,11 @@ def solve_diagonal_plus_rank_one(
 
 
 def solve_kkt_system_hessian_diagonal_plus_rank_one(
-    A: np.ndarray,
-    g: np.ndarray,
-    eta: np.ndarray,
-    zeta: np.ndarray,
-) -> np.ndarray:
+    A: npt.NDArray[np.float64],
+    g: npt.NDArray[np.float64],
+    eta: npt.NDArray[np.float64],
+    zeta: npt.NDArray[np.float64],
+) -> Tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
     """Solve a KKT system of equations.
 
     Parameters
@@ -87,20 +91,20 @@ def solve_kkt_system_hessian_diagonal_plus_rank_one(
            -       -   -       -     -   -
     where H = diag(eta) + zeta * zeta^T.
 
-    Since H is diagonal plus rank one, we can exploit the Schur complement and
-    the matrix inversion lemma to calculate delta_w in O(p^3 + p^2*M) time,
-    were p is the number of rows in A.
+    Since H is diagonal plus rank one, we can exploit the Schur complement and the
+    matrix inversion lemma to calculate delta_w in O(p^3 + p^2*M) time, were p is the
+    number of rows in A.
 
     Per the discussion in Boyd and Vandenberghe (2004), Algorithm C.4 (page
     673):
-      1. Form B = H^{-1} * A^T and b = H^{-1} * g. This corresponds to p+1
-         solves. We use `solve_diagonal_plus_rank_one` to solve each system in
-         O(M) time, for O(p*M) time total.
-      2. Form S = -A * B and c = -A * b. Since A is p-by-M and B is M-by-p,
-         forming S involves p^2 dot products of length M, which takes (p^2 * M)
-         time. Forming c takes O(p * M) time.
-      3. Solve S * nu = c via Cholesky decomposition. (S is negative definite,
-         so we instead solve -S * nu = -c.) This takes O(p^3) time.
+      1. Form B = H^{-1} * A^T and b = H^{-1} * g. This corresponds to p+1 solves. We
+         use `solve_diagonal_plus_rank_one` to solve each system in O(M) time, for
+         O(p*M) time total.
+      2. Form S = -A * B and c = -A * b. Since A is p-by-M and B is M-by-p, forming S
+         involves p^2 dot products of length M, which takes (p^2 * M) time. Forming c
+         takes O(p * M) time.
+      3. Solve S * nu = c via Cholesky decomposition. (S is negative definite, so we
+         instead solve -S * nu = -c.) This takes O(p^3) time.
       4. Solve H * delta_w = g - A^T * nu. This takes O(M) time.
 
     """

@@ -1,6 +1,6 @@
 """Balancing Weights and Raking."""
 
-from .distance_metrics import KLDivergence, Huber, SquaredL2
+from .distance_metrics import Huber, KLDivergence, SquaredL2
 from .exceptions import (
     BacktrackingLineSearchError,
     CenteringStepError,
