@@ -28,7 +28,7 @@ just for one covariate but perhaps several important ones believed to
 be correlated with the response of interest. Enforcing this constraint
 may force us to deviate from estimated propensity scores, but since
 those are just estimates, forcing balance on important covariates may
-actually /reduce/ the bias.
+actually *reduce* the bias.
 
 The variance of the estimator is proportional to $` \sum_i w_i^2, `$
 so all else being equal, we would prefer small weights to larger ones.
@@ -78,8 +78,9 @@ Like Raking, Entropy Balancing (Hainmuller, 2012) uses KL divergence
 as the distance metric and omits the variance constraint. An
 additional constraint is applied: $` 1^T w = 1^T v`$. This constraint
 can be accommodated by adding an extra column to X having all ones;
-the corresponding entry in $`\mu`$ should be $` M \cdot 1^T v`$. This
-could be handled more conveniently, but it's there.
+the corresponding entry in $`\mu`$ should be $` (1/M) \cdot 1^T v `$.
+PyRake makes it easy to add such a constraint, just pass
+`constrain_mean_weight_to=np.mean(v)` to the Rake constructor.
 
 Stable Balancing Weights (Zubizarreta, 2015) uses
 $` D(w, v) = \| w - v \|_2^2, `$ which is supported by PyRake.

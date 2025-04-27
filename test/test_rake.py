@@ -16,7 +16,7 @@ def test_rake_solve_returns_feasible_weights(dist) -> None:
     mu = X.mean(axis=0)
     phi = 1.5
 
-    rake = Rake(distance=dist, X=X, mu=mu, phi=phi)
+    rake = Rake(distance=dist, X=X, mu=mu, phi=phi, constrain_mean_weight_to=None)
     res = rake.solve()
     w = res.solution
 
@@ -31,7 +31,7 @@ def test_phase1_infeasible() -> None:
     mu = np.array([100.0, 100.0])  # clearly infeasible
     phi = 1.0
     dist = SquaredL2()
-    rake = Rake(distance=dist, X=X, mu=mu, phi=phi)
+    rake = Rake(distance=dist, X=X, mu=mu, phi=phi, constrain_mean_weight_to=None)
 
     with pytest.raises(ProblemInfeasibleError):
         rake.solve()

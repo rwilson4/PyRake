@@ -124,6 +124,12 @@ class Rake:
          Vector of mean covariate values in the target population.
      phi : float
          Constraint on mean squared weight.
+     constrain_mean_weight_to : float or None, default=1
+         If not None, add a constraint that the average weight must equal
+         `constrain_mean_weight_to`, which must be strictly positive. The default is an
+         average weight of 1. Another common option is for the average weight to equal
+         the average baseline weight. If no such constraint is desired, manually specify
+         `constrain_mean_weight_to=None`.
 
     """
 
@@ -133,17 +139,29 @@ class Rake:
         X: npt.NDArray[np.float64],
         mu: npt.NDArray[np.float64],
         phi: float,
+        constrain_mean_weight_to: Optional[float] = 1.0,
         settings: Optional[OptimizationSettings] = None,
     ) -> None:
         """Create a Rake object."""
         M, p = X.shape
         assert mu.shape[0] == p
 
+        if constrain_mean_weight_to is not None:
+            if constrain_mean_weight_to <= 0:
+                raise ValueError("constrain_mean_weight_to must be positive or None.")
+
+            # Add a column of ones to X
+            self.X = np.column_stack((X, np.ones(M)))
+            # Append the new mean constraint value to mu
+            self.mu = np.append(mu, constrain_mean_weight_to)
+            self.covariates_balanced = p + 1
+        else:
+            self.X = X
+            self.mu = mu
+            self.covariates_balanced = p
+
         self.distance = distance
         self.dimension = M
-        self.covariates_balanced = p
-        self.X = X
-        self.mu = mu
         self.phi = phi
         if settings is None:
             self.settings = OptimizationSettings()
