@@ -11,8 +11,11 @@ from .distance_metrics import Distance
 from .exceptions import (
     BacktrackingLineSearchError,
     CenteringStepError,
+    ConstraintBoundaryError,
     InteriorPointMethodError,
+    InvalidDescentDirectionError,
     ProblemInfeasibleError,
+    SevereCurvatureError,
 )
 from .numerical_helpers import (
     solve_kkt_system_hessian_diagonal_plus_rank_one,
@@ -312,7 +315,7 @@ class Rake:
             # Update
             try:
                 s = self.backtracking_line_search(w, delta_w, t)
-            except BacktrackingLineSearchError:
+            except BacktrackingLineSearchError as e:
                 if not last_step and suboptimality < self.settings.inner_tolerance_soft:
                     nu_star = nu_hat / t
                     lambda_star = np.zeros((M + 1,))
@@ -343,7 +346,7 @@ class Rake:
                     message="Backtracking line search failed",
                     suboptimality=suboptimality,
                     last_iterate=w,
-                )
+                ) from e
 
             w += s * delta_w
 
@@ -428,23 +431,57 @@ class Rake:
         beta = self.settings.backtracking_beta
         min_step = self.settings.backtracking_min_step
 
-        s = 1.0
-        w_new = w + s * delta_w
-        while np.any(w_new <= 0) or np.sum(w_new * w_new) >= M * self.phi:
-            s *= beta
-            if s < min_step:
-                raise BacktrackingLineSearchError("Step size got too small.")
+        # Calculate an initial step size s satisfying:
+        #   s <= 1
+        #   w + s * delta_w >= 0
+        #   \| w + s * delta_w \|_2^2 <= M * phi
+        # The last constraint is convex quadratic in s, so the acceptable s lie between
+        # the two roots. It is straightforward to show that if \| w \|_2^2 <= M * phi,
+        # then the lower root is <= 0, and since the step size must be positive there is
+        # no need to enforce a lower bound.
+        quad_a = np.dot(delta_w, delta_w)
+        quad_b = 2.0 * np.dot(w, delta_w)
+        quad_c = np.dot(w, w) - M * self.phi
+        s_high = (-quad_b + np.sqrt(quad_b * quad_b - 4.0 * quad_a * quad_c)) / (
+            2.0 * quad_a
+        )
 
-            w_new = w + s * delta_w
+        s = min(
+            1.0,
+            beta * -np.max(np.where(delta_w < 0, w / delta_w, -np.inf)),
+            beta * s_high,
+        )
+
+        if s < min_step:
+            raise ConstraintBoundaryError(
+                message="Descent step takes us too close to constraint boundaries.",
+                positivity_step=beta
+                * -np.max(np.where(delta_w < 0, w / delta_w, -np.inf)),
+                variance_step=beta * s_high,
+            )
 
         fw = self._ft(w, t)
         grad_ft = self._grad_ft(w, t)
         grad_ft_dot_delta_w = np.dot(grad_ft, delta_w)
+        if grad_ft_dot_delta_w > 0:
+            raise InvalidDescentDirectionError(
+                message="Newton step was not a descent direction.",
+                grad_ft_dot_delta_w=grad_ft_dot_delta_w,
+            )
 
-        while self._ft(w_new, t) > fw + alpha * s * grad_ft_dot_delta_w:
+        # alpha * -grad_ft_dot_delta_w is a positive number since delta_w is a descent
+        # direction.
+        neg_alpha_grad = alpha * -grad_ft_dot_delta_w
+
+        w_new = w + s * delta_w
+        while self._ft(w_new, t) + s * neg_alpha_grad > fw:
             s *= beta
             if s < min_step:
-                raise BacktrackingLineSearchError("Step size got too small.")
+                raise SevereCurvatureError(
+                    message="Small step sizes did not adequately decrease objective.",
+                    required_improvement=s * neg_alpha_grad,
+                    actual_improvement=fw - self._ft(w_new, t),
+                )
             w_new = w + s * delta_w
 
         return s
