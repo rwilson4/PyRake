@@ -17,7 +17,8 @@ def test_rake_solve_returns_feasible_weights(dist) -> None:
     phi = 1.5
 
     rake = Rake(distance=dist, X=X, mu=mu, phi=phi)
-    w = rake.solve()
+    res = rake.solve()
+    w = res.solution
 
     # Feasibility checks
     assert np.all(w > 0)

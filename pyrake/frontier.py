@@ -68,9 +68,9 @@ class EfficientFrontier:
         w = w0
         for phi in phi_grid:
             self.rake.phi = phi
-            w = self.rake.solve(w0=w)
-            weights.append(w)
+            res = self.rake.solve(w0=w)
+            weights.append(res.solution)
             phis.append(phi)
-            distances.append(self.rake.distance.evaluate(w))
+            distances.append(res.objective_value)
 
         return EfficientFrontierResults(weights, phis, distances)

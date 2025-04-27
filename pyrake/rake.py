@@ -1,7 +1,7 @@
 """Solve optimization problem."""
 
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import List, Literal, Optional, Tuple
 
 import numpy as np
 import numpy.typing as npt
@@ -25,12 +25,83 @@ class OptimizationSettings:
 
     outer_tolerance: float = 1e-6
     barrier_multiplier: float = 10.0
-    inner_tolerance: float = 1e-8
+    inner_tolerance: float = 1e-6
     inner_tolerance_soft: float = 1e-4
     max_inner_iterations: int = 100
     backtracking_alpha: float = 0.01
     backtracking_beta: float = 0.5
     backtracking_min_step: float = 1e-3
+
+
+@dataclass
+class NewtonResult:
+    """Wrapper for the results of Newton's method.
+
+    Parameters
+    ----------
+     solution : vector
+        The solution.
+     equality_multipliers, inequality_multipliers: vectors
+        Lagrange multipliers for constraints.
+     suboptimality : float
+        Suboptimality of solution.
+     nits : int
+        Number of iterations before convergence.
+     status : [0, 1]
+        Solution status:
+          0 : method completed successfully
+          1 : method failed to converge to the desired tolerance, but achieved an
+              acceptable tolerance
+     message : str
+          Summary of result.
+
+    """
+
+    solution: npt.NDArray[np.float64]
+    equality_multipliers: npt.NDArray[np.float64]
+    inequality_multipliers: npt.NDArray[np.float64]
+    suboptimality: float
+    nits: int
+    status: Literal[0, 1]
+    message: str
+
+
+@dataclass
+class InteriorPointMethodResult:
+    """Wrapper for the results of the Interior Point Method.
+
+    Parameters
+    ----------
+    solution : vector
+        The optimal weights.
+    objective_value : float
+        Distance between optimal weights and baseline.
+    dual_value : float
+        Dual function, evaluated at optimal weights and Lagrange multipliers.
+    equality_multipliers, inequality_multipliers: vectors
+        Optimal Lagrange multipliers for constraints.
+    suboptimality : float
+        Suboptimality of solution.
+    nits : int
+        The number of outer iterations performed during the optimization
+        process, indicating how many times the centering step was executed.
+    inner_nits : List[int]
+        Number of inner iterations performed during each centering step.
+    status : int
+        Solution status:
+          0 : method completed successfully
+
+    """
+
+    solution: npt.NDArray[np.float64]
+    objective_value: float
+    dual_value: float
+    equality_multipliers: npt.NDArray[np.float64]
+    inequality_multipliers: npt.NDArray[np.float64]
+    suboptimality: float
+    nits: int
+    inner_nits: List[int]
+    status: Literal[0]
 
 
 class Rake:
@@ -41,6 +112,18 @@ class Rake:
            subject to  (1/M) * X^T * w = \mu
                        (1/M) * \| w \|_2^2 <= \phi
                         w >= 0,
+    with an optional constraint on the mean of weights.
+
+    Parameters
+    ----------
+     distance : Distance
+         Distance object representing distance from baseline weights.
+     X : npt.NDArray[np.float64]
+         Matrix of covariates for which we desire exact balance.
+     mu : npt.NDArray[np.float64]
+         Vector of mean covariate values in the target population.
+     phi : float
+         Constraint on mean squared weight.
 
     """
 
@@ -52,6 +135,7 @@ class Rake:
         phi: float,
         settings: Optional[OptimizationSettings] = None,
     ) -> None:
+        """Create a Rake object."""
         M, p = X.shape
         assert mu.shape[0] == p
 
@@ -68,7 +152,7 @@ class Rake:
 
     def solve(
         self, w0: Optional[npt.NDArray[np.float64]] = None
-    ) -> npt.NDArray[np.float64]:
+    ) -> InteriorPointMethodResult:
         r"""Solve optimization problem.
 
         Uses an interior point method with a logarithmic barrier penalty to
@@ -92,31 +176,58 @@ class Rake:
             The optimal weights.
 
         """
-        p = self.covariates_balanced
         w = self.solve_phase1(w0=w0)
+
+        M = self.dimension
         t = 1.0
         num_steps = (
             int(
                 np.ceil(
-                    np.log(p / (t * self.settings.outer_tolerance))
+                    np.log((M + 1) / (t * self.settings.outer_tolerance))
                     / np.log(self.settings.barrier_multiplier)
                 )
             )
             + 1
         )
+        inner_nits = []
         for ii in range(num_steps):
             try:
-                w = self.centering_step(w, t, last_step=(ii + 1 == num_steps))
+                result = self.centering_step(w, t, last_step=(ii + 1 == num_steps))
+                w = result.solution
+                inner_nits.append(result.nits)
             except CenteringStepError as e:
-                raise InteriorPointMethodError("Centering step failed", e.last_iterate)
+                raise InteriorPointMethodError(
+                    message="Centering step failed",
+                    suboptimality=(M + 1) * self.settings.barrier_multiplier / t,
+                    last_iterate=e.last_iterate,
+                ) from e
 
             t *= self.settings.barrier_multiplier
 
-        return w
+        lambda_star = result.inequality_multipliers
+        nu_star = result.equality_multipliers
+        f = self.distance.evaluate(w)
+        g = (
+            f
+            - np.dot(lambda_star[0:M], w)
+            - lambda_star[M] * (1.0 - (1.0 / (M * self.phi)) * np.dot(w, w))
+            + np.dot(nu_star, (1 / M) * self.X.T.dot(w) - self.mu)
+        )
+        return InteriorPointMethodResult(
+            solution=w,
+            objective_value=f,
+            dual_value=g,
+            equality_multipliers=nu_star,
+            inequality_multipliers=lambda_star,
+            suboptimality=(M + 1) * self.settings.barrier_multiplier / t,
+            nits=num_steps,
+            inner_nits=inner_nits,
+            status=0,
+        )
 
     def centering_step(
         self, w0: npt.NDArray[np.float64], t: float, last_step: bool
-    ) -> npt.NDArray[np.float64]:
+    ) -> NewtonResult:
         r"""Solve centering step.
 
         The centering step solves:
@@ -138,6 +249,10 @@ class Rake:
         -------
          w : vector
             Solution to centering step.
+         lambda_star : vector
+            Lagrange multipliers for inequality constraints.
+         nu_star : vector
+            Lagrange multipliers for equality constraints.
 
         Notes
         -----
@@ -152,28 +267,73 @@ class Rake:
 
         """
         w = w0.copy()
-        for _ in range(self.settings.max_inner_iterations):
-            delta_w, _ = self.calculate_newton_step(w, t)
+        M = self.dimension
+        for nit in range(self.settings.max_inner_iterations):
+            delta_w, nu_hat = self.calculate_newton_step(w, t)
 
             # Check for convergence
             lmbda = self._newton_decrement(w, t, delta_w)
-            if 0.5 * lmbda * lmbda < self.settings.inner_tolerance:
-                return w
+            suboptimality = 0.5 * lmbda * lmbda
+            if suboptimality < self.settings.inner_tolerance:
+                nu_star = nu_hat / t
+                lambda_star = np.zeros((M + 1,))
+                lambda_star[0:M] = (1.0 / t) / w
+                lambda_star[M] = (1.0 / t) / (
+                    1.0 - (1.0 / (M * self.phi)) * np.dot(w, w)
+                )
+                return NewtonResult(
+                    solution=w,
+                    equality_multipliers=nu_star,
+                    inequality_multipliers=lambda_star,
+                    suboptimality=suboptimality,
+                    nits=nit + 1,
+                    status=0,
+                    message="Newton's method completed successfully to the desired tolerance",
+                )
 
             # Update
             try:
                 s = self.backtracking_line_search(w, delta_w, t)
             except BacktrackingLineSearchError:
-                if (
-                    not last_step
-                    and 0.5 * lmbda * lmbda < self.settings.inner_tolerance_soft
-                ):
-                    return w
-                raise CenteringStepError("Backtracking line search failed", w)
+                if not last_step and suboptimality < self.settings.inner_tolerance_soft:
+                    nu_star = nu_hat / t
+                    lambda_star = np.zeros((M + 1,))
+                    lambda_star[0:M] = ((1.0 / t) / w) * (1.0 + delta_w / w)
+                    lambda_star[M] = (1.0 / t) / (
+                        1.0 - (1.0 / (M * self.phi)) * np.dot(w, w)
+                    )
+                    lambda_star[M] = lambda_star[M] * (
+                        1.0
+                        + (2.0 / (M * self.phi))
+                        * np.dot(w, delta_w)
+                        / (1 - (1 / (M * self.phi)) * np.dot(w, w))
+                    )
+                    return NewtonResult(
+                        solution=w,
+                        equality_multipliers=nu_star,
+                        inequality_multipliers=lambda_star,
+                        suboptimality=suboptimality,
+                        nits=nit + 1,
+                        status=1,
+                        message=(
+                            "Newton's method achieved an acceptable tolerance but then "
+                            "ran into numerical issues"
+                        ),
+                    )
+
+                raise CenteringStepError(
+                    message="Backtracking line search failed",
+                    suboptimality=suboptimality,
+                    last_iterate=w,
+                )
 
             w += s * delta_w
 
-        raise CenteringStepError("Centering step did not converge.", w)
+        raise CenteringStepError(
+            "Centering step did not converge.",
+            suboptimality=suboptimality,
+            last_iterate=w,
+        )
 
     def calculate_newton_step(
         self, w: npt.NDArray[np.float64], t: float
@@ -351,8 +511,8 @@ class Rake:
         M = self.dimension
         return (
             t * self.distance.evaluate(w)
-            - np.log(1.0 - (1.0 / (M * self.phi)) * np.dot(w, w))
             - np.sum(np.log(w))
+            - np.log(1.0 - (1.0 / (M * self.phi)) * np.dot(w, w))
         )
 
     def _grad_ft(self, w: npt.NDArray[np.float64], t: float) -> npt.NDArray[np.float64]:
