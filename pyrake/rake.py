@@ -237,9 +237,13 @@ class Rake:
 
         """
         w = self.solve_phase1(w0=w0)
-
         M = self.dimension
-        t = 1.0
+
+        # Initialize t as the number of inequality constraints divided by an estimate of
+        # the suboptimality of w. Since the distance metric is always non-negative, the
+        # sub-optimality is at most D(w, v). Always do at least 1 step so we get the
+        # Lagrange multipliers.
+        t = (M + 1) / max(self.settings.outer_tolerance, self.distance.evaluate(w))
         num_steps = (
             int(
                 np.ceil(
@@ -335,9 +339,9 @@ class Rake:
             if suboptimality < self.settings.inner_tolerance:
                 nu_star = nu_hat / t
                 lambda_star = np.zeros((M + 1,))
-                lambda_star[0:M] = (1.0 / t) / w
-                lambda_star[M] = (1.0 / t) / (
-                    1.0 - (1.0 / (M * self.phi)) * np.dot(w, w)
+                lambda_star[0:M] = 1.0 / (t * w)
+                lambda_star[M] = 1.0 / (
+                    t * (1.0 - (1.0 / (M * self.phi)) * np.dot(w, w))
                 )
                 return NewtonResult(
                     solution=w,
