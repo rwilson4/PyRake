@@ -24,7 +24,45 @@ from .numerical_helpers import (
 
 @dataclass
 class OptimizationSettings:
-    """Optimization settings."""
+    """Optimization settings.
+
+    Parameters
+    ----------
+    outer_tolerance : float, default=1e-6
+        The tolerance level for convergence of the overall optimization problem. It
+        controls how close the solution must be to the actual optimal point in terms of
+        the objective function value.
+    barrier_multiplier : float, default=10.0
+        The factor by which the barrier parameter is multiplied at each outer iteration
+        to help guide the optimization process towards feasible solutions, balancing
+        between the penalty for constraint violation and descent direction.
+    inner_tolerance : float, default=1e-6
+        The tolerance for convergence within inner iterations of the optimization
+        method. This defines when the inner problem is considered solved to a
+        satisfactory level.
+    inner_tolerance_soft : float, default=1e-4
+        A less strict tolerance for the inner iterations, which can be used as a
+        fallback for allowing convergence when high precision is not achievable. This
+        tolerance can be employed on steps that do not need strict adherence to
+        constraints.
+    max_inner_iterations : int, default=100
+        The maximum number of iterations allowed for the inner optimization loop. This
+        guards against infinite loops and over-computation in the case where convergence
+        is slow.
+    backtracking_alpha : float, default=0.01
+        The coefficient used in backtracking line search to control the sufficient
+        decrease condition. This value scales the gradient term to adjust the step size
+        based on actual progress.
+    backtracking_beta : float, default=0.5
+        The factor used to reduce the step size in the backtracking line search. A value
+        less than 1 encourages more conservative adjustments to the step size for
+        stability.
+    backtracking_min_step : float, default=1e-3
+        The minimum allowable step size for backtracking line search. This prevents
+        excessively small steps that could result in numerical issues or ineffective
+        exploration of the optimization landscape.
+
+    """
 
     outer_tolerance: float = 1e-6
     barrier_multiplier: float = 10.0
