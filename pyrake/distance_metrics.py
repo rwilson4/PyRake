@@ -50,25 +50,22 @@ class SquaredL2(Distance):
     def evaluate(self, w: npt.NDArray[np.float64]) -> float:
         """Evaluate distance metric."""
         if self.v is None:
-            v = np.ones_like(w)
+            d = w - 1.0
+            return np.dot(d, d)
         else:
-            v = self.v
-
-        d = w - v
-        return np.dot(d, d)
+            d = w - self.v
+            return np.dot(d, d)
 
     def gradient(self, w: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
         """Calculate gradient of D(w, v)."""
         if self.v is None:
-            v = np.ones_like(w)
+            return 2.0 * (w - 1.0)
         else:
-            v = self.v
-
-        return 2.0 * (w - v)
+            return 2.0 * (w - self.v)
 
     def hessian_diagonal(self, w: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
         """Calculate diagonal component of Hessian of D(w, v)."""
-        return 2.0 * np.ones_like(w)
+        return np.full_like(w, 2.0)
 
 
 class KLDivergence(Distance):
@@ -82,20 +79,16 @@ class KLDivergence(Distance):
     def evaluate(self, w: npt.NDArray[np.float64]) -> float:
         """Evaluate distance metric."""
         if self.v is None:
-            v = np.ones_like(w)
+            return np.sum(w * np.log(w) - w + np.ones_like(w))
         else:
-            v = self.v
-
-        return np.sum(w * np.log(w / v) - w + v)
+            return np.sum(w * (np.log(w) - np.log(self.v)) - w + self.v)
 
     def gradient(self, w: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
         """Calculate gradient of ft."""
         if self.v is None:
-            v = np.ones_like(w)
+            return np.log(w)
         else:
-            v = self.v
-
-        return np.log(w / v)
+            return np.log(w) - np.log(self.v)
 
     def hessian_diagonal(self, w: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
         """Calculate diagonal component of Hessian of D(w, v)."""
@@ -125,11 +118,10 @@ class Huber(Distance):
     def evaluate(self, w: npt.NDArray[np.float64]) -> float:
         """Evaluate distance metric."""
         if self.v is None:
-            v = np.ones_like(w)
+            d = w - 1.0
         else:
-            v = self.v
+            d = w - self.v
 
-        d = w - v
         return np.sum(
             np.where(
                 np.abs(d) <= self.delta,
@@ -141,11 +133,10 @@ class Huber(Distance):
     def gradient(self, w: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
         """Calculate gradient of ft."""
         if self.v is None:
-            v = np.ones_like(w)
+            d = w - 1.0
         else:
-            v = self.v
+            d = w - self.v
 
-        d = w - v
         grad_dist = np.where(
             np.abs(d) <= self.delta, 2.0 * d, 2.0 * self.delta * np.sign(d)
         )
@@ -154,8 +145,8 @@ class Huber(Distance):
     def hessian_diagonal(self, w: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
         """Calculate diagonal component of Hessian of ft."""
         if self.v is None:
-            v = np.ones_like(w)
+            d = w - 1.0
         else:
-            v = self.v
+            d = w - self.v
 
-        return np.where(np.abs(w - v) <= self.delta, 2.0, 0.0)
+        return np.where(np.abs(d) <= self.delta, 2.0, 0.0)

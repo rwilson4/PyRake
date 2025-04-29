@@ -193,8 +193,9 @@ class Rake:
 
         Returns
         -------
-         w : vector
-            The optimal weights.
+         res : InteriorPointMethodResult
+            The results are wrapped in a InteriorPointMethodResult class, which includes
+            the optimal weights and other helpful info.
 
         """
         w = self.solve_phase1(w0=w0)
@@ -204,7 +205,7 @@ class Rake:
         num_steps = (
             int(
                 np.ceil(
-                    np.log((M + 1) / (t * self.settings.outer_tolerance))
+                    (np.log(M + 1) - np.log(t * self.settings.outer_tolerance))
                     / np.log(self.settings.barrier_multiplier)
                 )
             )
@@ -219,6 +220,7 @@ class Rake:
             except CenteringStepError as e:
                 raise InteriorPointMethodError(
                     message="Centering step failed",
+                    remaining_steps=num_steps - ii - 1,
                     suboptimality=(M + 1) * self.settings.barrier_multiplier / t,
                     last_iterate=e.last_iterate,
                 ) from e
@@ -268,12 +270,9 @@ class Rake:
 
         Returns
         -------
-         w : vector
-            Solution to centering step.
-         lambda_star : vector
-            Lagrange multipliers for inequality constraints.
-         nu_star : vector
-            Lagrange multipliers for equality constraints.
+         res : NewtonResult
+            The results are wrapped in a NewtonResult class, which includes the optimal
+            weights and other helpful info.
 
         Notes
         -----
@@ -395,9 +394,8 @@ class Rake:
         O(p^3 + p^2 * M) time.
 
         """
-        M = self.dimension
         return solve_kkt_system_hessian_diagonal_plus_rank_one(
-            A=(1.0 / M) * self.X.T,
+            A=(1.0 / self.dimension) * self.X.T,
             g=-self._grad_ft(w, t),
             eta=self._hessian_ft_diagonal(w, t),
             zeta=self._hessian_ft_rank_one(w),
@@ -574,7 +572,7 @@ class Rake:
         """Calculate gradient of ft at w."""
         M = self.dimension
         den = 1.0 - (1.0 / (M * self.phi)) * np.dot(w, w)
-        grad_constraints = w * ((2.0 / (M * self.phi)) / den) - 1.0 / w
+        grad_constraints = w * (2.0 / (M * self.phi * den)) - 1.0 / w
         return t * self.distance.gradient(w) + grad_constraints
 
     def _hessian_ft_diagonal(
@@ -585,8 +583,8 @@ class Rake:
         den = 1.0 - (1.0 / (M * self.phi)) * np.dot(w, w)
         return (
             t * self.distance.hessian_diagonal(w)
-            + ((2.0 / (M * self.phi)) / den) * np.ones_like(w)
-            + 1.0 / (w * w)
+            + np.full_like(w, 2.0 / (M * self.phi * den))
+            + np.square(1.0 / w)
         )
 
     def _hessian_ft_rank_one(
@@ -595,7 +593,7 @@ class Rake:
         """Calculate rank one component of Hessian of ft at w."""
         M = self.dimension
         den = 1.0 - (1.0 / (M * self.phi)) * np.dot(w, w)
-        return w * ((2.0 / (M * self.phi)) / den)
+        return w * (2.0 / (M * self.phi * den))
 
     def _newton_decrement(
         self,

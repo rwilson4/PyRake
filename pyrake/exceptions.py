@@ -108,3 +108,23 @@ class CenteringStepError(OptimizationError):
 
 class InteriorPointMethodError(OptimizationError):
     """Raised when interior point method fails."""
+
+    def __init__(
+        self,
+        message: str,
+        remaining_steps: int,
+        suboptimality: float,
+        last_iterate: npt.NDArray[np.float64],
+    ) -> None:
+        self.message = message
+        self.remaining_steps = remaining_steps
+        self.suboptimality = suboptimality
+        self.last_iterate = last_iterate
+
+    def __str__(self) -> str:
+        """Pretty-print error."""
+        msg = (
+            f"{self.message} ({self.remaining_steps} step(s) remaining; "
+            f"suboptimality = {self.suboptimality:.03g})"
+        )
+        return msg
