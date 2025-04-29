@@ -18,6 +18,7 @@ from .exceptions import (
     SevereCurvatureError,
 )
 from .numerical_helpers import (
+    solve_diagonal_plus_rank_one,
     solve_kkt_system_hessian_diagonal_plus_rank_one,
 )
 
@@ -267,6 +268,7 @@ class Rake:
                     last_iterate=e.last_iterate,
                 ) from e
 
+            w = self.predictor_corrector(w, t)
             t *= self.settings.barrier_multiplier
 
         lambda_star = result.inequality_multipliers
@@ -525,6 +527,46 @@ class Rake:
             w_new = w + s * delta_w
 
         return s
+
+    def predictor_corrector(
+        self, w: npt.NDArray[np.float64], t: float
+    ) -> npt.NDArray[np.float64]:
+        """Predictor step of a predictor/corrector method.
+
+        Given the current weights from the previous centering step and the
+        barrier parameter, this method calculates a predicted solution
+        for the next barrier parameter using a linear approximation.
+
+        Parameters
+        ----------
+        w : npt.NDArray[np.float64]
+            Weights obtained from the previous centering step.
+        t : float
+            The current barrier parameter.
+
+        Returns
+        -------
+        npt.NDArray[np.float64]
+            The predicted weights for the next barrier parameter.
+
+        """
+        # 1. Calculate the gradient of ft at w
+        grad_ft = self._grad_ft(w, t)
+
+        # 2. Compute the Hessian diagonal and rank one component
+        eta = self._hessian_ft_diagonal(w, t)
+        zeta = self._hessian_ft_rank_one(w)
+
+        # 3. Solve for dx/dt
+        dx_dt = solve_diagonal_plus_rank_one(eta, zeta, -grad_ft)
+
+        # 4. Calculate the barrier multiplier mu from settings
+        mu = self.settings.barrier_multiplier
+
+        # 5. Use the predictor formula to calculate the next weights
+        # x_star(t) + (dx^star(t) / dt) * (mu * t - t)
+        predicted_weights = w + dx_dt * (mu * t - t)
+        return predicted_weights
 
     def solve_phase1(
         self, w0: Optional[npt.NDArray[np.float64]] = None
