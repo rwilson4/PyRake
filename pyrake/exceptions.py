@@ -8,6 +8,17 @@ class ProblemInfeasibleError(Exception):
     """Raised when the balancing weight problem is infeasible."""
 
 
+class NewtonStepError(Exception):
+    """Raised when we cannot calculate Newton step."""
+
+    def __init__(self, message: str) -> None:
+        self.message = message
+
+    def __str__(self) -> str:
+        """Pretty-print error."""
+        return self.message
+
+
 class BacktrackingLineSearchError(Exception):
     """Raised when BTLS fails."""
 
@@ -22,20 +33,12 @@ class BacktrackingLineSearchError(Exception):
 class ConstraintBoundaryError(BacktrackingLineSearchError):
     """Raised when BTLS fails because even small steps violated a constraint."""
 
-    def __init__(
-        self, message: str, positivity_step: float, variance_step: float
-    ) -> None:
+    def __init__(self, message: str) -> None:
         self.message = message
-        self.positivity_step = positivity_step
-        self.variance_step = variance_step
 
     def __str__(self) -> str:
         """Pretty-print error."""
-        msg = (
-            f"{self.message} Max step size for positivity: {self.positivity_step:.03g};"
-            f" for variance: {self.variance_step:.03g}."
-        )
-        return msg
+        return self.message
 
 
 class InvalidDescentDirectionError(BacktrackingLineSearchError):
@@ -46,14 +49,14 @@ class InvalidDescentDirectionError(BacktrackingLineSearchError):
 
     """
 
-    def __init__(self, message: str, grad_ft_dot_delta_w: float) -> None:
+    def __init__(self, message: str, grad_ft_dot_delta_x: float) -> None:
         self.message = message
-        self.grad_ft_dot_delta_w = grad_ft_dot_delta_w
+        self.grad_ft_dot_delta_x = grad_ft_dot_delta_x
 
     def __str__(self) -> str:
         """Pretty-print error."""
         msg = (
-            f"{self.message} (∇f^T △w = {self.grad_ft_dot_delta_w} > 0, "
+            f"{self.message} (∇f^T △w = {self.grad_ft_dot_delta_x} > 0, "
             "but should be <= 0)"
         )
         return msg
@@ -90,7 +93,10 @@ class OptimizationError(Exception):
     """Base class for optimization errors."""
 
     def __init__(
-        self, message: str, suboptimality: float, last_iterate: npt.NDArray[np.float64]
+        self,
+        message: str,
+        suboptimality: float,
+        last_iterate: npt.NDArray[np.float64],
     ) -> None:
         self.message = message
         self.suboptimality = suboptimality

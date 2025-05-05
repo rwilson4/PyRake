@@ -54,7 +54,9 @@ class EfficientFrontier:
         self, phi_max: Optional[float] = None, num_points: int = 20
     ) -> EfficientFrontierResults:
         """Trace bias/variance tradeoff."""
-        w0 = self.rake.solve_phase1()
+        if self.rake.phase1_solver is None:
+            raise ValueError("Must specify a Phase I solver")
+        w0 = self.rake.phase1_solver.solve(fully_optimize=True).solution
         min_phi = np.dot(w0, w0)
 
         weights = [w0]
