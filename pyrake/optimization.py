@@ -92,10 +92,12 @@ class NewtonResult(OptimizationResult):
         The solution.
      objective_value : float
         Objective value.
+     dual_value : float
+        Value of Lagrangian dual function.
      equality_multipliers, inequality_multipliers: vectors
         Lagrange multipliers for constraints.
-     suboptimality : float
-        Suboptimality of solution.
+     suboptimalities : List[float]
+        Suboptimality of solution at each iteration.
      nits : int
         Number of iterations before convergence.
      status : [0, 1]
@@ -109,9 +111,11 @@ class NewtonResult(OptimizationResult):
     """
 
     objective_value: float
+    barrier_objective_value: float
+    dual_value: float
     equality_multipliers: npt.NDArray[np.float64]
     inequality_multipliers: npt.NDArray[np.float64]
-    suboptimality: float
+    suboptimalities: List[float]
     nits: int
     status: Literal[0, 1]
     message: str
@@ -152,6 +156,30 @@ class InteriorPointMethodResult(OptimizationResult):
     nits: int
     inner_nits: List[int]
     status: Literal[0]
+
+
+class ProblemCertifiablyInfeasibleError(ProblemInfeasibleError):
+    """Raised when problem is certifiably infeasible."""
+
+    def __init__(self, message: str, result: NewtonResult) -> None:
+        self.message = message
+        self.result = result
+
+    def __str__(self) -> str:
+        """Pretty-print error."""
+        return self.message
+
+
+class ProblemMarginallyFeasibleError(ProblemInfeasibleError):
+    """Raised when problem may be infeasible, but we can't certify it as such."""
+
+    def __init__(self, message: str, result: NewtonResult) -> None:
+        self.message = message
+        self.result = result
+
+    def __str__(self) -> str:
+        """Pretty-print error."""
+        return self.message
 
 
 class Optimizer(ABC):
@@ -329,7 +357,7 @@ class InteriorPointMethodSolver(Optimizer):
 
         return InteriorPointMethodResult(
             solution=x,
-            objective_value=self.evaluate_objective(x),
+            objective_value=result.objective_value,
             dual_value=self.evaluate_dual(
                 lmbda=result.inequality_multipliers,
                 nu=result.equality_multipliers,
@@ -391,6 +419,7 @@ class InteriorPointMethodSolver(Optimizer):
 
         """
         x = x0.copy()
+        suboptimalities = []
         suboptimality = np.inf
         for nit in range(self.settings.max_inner_iterations):
             if self.settings.verbose:
@@ -411,6 +440,7 @@ class InteriorPointMethodSolver(Optimizer):
             # Check for convergence
             lmbda = self.newton_decrement(x, t, delta_x)
             suboptimality = 0.5 * lmbda * lmbda
+            suboptimalities.append(suboptimality)
             if self.settings.verbose:
                 print(
                     f"    {nit:02d} Newton step calculated in "
@@ -423,10 +453,14 @@ class InteriorPointMethodSolver(Optimizer):
                 lambda_star = self.inequality_multipliers(x, t, delta_x)
                 return NewtonResult(
                     solution=x,
-                    objective_value=self.evaluate_barrier_objective(x, t),
+                    objective_value=self.evaluate_objective(x),
+                    barrier_objective_value=self.evaluate_barrier_objective(x, t),
+                    dual_value=self.evaluate_dual(
+                        lmbda=lambda_star, nu=nu_star, x_star=x
+                    ),
                     equality_multipliers=nu_star,
                     inequality_multipliers=lambda_star,
-                    suboptimality=suboptimality,
+                    suboptimalities=suboptimalities,
                     nits=nit + 1,
                     status=0,
                     message=(
@@ -446,10 +480,14 @@ class InteriorPointMethodSolver(Optimizer):
                     )
                     return NewtonResult(
                         solution=x,
-                        objective_value=self.evaluate_barrier_objective(x, t),
+                        objective_value=self.evaluate_objective(x),
+                        barrier_objective_value=self.evaluate_barrier_objective(x, t),
+                        dual_value=self.evaluate_dual(
+                            lmbda=lambda_star, nu=nu_star, x_star=x
+                        ),
                         equality_multipliers=nu_star,
                         inequality_multipliers=lambda_star,
-                        suboptimality=suboptimality,
+                        suboptimalities=suboptimalities,
                         nits=nit + 1,
                         status=1,
                         message=(
@@ -806,6 +844,7 @@ class PhaseIInteriorPointSolver(InteriorPointMethodSolver, PhaseISolver):
                 )
 
             x = result.solution
+
             inner_nits.append(result.nits)
             if not fully_optimize and self.is_feasible(x):
                 if self.settings.verbose:
@@ -814,6 +853,11 @@ class PhaseIInteriorPointSolver(InteriorPointMethodSolver, PhaseISolver):
                         "early-stopping."
                     )
                 break
+
+            # Dual can provide certificate of infeasibility, in which case we can quit
+            # faster.
+            if not fully_optimize:
+                self.check_for_infeasibility(result)
 
             # w = self.predictor_corrector(w, t)
             t *= self.settings.barrier_multiplier
@@ -826,11 +870,18 @@ class PhaseIInteriorPointSolver(InteriorPointMethodSolver, PhaseISolver):
             )
 
         if not fully_optimize and not self.is_feasible(x):
-            raise ProblemInfeasibleError("Problem was infeasible.")
+            raise ProblemMarginallyFeasibleError(
+                message=(
+                    "Problem may be infeasible: dual value was "
+                    f"{result.dual_value} < 0, but last centering step resulted in "
+                    f"a point with value {result.objective_value}"
+                ),
+                result=result,
+            )
 
         return InteriorPointMethodResult(
             solution=self.finalize_solution(x),
-            objective_value=self.evaluate_objective(x),
+            objective_value=result.objective_value,
             dual_value=self.evaluate_dual(
                 lmbda=result.inequality_multipliers,
                 nu=result.equality_multipliers,
@@ -850,15 +901,27 @@ class PhaseIInteriorPointSolver(InteriorPointMethodSolver, PhaseISolver):
     def is_feasible(self, x: npt.NDArray[np.float64]) -> bool:
         """Determine whether a feasible point has been found."""
 
-    @abstractmethod
+    def check_for_infeasibility(self, result: NewtonResult):
+        """Check if infeasible.
+
+        For some problems, the dual function can provide a "certificate of
+        infeasibility". For these problems, this function should inspect the result of
+        the centering step, and if the problem has proven infeasible, this function
+        should raise a ProblemCertifiablyInfeasibleError. For other problems, it's fine
+        to just let this function do nothing.
+
+        """
+        pass
+
     def augment_previous_solution(
         self, phase1_res: OptimizationResult, **kwargs
     ) -> npt.NDArray[np.float64]:
         """Initialize variable based on Phase I result."""
+        return phase1_res.solution
 
     def finalize_solution(self, x: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
         """De-augment solution."""
-        return x[0:-1]
+        return x
 
     def centering_step(
         self,
@@ -903,6 +966,7 @@ class PhaseIInteriorPointSolver(InteriorPointMethodSolver, PhaseISolver):
         """
         x = x0.copy()
         suboptimality = np.inf
+        suboptimalities = []
         for nit in range(self.settings.max_inner_iterations):
             if self.settings.verbose:
                 start_time = time.time()
@@ -928,21 +992,26 @@ class PhaseIInteriorPointSolver(InteriorPointMethodSolver, PhaseISolver):
                     f"{1000 * (end_time - start_time):.03f} ms; "
                     f"Sub-optimality {suboptimality}"
                 )
+            suboptimalities.append(suboptimality)
 
             if suboptimality < self.settings.inner_tolerance:
                 nu_star = nu_hat / t
                 lambda_star = self.inequality_multipliers(x, t, delta_x)
                 return NewtonResult(
                     solution=x,
-                    objective_value=self.evaluate_barrier_objective(x, t),
+                    objective_value=self.evaluate_objective(x),
+                    barrier_objective_value=self.evaluate_barrier_objective(x, t),
+                    dual_value=self.evaluate_dual(
+                        lmbda=lambda_star, nu=nu_star, x_star=x
+                    ),
                     equality_multipliers=nu_star,
                     inequality_multipliers=lambda_star,
-                    suboptimality=suboptimality,
+                    suboptimalities=suboptimalities,
                     nits=nit + 1,
                     status=0,
                     message=(
                         "Newton's method completed successfully to the desired "
-                        "tolerance"
+                        "tolerance."
                     ),
                 )
 
@@ -957,15 +1026,19 @@ class PhaseIInteriorPointSolver(InteriorPointMethodSolver, PhaseISolver):
                     )
                     return NewtonResult(
                         solution=x,
-                        objective_value=self.evaluate_barrier_objective(x, t),
+                        objective_value=self.evaluate_objective(x),
+                        barrier_objective_value=self.evaluate_barrier_objective(x, t),
+                        dual_value=self.evaluate_dual(
+                            lmbda=lambda_star, nu=nu_star, x_star=x
+                        ),
                         equality_multipliers=nu_star,
                         inequality_multipliers=lambda_star,
-                        suboptimality=suboptimality,
+                        suboptimalities=suboptimalities,
                         nits=nit + 1,
                         status=1,
                         message=(
                             "Newton's method achieved an acceptable tolerance but then "
-                            "ran into numerical issues"
+                            "ran into numerical issues."
                         ),
                     )
 
@@ -982,18 +1055,19 @@ class PhaseIInteriorPointSolver(InteriorPointMethodSolver, PhaseISolver):
                 )
                 return NewtonResult(
                     solution=x + btls_s * delta_x,
-                    objective_value=self.evaluate_barrier_objective(
+                    objective_value=self.evaluate_objective(x + btls_s * delta_x),
+                    barrier_objective_value=self.evaluate_barrier_objective(
                         x + btls_s * delta_x, t
+                    ),
+                    dual_value=self.evaluate_dual(
+                        lmbda=lambda_star, nu=nu_star, x_star=x
                     ),
                     equality_multipliers=nu_star,
                     inequality_multipliers=lambda_star,
-                    suboptimality=suboptimality,
+                    suboptimalities=suboptimalities,
                     nits=nit + 1,
                     status=1,
-                    message=(
-                        "Newton's method achieved an acceptable tolerance but then "
-                        "ran into numerical issues"
-                    ),
+                    message=("Newton's method found a feasible point."),
                 )
 
             x += btls_s * delta_x

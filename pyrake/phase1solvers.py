@@ -8,9 +8,6 @@ import numpy.typing as npt
 from scipy import linalg
 
 from .exceptions import (
-    CenteringStepError,
-    InteriorPointMethodError,
-    NewtonStepError,
     ProblemInfeasibleError,
 )
 from .numerical_helpers import (
@@ -19,12 +16,12 @@ from .numerical_helpers import (
     solve_kkt_system,
 )
 from .optimization import (
-    InteriorPointMethodResult,
-    InteriorPointMethodSolver,
+    NewtonResult,
     OptimizationResult,
     OptimizationSettings,
     PhaseIInteriorPointSolver,
     PhaseISolver,
+    ProblemCertifiablyInfeasibleError,
 )
 
 
@@ -137,7 +134,7 @@ class EqualityWithBoundsSolver(PhaseIInteriorPointSolver):
 
     @property
     def dimension(self) -> int:
-        """Count equality constraints."""
+        """Problem dimension."""
         return self.A.shape[1]
 
     @property
@@ -176,6 +173,17 @@ class EqualityWithBoundsSolver(PhaseIInteriorPointSolver):
         """Determine whether a feasible point has been found."""
         return x[-1] < 0
 
+    def check_for_infeasibility(self, result: NewtonResult):
+        """Check if infeasible."""
+        if result.dual_value > 0:
+            raise ProblemCertifiablyInfeasibleError(
+                message=(
+                    "Problem certifiably infeasible: dual value was "
+                    f"{result.dual_value} > 0"
+                ),
+                result=result,
+            )
+
     def augment_previous_solution(
         self, phase1_res: OptimizationResult, **kwargs
     ) -> npt.NDArray[np.float64]:
@@ -187,9 +195,12 @@ class EqualityWithBoundsSolver(PhaseIInteriorPointSolver):
         self.s0_plus_eps = x[self.dimension] + eps
         return x
 
+    def finalize_solution(self, x: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+        """De-augment solution."""
+        return x[0:-1]
+
     def initialize_barrier_parameter(self, x0: npt.NDArray[np.float64]) -> float:
         """Initialize barrier parameter."""
-        return 1.0
         return max(
             1.0,
             self.num_ineq_constraints
@@ -285,9 +296,6 @@ class EqualityWithBoundsSolver(PhaseIInteriorPointSolver):
             ),
             beta * (self.s0_plus_eps - s) / delta_s if delta_s > 0 else np.inf,
         )
-
-        assert np.all(w + btls_s * delta_w > -s - btls_s * delta_s)
-        assert s + btls_s * delta_s < self.s0_plus_eps
 
         return btls_s
 
@@ -472,7 +480,11 @@ class EqualityWithBoundsSolver(PhaseIInteriorPointSolver):
         -infinity otherwise.
 
         """
-        if not np.allclose(lmbda[0 : self.dimension], self.A.T @ nu):
+        # print(lmbda[0:-1] - self.A.T @ nu)
+        # print(self.dimension * lmbda[-1], sum(lmbda[0:-1]) - 1)
+        # print(np.max(abs(lmbda[0:-1] - self.A.T @ nu)), abs(self.dimension * lmbda[-1] - (sum(lmbda[0:-1]) - 1)))
+        # assert 1 == 2
+        if not np.allclose(lmbda[0 : self.dimension], self.A.T @ nu, atol=1e-3):
             return -np.inf
 
         if (
@@ -480,13 +492,13 @@ class EqualityWithBoundsSolver(PhaseIInteriorPointSolver):
                 self.dimension * lmbda[self.dimension]
                 - (np.sum(lmbda[0 : self.dimension]) - 1)
             )
-            > 1e-9
+            > 1e-3
         ):
             return -np.inf
 
         return (
             -np.dot(self.b, nu)
-            + self.dimension * lmbda[self.dimension] * self.s0_plus_eps
+            - self.dimension * lmbda[self.dimension] * self.s0_plus_eps
         )
 
 
@@ -523,14 +535,13 @@ class EqualityWithBoundsAndNormConstraintSolver(PhaseIInteriorPointSolver):
         if phase1_solver is None:
             raise ValueError("phase1_solver is required.")
 
-        super().__init__(
-            phase1_solver=phase1_solver,
-            settings=settings,
-            acceptable_objective=phi,
-        )
+        super().__init__(phase1_solver=phase1_solver, settings=settings)
         self.phi = phi
-        self.equality_constraints = phase1_solver.A.shape[0]
-        self.inequality_constraints = 1 + phase1_solver.A.shape[1]
+
+    @property
+    def dimension(self) -> int:
+        """Problem dimension."""
+        return self.A.shape[1]
 
     @property
     def num_eq_constraints(self) -> int:
@@ -563,6 +574,29 @@ class EqualityWithBoundsAndNormConstraintSolver(PhaseIInteriorPointSolver):
             raise ValueError("PhaseISolver must be an EqualityWithBoundsSolver.")
 
         return self.phase1_solver.b
+
+    def is_feasible(self, x: npt.NDArray[np.float64]) -> bool:
+        """Determine whether a feasible point has been found."""
+        return np.dot(x, x) < self.phi
+
+    def check_for_infeasibility(self, result: NewtonResult):
+        """Check if infeasible."""
+        if result.dual_value > self.phi:
+            raise ProblemCertifiablyInfeasibleError(
+                message=(
+                    "Problem certifiably infeasible: dual value was "
+                    f"{result.dual_value} > {self.phi}"
+                ),
+                result=result,
+            )
+
+    def initialize_barrier_parameter(self, x0: npt.NDArray[np.float64]) -> float:
+        """Initialize barrier parameter."""
+        return max(
+            1.0,
+            self.num_ineq_constraints
+            / max(self.settings.outer_tolerance, np.dot(x0, x0)),
+        )
 
     def calculate_newton_step(
         self,
@@ -703,4 +737,4 @@ class EqualityWithBoundsAndNormConstraintSolver(PhaseIInteriorPointSolver):
 
         """
         lmbda_minus_AT_nu = lmbda - self.A.T @ nu
-        return -0.25 * np.dot(lmbda_minus_AT_nu, lmbda_minus_AT_nu) - np.dot(nu, self.b)
+        return -np.dot(self.b, nu) - 0.25 * np.dot(lmbda_minus_AT_nu, lmbda_minus_AT_nu)

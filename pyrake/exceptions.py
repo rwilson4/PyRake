@@ -5,7 +5,7 @@ import numpy.typing as npt
 
 
 class ProblemInfeasibleError(Exception):
-    """Raised when the balancing weight problem is infeasible."""
+    """Raised when problem is infeasible."""
 
 
 class NewtonStepError(Exception):
