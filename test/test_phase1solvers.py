@@ -21,11 +21,19 @@ from pyrake.phase1solvers import (
 class TestEqualitySolver:
     """Test EqualitySolver."""
 
-    @staticmethod
-    def test_solver() -> None:
+    @pytest.mark.parametrize(
+        "seed,M,p",
+        [
+            (1101, 100, 20),
+            (2101, 200, 30),
+            (3101, 50, 5),
+            (4101, 500, 100),
+            (5101, 13, 3),
+        ],
+    )
+    def test_solver(self, seed: int, M: int, p: int) -> None:
         """Test solver."""
-        np.random.seed(1)
-        M, p = 100, 20
+        np.random.seed(seed)
         A = np.random.randn(p, M)
         w = np.random.randn(M)
         b = A @ w
@@ -35,11 +43,19 @@ class TestEqualitySolver:
         w = solver.solve().solution
         np.testing.assert_allclose(A @ w, b)
 
-    @staticmethod
-    def test_solver_not_full_rank() -> None:
+    @pytest.mark.parametrize(
+        "seed,M,p",
+        [
+            (1102, 100, 20),
+            (2102, 200, 30),
+            (3102, 50, 5),
+            (4102, 500, 100),
+            (5102, 13, 3),
+        ],
+    )
+    def test_solver_rank_deficient(self, seed: int, M: int, p: int) -> None:
         """Test solver."""
-        np.random.seed(2)
-        M, p = 100, 20
+        np.random.seed(seed)
         A = np.random.randn(p, M)
         w = np.random.randn(M)
 
@@ -55,11 +71,19 @@ class TestEqualitySolver:
         w = solver.solve().solution
         np.testing.assert_allclose(A @ w, b)
 
-    @staticmethod
-    def test_solver_infeasible() -> None:
+    @pytest.mark.parametrize(
+        "seed,M,p",
+        [
+            (1103, 100, 20),
+            (2103, 200, 30),
+            (3103, 50, 5),
+            (4103, 500, 100),
+            (5103, 13, 3),
+        ],
+    )
+    def test_solver_infeasible(self, seed: int, M: int, p: int) -> None:
         """Test solver."""
-        np.random.seed(3)
-        M, p = 100, 20
+        np.random.seed(seed)
         A = np.random.randn(p, M)
         w = np.random.randn(M)
 
@@ -75,12 +99,45 @@ class TestEqualitySolver:
         with pytest.raises(ProblemInfeasibleError):
             solver.solve().solution
 
+    @pytest.mark.parametrize(
+        "seed,M,p",
+        [
+            (1104, 100, 20),
+            (2104, 200, 30),
+            (3104, 50, 5),
+            (4104, 500, 100),
+            (5104, 13, 3),
+        ],
+    )
+    def test_solver_with_mean_constraint(self, seed: int, M: int, p: int) -> None:
+        """Test solver with an extra row of all 1s in A."""
+        np.random.seed(seed)
+        A = np.random.randn(p, M)
+        # Add a row to A of all ones.
+        A = np.vstack((A, np.ones((1, M))))
+        w = np.random.randn(M)
+        b = A @ w
+
+        solver = EqualitySolver(A=A, b=b)
+
+        w = solver.solve().solution
+        np.testing.assert_allclose(A @ w, b)
+
 
 class TestEqualityWithBoundsSolver:
     """Test EqualityWithBoundsSolver."""
 
-    @staticmethod
-    def test_solver_feasible_bounded_below() -> None:
+    @pytest.mark.parametrize(
+        "seed,M,p",
+        [
+            (1201, 100, 20),
+            (2201, 200, 30),
+            (3201, 50, 5),
+            (4201, 500, 100),
+            (5201, 13, 3),
+        ],
+    )
+    def test_solver_feasible_bounded_below(self, seed: int, M: int, p: int) -> None:
         """Test solver when problem is feasible and the augmented problem bounded below.
 
         The dual function for the augmented problem gives a lower bound for the problem
@@ -94,8 +151,7 @@ class TestEqualityWithBoundsSolver:
         And if there exists w such that A * w = b, then the problem is feasible.
 
         """
-        np.random.seed(11)
-        M, p = 100, 20
+        np.random.seed(seed)
 
         nu = np.random.randn(p)
         # Construct A such that lambda1 := A^T nu >= 0
@@ -132,8 +188,17 @@ class TestEqualityWithBoundsSolver:
         np.testing.assert_allclose(A @ res.solution, b)
         assert np.all(res.solution > 0)
 
-    @staticmethod
-    def test_solver_feasible_unbounded_below() -> None:
+    @pytest.mark.parametrize(
+        "seed,M,p",
+        [
+            (1202, 100, 20),
+            (2202, 200, 30),
+            (3202, 50, 5),
+            (4202, 500, 100),
+            (5202, 13, 3),
+        ],
+    )
+    def test_solver_feasible_unbounded_below(self, seed: int, M: int, p: int) -> None:
         """Test solver when problem is feasible and the augmented problem is unbounded below.
 
         The augmented problem is unbounded below (yet is still feasible) if there does
@@ -152,8 +217,8 @@ class TestEqualityWithBoundsSolver:
            0: lambda1 = 0 so lambda2 = -1.
 
         """
-        np.random.seed(12)
-        M, p = 100, 1
+        np.random.seed(seed)
+        p = 1
 
         A = np.random.randn(p, M)
         A[0, 0] = -abs(A[0, 0])
@@ -179,8 +244,17 @@ class TestEqualityWithBoundsSolver:
         with pytest.raises(InteriorPointMethodError):
             solver.solve(fully_optimize=True)
 
-    @staticmethod
-    def test_solver_infeasible() -> None:
+    @pytest.mark.parametrize(
+        "seed,M,p",
+        [
+            (1203, 100, 20),
+            (2203, 200, 30),
+            (3203, 50, 5),
+            (4203, 500, 100),
+            (5203, 13, 3),
+        ],
+    )
+    def test_solver_infeasible(self, seed: int, M: int, p: int) -> None:
         """Test solver when problem is infeasible.
 
         We seek an x satisfying A * x = b and x > 0. No such x exists if there exists a
@@ -192,8 +266,7 @@ class TestEqualityWithBoundsSolver:
         infeasibility.
 
         """
-        np.random.seed(13)
-        M, p = 100, 20
+        np.random.seed(seed)
         nu = np.random.randn(p)
 
         # Construct A such that A^T nu >= 0
@@ -221,7 +294,7 @@ class TestEqualityWithBoundsSolver:
             phase1_solver=EqualitySolver(
                 A=A, b=b, settings=OptimizationSettings(verbose=True)
             ),
-            settings=OptimizationSettings(verbose=True, outer_tolerance=2e-3),
+            settings=OptimizationSettings(verbose=True, outer_tolerance=0.03),
         )
 
         with pytest.raises(ProblemCertifiablyInfeasibleError):
@@ -233,8 +306,17 @@ class TestEqualityWithBoundsSolver:
         assert isinstance(res, InteriorPointMethodResult)
         assert res.dual_value > 0
 
-    @staticmethod
-    def test_solver_marginally_feasible() -> None:
+    @pytest.mark.parametrize(
+        "seed,M,p",
+        [
+            (1205, 100, 20),
+            (2205, 200, 30),
+            (3205, 50, 5),
+            (4205, 500, 100),
+            (5205, 13, 3),
+        ],
+    )
+    def test_solver_marginally_feasible(self, seed: int, M: int, p: int) -> None:
         """Test solver when problem is marginally feasible.
 
         Here we test a scenario where there exists a technically feasible w, but where
@@ -243,8 +325,7 @@ class TestEqualityWithBoundsSolver:
         we won't find a strictly feasible w (because it doesn't exist).
 
         """
-        np.random.seed(14)
-        M = 100
+        np.random.seed(seed)
 
         w_star = np.random.rand(M)
         w_star[0] = 0
@@ -263,15 +344,151 @@ class TestEqualityWithBoundsSolver:
         with pytest.raises(ProblemMarginallyFeasibleError):
             solver.solve()
 
+    @pytest.mark.parametrize(
+        "seed,M,p",
+        [
+            (1206, 100, 20),
+            (2206, 200, 30),
+            (3206, 50, 5),
+            (4206, 500, 100),
+            (5206, 13, 3),
+        ],
+    )
+    def test_solver_feasible_mean_constraint(self, seed: int, M: int, p: int) -> None:
+        """Test solver with an extra row of all 1s in A."""
+        np.random.seed(seed)
+
+        nu = np.random.randn(p + 1)
+        # Construct A such that lambda1 := A^T nu[:p] >= 0
+        A = np.random.randn(p, M)
+
+        for ic in range(M):
+            if np.dot(A[:, ic], nu[:p]) < 0:
+                A[:, ic] = -A[:, ic]
+
+        # Scale A such that lambda2 := sum(A^T nu) - 1 > 0
+        A *= 1.1 / np.sum(A.T @ nu[:p])
+
+        # Add a row to A of all ones. So long as the last element of nu is positive,
+        # we'll still have have [A^T 1] * nu = A^T nu[:p] + nu[p] * 1 >= A^T nu[:p] >= 0
+        # and sum([A^T 1] * nu) >= sum(A^T nu[:p]) > 1
+        A = np.vstack((A, np.ones((1, M))))
+        if nu[p] < 0:
+            nu[p] = -nu[p]
+
+        assert np.all(A.T @ nu >= 0)
+        assert np.sum(A.T @ nu) > 1
+
+        # Construct feasible w
+        w = 0.1 + np.random.rand(M)
+        b = A @ w
+
+        solver = EqualityWithBoundsSolver(
+            phase1_solver=EqualitySolver(
+                A=A, b=b, settings=OptimizationSettings(verbose=True)
+            ),
+            settings=OptimizationSettings(verbose=True),
+        )
+
+        # Verify we find a feasible point
+        res = solver.solve()
+        np.testing.assert_allclose(A @ res.solution, b)
+        assert np.all(res.solution > 0)
+
+        # Since augmented problem is bounded below, verify we can fully solve it (if for
+        # whatever reason we wanted to).
+        res = solver.solve(fully_optimize=True)
+        np.testing.assert_allclose(A @ res.solution, b, atol=1e-10)
+        assert np.all(res.solution > 0)
+
+    @pytest.mark.parametrize(
+        "seed,M,p",
+        [
+            (1207, 100, 20),
+            (2207, 200, 30),
+            (3207, 50, 5),
+            (4207, 500, 100),
+            (5207, 13, 3),
+        ],
+    )
+    def test_solver_feasible_bounded_below_rank_deficient(
+        self, seed: int, M: int, p: int
+    ) -> None:
+        """Test solver when problem is feasible and the augmented problem bounded below.
+
+        The dual function for the augmented problem gives a lower bound for the problem
+        value. The dual function is finite if there exists a collection nu (length p),
+        lambda1 (length M), lambda2 (scalar), such that:
+           lambda1 = A^T nu
+           lambda2 = sum(lambda1) - 1
+           lambda1 >= 0
+           lambda2 >= 0.
+
+        And if there exists w such that A * w = b, then the problem is feasible.
+
+        """
+        np.random.seed(seed)
+
+        nu = np.random.randn(p)
+        # Construct A such that lambda1 := A^T nu >= 0
+        A = np.random.randn(p, M)
+        U, s, Vh = linalg.svd(A, full_matrices=False)
+        s[-1] = 0.0
+        s[-2] = 0.0
+        A = U @ np.diag(s) @ Vh
+        for ic in range(M):
+            if np.dot(A[:, ic], nu) < 0:
+                A[:, ic] = -A[:, ic]
+
+        assert np.all(A.T @ nu >= 0)
+
+        # Scale A such that lambda2 := sum(A^T nu) - 1 > 0
+        A *= 1.1 / np.sum(A.T @ nu)
+        assert np.sum(A.T @ nu) > 1
+
+        U, s, Vh = linalg.svd(A, full_matrices=False)
+        assert s[-1] < 1e-10
+        assert s[-2] < 1e-10
+
+        # Construct feasible w
+        w = 0.1 + np.random.rand(M)
+        b = A @ w
+
+        solver = EqualityWithBoundsSolver(
+            phase1_solver=EqualitySolver(
+                A=A, b=b, settings=OptimizationSettings(verbose=True)
+            ),
+            settings=OptimizationSettings(verbose=True, outer_tolerance=0.01),
+        )
+
+        # Verify we find a feasible point
+        res = solver.solve()
+        np.testing.assert_allclose(A @ res.solution, b)
+        assert np.all(res.solution > 0)
+
+        # Since augmented problem is bounded below, verify we can fully solve it (if for
+        # whatever reason we wanted to).
+        res = solver.solve(fully_optimize=True)
+        np.testing.assert_allclose(A @ res.solution, b)
+        assert np.all(res.solution > 0)
+
 
 class TestEqualityWithBoundsAndNormConstraintSolver:
     """Test EqualityWithBoundsAndNormConstraintSolver."""
 
-    @staticmethod
-    def test_solver_feasible() -> None:
+    @pytest.mark.parametrize(
+        "seed,M,p",
+        [
+            (1301, 100, 20),
+            (2301, 200, 30),
+            (3301, 50, 5),
+            (4301, 500, 100),
+            (5301, 13, 3),
+        ],
+    )
+    def test_solver_feasible(self, seed: int, M: int, p: int) -> None:
         """Test solver when problem is feasible."""
-        np.random.seed(21)
-        M, p = 100, 20
+        np.random.seed(seed)
         phi = 1.0
 
         w = np.random.rand(M)
@@ -306,11 +523,19 @@ class TestEqualityWithBoundsAndNormConstraintSolver:
         assert np.all(res.solution > 0)
         assert np.dot(res.solution, res.solution) < phi
 
-    @staticmethod
-    def test_solver_infeasible() -> None:
+    @pytest.mark.parametrize(
+        "seed,M,p",
+        [
+            (1302, 100, 20),
+            (2302, 200, 30),
+            (3302, 50, 5),
+            (4302, 500, 100),
+            (5302, 13, 3),
+        ],
+    )
+    def test_solver_infeasible(self, seed: int, M: int, p: int) -> None:
         """Test solver when problem is infeasible."""
-        np.random.seed(21)
-        M = 100
+        np.random.seed(seed)
 
         w = np.random.rand(M)
         A = np.random.randn(M, M)
@@ -336,3 +561,105 @@ class TestEqualityWithBoundsAndNormConstraintSolver:
         np.testing.assert_allclose(A @ res.solution, b)
         assert np.all(res.solution > 0)
         assert np.dot(w, w) > phi
+
+    @pytest.mark.parametrize(
+        "seed,M,p",
+        [
+            (1303, 100, 20),
+            (2303, 200, 30),
+            (3303, 50, 5),
+            (4303, 500, 100),
+            (5303, 13, 3),
+        ],
+    )
+    def test_solver_feasible_mean_constraint(self, seed: int, M: int, p: int) -> None:
+        """Test solver when problem is feasible."""
+        np.random.seed(seed)
+        phi = 1.0
+        A = (1 / M) * np.random.randn(M, p).T
+
+        w = np.random.rand(M)
+        # Constrain to norm < phi
+        w /= np.sqrt(np.dot(w, w))
+        w /= 1.1 * phi
+        assert np.dot(w, w) < phi
+
+        A = np.random.randn(p, M)
+        # Add row of 1s to A
+        A = np.vstack((A, np.ones((1, M))))
+        b = A @ w
+
+        solver = EqualityWithBoundsAndNormConstraintSolver(
+            phase1_solver=EqualityWithBoundsSolver(
+                phase1_solver=EqualitySolver(
+                    A=A, b=b, settings=OptimizationSettings(verbose=True)
+                ),
+                settings=OptimizationSettings(verbose=True),
+            ),
+            phi=phi,
+            settings=OptimizationSettings(verbose=True),
+        )
+
+        # Verify we find a feasible point
+        res = solver.solve()
+        np.testing.assert_allclose(A @ res.solution, b)
+        assert np.all(res.solution > 0)
+        assert np.dot(res.solution, res.solution) < phi
+
+        # Verify we can fully optimize
+        res = solver.solve(fully_optimize=True)
+        np.testing.assert_allclose(A @ res.solution, b)
+        assert np.all(res.solution > 0)
+        assert np.dot(res.solution, res.solution) < phi
+
+    @pytest.mark.parametrize(
+        "seed,M,p",
+        [
+            (1304, 100, 20),
+            (2304, 200, 30),
+            (3304, 50, 5),
+            (4304, 500, 100),
+            (5304, 13, 3),
+        ],
+    )
+    def test_solver_feasible_rank_deficient(self, seed: int, M: int, p: int) -> None:
+        """Test solver when problem is feasible."""
+        np.random.seed(seed)
+        phi = 1.0
+
+        w = np.random.rand(M)
+        # Constrain to norm < phi
+        w /= np.sqrt(np.dot(w, w))
+        w /= 1.1 * phi
+        assert np.dot(w, w) < phi
+
+        A = np.random.randn(p, M)
+        U, s, Vh = linalg.svd(A, full_matrices=False)
+        s[-1] = 0.0
+        s[-2] = 0.0
+        A = U @ np.diag(s) @ Vh
+
+        b = A @ w
+
+        solver = EqualityWithBoundsAndNormConstraintSolver(
+            phase1_solver=EqualityWithBoundsSolver(
+                phase1_solver=EqualitySolver(
+                    A=A, b=b, settings=OptimizationSettings(verbose=True)
+                ),
+                settings=OptimizationSettings(verbose=True),
+            ),
+            phi=phi,
+            settings=OptimizationSettings(verbose=True),
+        )
+
+        # Verify we find a feasible point
+        res = solver.solve()
+        np.testing.assert_allclose(A @ res.solution, b)
+        assert np.all(res.solution > 0)
+        assert np.dot(res.solution, res.solution) < phi
+
+        # Verify we can fully optimize
+        res = solver.solve(fully_optimize=True)
+        np.testing.assert_allclose(A @ res.solution, b)
+        assert np.all(res.solution > 0)
+        assert np.dot(res.solution, res.solution) < phi

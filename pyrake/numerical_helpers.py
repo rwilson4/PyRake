@@ -271,6 +271,10 @@ def solve_kkt_system(
          takes O(p * M) time.
       3. Solve S * nu = c via Cholesky decomposition. (S is negative definite, so we
          instead solve -S * nu = -c.) This takes O(p^3) time.
+         a. If A is not full rank, S won't be, either. We can typically still solve the
+            system using the Singular Value Decomposition (SVD) instead of the Cholesky
+            decomposition. The SVD is slower, so we still at least *try* the Cholesky,
+            and if that fails, we fall back to SVD.
       4. Solve H * delta_x= g - A^T * nu. This takes O(M) time.
 
     """
@@ -287,8 +291,24 @@ def solve_kkt_system(
     neg_Sc = A @ Bb
 
     # Step 3: Solve -S * xi = -c
-    c, lower = linalg.cho_factor(neg_Sc[:, 0:p], lower=True)
-    nu = linalg.cho_solve((c, lower), neg_Sc[:, p])
+    try:
+        c, lower = linalg.cho_factor(neg_Sc[:, 0:p], lower=True)
+        nu = linalg.cho_solve((c, lower), neg_Sc[:, p])
+    except np.linalg.LinAlgError:
+        # This can happen when A is not full rank; fall back to SVD, which is slower but
+        # more numerically stable. To be honest though, in my timing experiments, this
+        # is really about the same speed as Cholesky, so consider just always doing SVD.
+        U, s, Vh = linalg.svd(neg_Sc[:, 0:p], full_matrices=False)
+        rank = int(np.sum(s > 1e-10))
+        U_r = U[:, 0:rank]
+        if not np.allclose(U_r @ (U_r.T @ neg_Sc[:, p]), neg_Sc[:, p]):
+            raise NewtonStepError(
+                "KKT system did not have a solution, because A is not full rank."
+            )
+
+        s_inv = np.zeros_like(s)
+        s_inv[0:rank] = 1.0 / s[0:rank]
+        nu = Vh.T @ (s_inv * (U.T @ neg_Sc[:, p]))
 
     # Step 4: Solve H * delta_w = -grad_ft - A^T * xi
     delta_x = hessian_solve(g - (A.T @ nu), **kwargs)
