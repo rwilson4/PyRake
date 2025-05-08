@@ -5,8 +5,10 @@ from abc import ABC, abstractmethod, abstractproperty
 from dataclasses import dataclass
 from typing import List, Literal, Optional, Tuple
 
+import matplotlib.pyplot as plt
 import numpy as np
 import numpy.typing as npt
+from matplotlib.axes import Axes
 
 from .exceptions import (
     BacktrackingLineSearchError,
@@ -120,6 +122,17 @@ class NewtonResult(OptimizationResult):
     status: Literal[0, 1]
     message: str
 
+    def plot_convergence(self, ax: Optional[Axes] = None) -> Axes:
+        """Plot convergence."""
+        if ax is None:
+            _, ax = plt.subplots()
+
+        ax.plot([ii + 1 for ii in range(self.nits)], self.suboptimalities, marker="o")
+        plt.yscale("log")
+        ax.set_xlabel("Iteration")
+        ax.set_ylabel("Sub-Optimality")
+        return ax
+
 
 @dataclass
 class InteriorPointMethodResult(OptimizationResult):
@@ -153,9 +166,25 @@ class InteriorPointMethodResult(OptimizationResult):
     equality_multipliers: npt.NDArray[np.float64]
     inequality_multipliers: npt.NDArray[np.float64]
     suboptimality: float
+    duality_gaps: List[float]
     nits: int
     inner_nits: List[int]
     status: Literal[0]
+
+    def plot_convergence(self, ax: Optional[Axes] = None) -> Axes:
+        """Plot convergence."""
+        if ax is None:
+            _, ax = plt.subplots()
+
+        ax.stairs(
+            values=self.duality_gaps,
+            edges=[ii for ii in range(self.nits + 1)],
+            baseline=None,
+        )
+        plt.yscale("log")
+        ax.set_xlabel("Newton Iterations")
+        ax.set_ylabel("Duality Gap")
+        return ax
 
 
 class ProblemCertifiablyInfeasibleError(ProblemInfeasibleError):
@@ -313,11 +342,12 @@ class InteriorPointMethodSolver(Optimizer):
             )
             + 1
         )
-        inner_nits = []
         if self.settings.verbose:
             overall_start_time = time.time()
             print("  Starting IPM")
 
+        inner_nits = []
+        duality_gaps = []
         for ii in range(num_steps):
             if self.settings.verbose:
                 print(f"  {ii:02d} Beginning centering step with {t=:}")
@@ -344,6 +374,7 @@ class InteriorPointMethodSolver(Optimizer):
 
             x = result.solution
             inner_nits.append(result.nits)
+            duality_gaps.append(result.objective_value - result.dual_value)
 
             # w = self.predictor_corrector(w, t)
             t *= self.settings.barrier_multiplier
@@ -368,6 +399,7 @@ class InteriorPointMethodSolver(Optimizer):
             suboptimality=self.num_ineq_constraints
             * self.settings.barrier_multiplier
             / t,
+            duality_gaps=duality_gaps,
             nits=num_steps,
             inner_nits=inner_nits,
             status=0,
@@ -812,11 +844,12 @@ class PhaseIInteriorPointSolver(InteriorPointMethodSolver, PhaseISolver):
             )
             + 1
         )
-        inner_nits = []
         if self.settings.verbose:
             overall_start_time = time.time()
             print("  Starting IPM")
 
+        inner_nits = []
+        duality_gaps = []
         for ii in range(num_steps):
             if self.settings.verbose:
                 print(f"  {ii:02d} Beginning centering step with {t=:}")
@@ -846,6 +879,7 @@ class PhaseIInteriorPointSolver(InteriorPointMethodSolver, PhaseISolver):
             x = result.solution
 
             inner_nits.append(result.nits)
+            duality_gaps.append(result.objective_value - result.dual_value)
             if not fully_optimize and self.is_feasible(x):
                 if self.settings.verbose:
                     print(
@@ -859,7 +893,6 @@ class PhaseIInteriorPointSolver(InteriorPointMethodSolver, PhaseISolver):
             if not fully_optimize:
                 self.check_for_infeasibility(result)
 
-            # w = self.predictor_corrector(w, t)
             t *= self.settings.barrier_multiplier
 
         if self.settings.verbose:
@@ -892,6 +925,7 @@ class PhaseIInteriorPointSolver(InteriorPointMethodSolver, PhaseISolver):
             suboptimality=self.num_ineq_constraints
             * self.settings.barrier_multiplier
             / t,
+            duality_gaps=duality_gaps,
             nits=num_steps,
             inner_nits=inner_nits,
             status=0,
