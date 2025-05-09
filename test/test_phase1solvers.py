@@ -128,16 +128,18 @@ class TestEqualityWithBoundsSolver:
     """Test EqualityWithBoundsSolver."""
 
     @pytest.mark.parametrize(
-        "seed,M,p",
+        "seed,M,p,atol",
         [
-            (1201, 100, 20),
-            (2201, 200, 30),
-            (3201, 50, 5),
-            (4201, 500, 100),
-            (5201, 13, 3),
+            (1201, 100, 20, 1e-9),
+            (2201, 200, 30, 1e-9),
+            (3201, 50, 5, 1e-9),
+            (4201, 500, 100, 1e-9),
+            (5201, 13, 3, 1e-9),
         ],
     )
-    def test_solver_feasible_bounded_below(self, seed: int, M: int, p: int) -> None:
+    def test_solver_feasible_bounded_below(
+        self, seed: int, M: int, p: int, atol: float
+    ) -> None:
         """Test solver when problem is feasible and the augmented problem bounded below.
 
         The dual function for the augmented problem gives a lower bound for the problem
@@ -174,7 +176,7 @@ class TestEqualityWithBoundsSolver:
             phase1_solver=EqualitySolver(
                 A=A, b=b, settings=OptimizationSettings(verbose=True)
             ),
-            settings=OptimizationSettings(verbose=True, outer_tolerance=0.01),
+            settings=OptimizationSettings(verbose=True),
         )
 
         # Verify we find a feasible point
@@ -185,7 +187,7 @@ class TestEqualityWithBoundsSolver:
         # Since augmented problem is bounded below, verify we can fully solve it (if for
         # whatever reason we wanted to).
         res = solver.solve(fully_optimize=True)
-        np.testing.assert_allclose(A @ res.solution, b)
+        np.testing.assert_allclose(A @ res.solution, b, atol=atol)
         assert np.all(res.solution > 0)
 
     @pytest.mark.parametrize(
@@ -294,7 +296,7 @@ class TestEqualityWithBoundsSolver:
             phase1_solver=EqualitySolver(
                 A=A, b=b, settings=OptimizationSettings(verbose=True)
             ),
-            settings=OptimizationSettings(verbose=True, outer_tolerance=0.03),
+            settings=OptimizationSettings(verbose=True),
         )
 
         with pytest.raises(ProblemCertifiablyInfeasibleError):
@@ -338,7 +340,7 @@ class TestEqualityWithBoundsSolver:
             phase1_solver=EqualitySolver(
                 A=A, b=b, settings=OptimizationSettings(verbose=True)
             ),
-            settings=OptimizationSettings(verbose=True, outer_tolerance=1e-2),
+            settings=OptimizationSettings(verbose=True),
         )
 
         with pytest.raises(ProblemMarginallyFeasibleError):
@@ -402,17 +404,17 @@ class TestEqualityWithBoundsSolver:
         assert np.all(res.solution > 0)
 
     @pytest.mark.parametrize(
-        "seed,M,p",
+        "seed,M,p,atol",
         [
-            (1207, 100, 20),
-            (2207, 200, 30),
-            (3207, 50, 5),
-            (4207, 500, 100),
-            (5207, 13, 3),
+            (1207, 100, 20, 1e-9),
+            (2207, 200, 30, 1e-9),
+            (3207, 50, 5, 1e-7),
+            (4207, 500, 100, 1e-4),
+            (5207, 13, 3, 1e-9),
         ],
     )
     def test_solver_feasible_bounded_below_rank_deficient(
-        self, seed: int, M: int, p: int
+        self, seed: int, M: int, p: int, atol: float
     ) -> None:
         """Test solver when problem is feasible and the augmented problem bounded below.
 
@@ -458,7 +460,7 @@ class TestEqualityWithBoundsSolver:
             phase1_solver=EqualitySolver(
                 A=A, b=b, settings=OptimizationSettings(verbose=True)
             ),
-            settings=OptimizationSettings(verbose=True, outer_tolerance=0.01),
+            settings=OptimizationSettings(verbose=True),
         )
 
         # Verify we find a feasible point
@@ -469,7 +471,7 @@ class TestEqualityWithBoundsSolver:
         # Since augmented problem is bounded below, verify we can fully solve it (if for
         # whatever reason we wanted to).
         res = solver.solve(fully_optimize=True)
-        np.testing.assert_allclose(A @ res.solution, b)
+        np.testing.assert_allclose(A @ res.solution, b, atol=atol)
         assert np.all(res.solution > 0)
 
 

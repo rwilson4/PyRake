@@ -7,12 +7,10 @@ import numpy as np
 import numpy.typing as npt
 from scipy import linalg
 
-from .exceptions import (
-    ProblemInfeasibleError,
-)
+from .exceptions import ProblemInfeasibleError
 from .numerical_helpers import (
-    solve_arrow_sparsity_pattern,
-    solve_diagonal,
+    solve_arrow_sparsity_pattern_phase1,
+    solve_diagonal_eta_inverse,
     solve_kkt_system,
 )
 from .optimization import (
@@ -72,6 +70,7 @@ class EqualitySolver(PhaseISolver):
 
         """
         if x0 is not None and np.all(np.abs(self.A @ x0 - self.b) < 1e-10):
+            print("  Initial guess was feasible.")
             return OptimizationResult(solution=x0)
 
         # If A = U * s * Vh, then we seek to solve:
@@ -197,15 +196,26 @@ class EqualityWithBoundsSolver(PhaseIInteriorPointSolver):
 
     def finalize_solution(self, x: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
         """De-augment solution."""
-        return x[0:-1]
+        return x[0 : self.dimension]
 
     def initialize_barrier_parameter(self, x0: npt.NDArray[np.float64]) -> float:
-        """Initialize barrier parameter."""
-        return max(
-            1.0,
-            self.num_ineq_constraints
-            / max(self.settings.outer_tolerance, x0[self.dimension]),
-        )
+        r"""Initialize barrier parameter.
+
+        We try 2 different approaches to initializing the barrier parameter, based on
+        the discussion in Boyd and Vandenberghe, section 11.3.1.
+          1. Choose t0 so that m / t0 is of the same order as f0(x0) - p_star,
+             where m is the number of inequality constraints. Since f0 = s, and the
+             happy path is p_star < 0 for a feasible solution, f0(x0) - p_star > s0.
+             Thus, we want m / t0 > s0, or t0 < m / s0.
+          2. Choose t0 to minimize the deviation of x0 from x^\star(t0). This ends up
+             being a least squares equation (Eq 11.12), and is quite a bit more
+             complicated, but ends up having a fairly simple formula.
+
+        """
+        M = self.dimension
+        t1 = self.num_ineq_constraints / max(self.settings.outer_tolerance, x0[M])
+        t2 = np.sum(1.0 / (x0[0:M] + x0[M])) - M / 1.0
+        return max(1.0, t1, t2)
 
     def calculate_newton_step(
         self,
@@ -248,10 +258,9 @@ class EqualityWithBoundsSolver(PhaseIInteriorPointSolver):
         return solve_kkt_system(
             A=np.hstack((self.A, np.zeros((self.num_eq_constraints, 1)))),
             g=-self.gradient_barrier(x, t),
-            hessian_solve=solve_arrow_sparsity_pattern,
-            eta=self._hessian_ft_diagonal(x, t),
-            zeta=self._hessian_ft_edge(x),
-            theta=self._hessian_ft_corner(x, t),
+            hessian_solve=solve_arrow_sparsity_pattern_phase1,
+            eta_inverse=self._hessian_ft_diagonal_inverse(x, t),
+            one_over_psi_squared=self._hessian_one_over_psi_squared(x),
         )
 
     def btls_keep_feasible(
@@ -269,15 +278,13 @@ class EqualityWithBoundsSolver(PhaseIInteriorPointSolver):
         are feasible (so w + s > 0). So we're only concerned with entries i having
         delta_w[i] + delta_s < 0, in which case we need
             btls_s < (w[i] + s) / -(delta_w[i] + delta_s),
-        so we set btls_s as the minimum of these quantities. If this minimum > 1, we
-        just set btls_s = 1.0. If all entries satisfy delta_w + delta_s >= 0, we just
-        set btls_s = 1.
+        so we set btls_s as the minimum of these quantities. If all entries satisfy
+        delta_w + delta_s >= 0, this constraint is not active.
 
         Similarly, if delta_s <= 0, there's no problem since s is strictly feasible. But
         if delta_s > 0, we want btls_s < ((s0 + eps) - s) / delta_s
 
         """
-        beta = self.settings.backtracking_beta
         M = self.dimension
         w = x[0:M]
         s = x[M]
@@ -289,12 +296,10 @@ class EqualityWithBoundsSolver(PhaseIInteriorPointSolver):
         #   w + btls_s * delta_w > -s - btls_s * delta_s
         #   s + btls_s * delta_s < s0 + eps
         btls_s = min(
-            1.0,
-            beta
-            * np.min(
+            np.min(
                 np.where(delta_w + delta_s < 0, (w + s) / -(delta_w + delta_s), np.inf)
             ),
-            beta * (self.s0_plus_eps - s) / delta_s if delta_s > 0 else np.inf,
+            (self.s0_plus_eps - s) / delta_s if delta_s > 0 else np.inf,
         )
 
         return btls_s
@@ -365,12 +370,13 @@ class EqualityWithBoundsSolver(PhaseIInteriorPointSolver):
 
 
         """
+        M = self.dimension
         eta = self._hessian_ft_diagonal(x, t)
         zeta = self._hessian_ft_edge(x)
-        theta = self._hessian_ft_corner(x, t)
+        theta = self._hessian_ft_corner(x)
         Hy = np.zeros_like(y)
-        Hy[0:-1] = eta * y[0:-1] + y[-1] * zeta
-        Hy[-1] = np.dot(zeta, y[0:-1]) + theta * y[-1]
+        Hy[0:M] = eta * y[0:M] + y[M] * zeta
+        Hy[M] = np.dot(zeta, y[0:M]) + theta * y[M]
         return Hy
 
     def _hessian_ft_diagonal(
@@ -397,6 +403,15 @@ class EqualityWithBoundsSolver(PhaseIInteriorPointSolver):
         s = x[M]
         return np.square(1.0 / (w + np.full_like(w, s)))
 
+    def _hessian_ft_diagonal_inverse(
+        self, x: npt.NDArray[np.float64], t: float
+    ) -> npt.NDArray[np.float64]:
+        """Numerically stable version of eta^{-1}."""
+        M = self.dimension
+        w = x[0:M]
+        s = x[M]
+        return np.square(w + np.full_like(w, s))
+
     def _hessian_ft_edge(self, x: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
         """Calculate last row/column of Hessian of ft at x."""
         M = self.dimension
@@ -404,7 +419,7 @@ class EqualityWithBoundsSolver(PhaseIInteriorPointSolver):
         s = x[M]
         return np.square(1.0 / (w + np.full_like(w, s)))
 
-    def _hessian_ft_corner(self, x: npt.NDArray[np.float64], t: float) -> float:
+    def _hessian_ft_corner(self, x: npt.NDArray[np.float64]) -> float:
         """Calculate bottom right corner of Hessian of ft at x."""
         M = self.dimension
         w = x[0:M]
@@ -412,6 +427,11 @@ class EqualityWithBoundsSolver(PhaseIInteriorPointSolver):
         return (M * ((1.0 / (self.s0_plus_eps - s)) ** 2)) + np.sum(
             np.square(1.0 / (w + np.full_like(w, s)))
         )
+
+    def _hessian_one_over_psi_squared(self, x: npt.NDArray[np.float64]) -> float:
+        M = self.dimension
+        s0_plus_eps_minus_s = self.s0_plus_eps - x[M]
+        return (s0_plus_eps_minus_s * s0_plus_eps_minus_s) / M
 
     def constraints(self, x: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
         """Calculate the vector of constraints, fi(x) <= 0.
@@ -480,26 +500,14 @@ class EqualityWithBoundsSolver(PhaseIInteriorPointSolver):
         -infinity otherwise.
 
         """
-        # print(lmbda[0:-1] - self.A.T @ nu)
-        # print(self.dimension * lmbda[-1], sum(lmbda[0:-1]) - 1)
-        # print(np.max(abs(lmbda[0:-1] - self.A.T @ nu)), abs(self.dimension * lmbda[-1] - (sum(lmbda[0:-1]) - 1)))
-        # assert 1 == 2
-        if not np.allclose(lmbda[0 : self.dimension], self.A.T @ nu, atol=1e-3):
+        M = self.dimension
+        if not np.allclose(lmbda[0:M], self.A.T @ nu, atol=1e-3):
             return -np.inf
 
-        if (
-            abs(
-                self.dimension * lmbda[self.dimension]
-                - (np.sum(lmbda[0 : self.dimension]) - 1)
-            )
-            > 1e-3
-        ):
+        if abs(M * lmbda[M] - (np.sum(lmbda[0:M]) - 1)) > 1e-3:
             return -np.inf
 
-        return (
-            -np.dot(self.b, nu)
-            - self.dimension * lmbda[self.dimension] * self.s0_plus_eps
-        )
+        return -np.dot(self.b, nu) - M * lmbda[M] * self.s0_plus_eps
 
 
 class EqualityWithBoundsAndNormConstraintSolver(PhaseIInteriorPointSolver):
@@ -591,12 +599,61 @@ class EqualityWithBoundsAndNormConstraintSolver(PhaseIInteriorPointSolver):
             )
 
     def initialize_barrier_parameter(self, x0: npt.NDArray[np.float64]) -> float:
-        """Initialize barrier parameter."""
-        return max(
-            1.0,
-            self.num_ineq_constraints
-            / max(self.settings.outer_tolerance, np.dot(x0, x0)),
+        r"""Initialize barrier parameter.
+
+        We try 2 different approaches to initializing the barrier parameter, based on
+        the discussion in Boyd and Vandenberghe, section 11.3.1.
+          1. Choose t0 so that m / t0 is of the same order as f0(x0) - p_star,
+             where m is the number of inequality constraints. Since f0 = \| x \|^2,
+             p_star is at least 0, so f0(x0) - p_star <= \| x0 \|_2^2. Thus, we want
+             m / t0 = \| x0 \|_2^2, or t0 = m / \| x0 \|_2^2.
+          2. Choose t0 to minimize the deviation of x0 from x^\star(t0). This ends up
+             being a least squares equation (Eq 11.12), and is quite a bit more
+             complicated.
+
+        """
+        t1 = self.num_ineq_constraints / max(
+            self.settings.outer_tolerance, np.dot(x0, x0)
         )
+
+        delta_phi = -(self.grad_constraints(x0).T @ (1.0 / self.constraints(x0)))
+        delta_f0 = self.gradient(x0)
+        A_delta_phi = self.A @ delta_phi
+        A_delta_f0 = self.A @ delta_f0
+
+        # z_phi = (A * A^T)^{-1} * A * delta_phi
+        # Singular Value Decomposition: A = U * diag(s) * V^T,
+        # where U is p-by-r (r is the rank of A), s is length r, V is M-by-r.
+        # Since the columns of U and V are orthonormal, U^T U = V^T V = I_r,
+        # but in general U * U^T does not equal I_p and V^T * V does not equal I_M.
+        #
+        # A * A^T = U * diag(s) * V^T * V * diag(s) * U^T
+        #            = U * diag(s^2) * U^T
+        # A * A^T * z_phi = A * delta_phi
+        # -> U * diag(s^2) * U^T * z_phi = A * delta_phi
+        # -> diag(s^2) * U^T * z_phi = U^T * A * delta_phi
+        # -> U^T * z_phi = diag(s^{-2}) * U^T * A * delta_phi
+        #
+        # Now, in general U * U^T does not equal I_p, but if we *define*
+        # z_phi = U * diag(s^{-2}) * U^T * A * delta_phi,
+        # then U^T * z_phi = U^T * U * diag(s^{-2}) * U^T * A * delta_phi
+        #                  = diag(s^{-2}) * U^T * A * delta_phi,
+        # so this z_phi satisfies the equation, and is the minimum norm solution.
+        #
+        # When A has full row rank, z_phi is the *unique* solution to the equation,
+        # but this strategy works even when A is rank deficient.
+        U, s, Vh = linalg.svd(self.A, full_matrices=False)
+        rank = int(np.sum(s > 1e-5))
+        U = U[:, 0:rank]
+        s = s[0:rank]
+        z_phi = U @ ((U.T @ A_delta_phi) / np.square(s))
+        z_f0 = U @ ((U.T @ A_delta_f0) / np.square(s))
+
+        t2 = -(
+            (np.dot(delta_f0, delta_phi) - np.dot(A_delta_f0, z_phi))
+            / (np.dot(delta_f0, delta_f0) - np.dot(A_delta_f0, z_f0))
+        )
+        return max(1.0, t1, t2)
 
     def calculate_newton_step(
         self,
@@ -639,8 +696,8 @@ class EqualityWithBoundsAndNormConstraintSolver(PhaseIInteriorPointSolver):
         return solve_kkt_system(
             A=self.A,
             g=-self.gradient_barrier(x, t),
-            hessian_solve=solve_diagonal,
-            eta=self._hessian_ft_diagonal(x, t),
+            hessian_solve=solve_diagonal_eta_inverse,
+            eta_inverse=self._hessian_ft_diagonal_inverse(x, t),
         )
 
     def btls_keep_feasible(
@@ -654,18 +711,11 @@ class EqualityWithBoundsAndNormConstraintSolver(PhaseIInteriorPointSolver):
         entries having delta_x[i] < 0, for which we want:
            btls_s < x[i] / -delta_x[i].
         We want this for all i having delta_x[i] < 0, so we set btls_s as the minimum of
-        these quantities. If this minimum > 1, we just set btls_s = 1.0 If all entries
-        of delta_x > 0, we just set btls_s = 1.
+        these quantities.
 
 
         """
-        beta = self.settings.backtracking_beta
-        btls_s = min(
-            1.0,
-            beta * np.min(np.where(delta_x < 0, x / -delta_x, np.inf)),
-        )
-
-        return btls_s
+        return np.min(np.where(delta_x < 0, x / -delta_x, np.inf))
 
     def evaluate_objective(self, x: npt.NDArray[np.float64]) -> float:
         """Calculate f0 at x."""
@@ -697,6 +747,24 @@ class EqualityWithBoundsAndNormConstraintSolver(PhaseIInteriorPointSolver):
     ) -> npt.NDArray[np.float64]:
         """Calculate diagonal component of Hessian of ft at x."""
         return 2.0 * t + np.square(1.0 / x)
+
+    def _hessian_ft_diagonal_inverse(
+        self, x: npt.NDArray[np.float64], t: float
+    ) -> npt.NDArray[np.float64]:
+        """Calculate diagonal component of Hessian of ft at x."""
+        # eta[i]^{-1} = x[i]^2 / (2 * t * x[i]^2 + 1)
+        #
+        # We have numerical stability issues when t is large and x is close to 0. In
+        # this case, calculating t * x^2 as (sqrt(t) * x)^2 involves multiplying a big
+        # number times a small number, giving a reasonable number, then squaring that.
+        #
+        # Calculating den = (2 * t * x[i]^2 + 1) = 2 * tx2[i] + 1 offers no further
+        # challenges.
+        #
+        # Calculating x[i]^2 / den may underflow, but calculating x[i] / sqrt(den), and
+        # then squaring that, may improve stability.
+        tx2 = np.square(np.sqrt(t) * x)
+        return np.square(x / np.sqrt(2.0 * tx2 + 1.0))
 
     def constraints(self, x: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
         """Calculate the vector of constraints, fi(x) <= 0.

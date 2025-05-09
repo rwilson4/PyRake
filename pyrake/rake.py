@@ -4,10 +4,11 @@ from typing import Optional, Tuple
 
 import numpy as np
 import numpy.typing as npt
+from scipy import linalg
 
 from .distance_metrics import Distance
 from .numerical_helpers import (
-    solve_diagonal_plus_rank_one,
+    solve_diagonal_plus_rank_one_eta_inverse,
     solve_kkt_system,
 )
 from .optimization import (
@@ -68,7 +69,7 @@ class Rake(InteriorPointMethodSolver):
                 raise ValueError("constrain_mean_weight_to must be positive or None.")
 
             # Add a column of ones to X
-            self.X = np.column_stack((X, np.ones(M)))
+            self.X = np.hstack((X, np.ones((M, 1))))
             # Append the new mean constraint value to mu
             self.mu = np.append(mu, constrain_mean_weight_to)
             self.covariates_balanced = p + 1
@@ -114,11 +115,48 @@ class Rake(InteriorPointMethodSolver):
         # the suboptimality of w. Since the distance metric is always non-negative, the
         # sub-optimality is at most D(w, v). Always do at least 1 step so we get the
         # Lagrange multipliers.
-        return max(
-            1.0,
-            self.num_ineq_constraints
-            / max(self.settings.outer_tolerance, self.distance.evaluate(x0)),
+        t1 = self.num_ineq_constraints / max(
+            self.settings.outer_tolerance, self.distance.evaluate(x0)
         )
+
+        delta_phi = -(self.grad_constraints(x0).T @ (1.0 / self.constraints(x0)))
+        delta_f0 = self.gradient(x0)
+        A_delta_phi = (1 / self.dimension) * (self.X.T @ delta_phi)
+        A_delta_f0 = (1 / self.dimension) * (self.X.T @ delta_f0)
+
+        # z_phi = (A * A^T)^{-1} * A * delta_phi
+        # Singular Value Decomposition: A = U * diag(s) * V^T,
+        # where U is p-by-r (r is the rank of A), s is length r, V is M-by-r.
+        # Since the columns of U and V are orthonormal, U^T U = V^T V = I_r,
+        # but in general U * U^T does not equal I_p and V^T * V does not equal I_M.
+        #
+        # A * A^T = U * diag(s) * V^T * V * diag(s) * U^T
+        #            = U * diag(s^2) * U^T
+        # A * A^T * z_phi = A * delta_phi
+        # -> U * diag(s^2) * U^T * z_phi = A * delta_phi
+        # -> diag(s^2) * U^T * z_phi = U^T * A * delta_phi
+        # -> U^T * z_phi = diag(s^{-2}) * U^T * A * delta_phi
+        #
+        # Now, in general U * U^T does not equal I_p, but if we *define*
+        # z_phi = U * diag(s^{-2}) * U^T * A * delta_phi,
+        # then U^T * z_phi = U^T * U * diag(s^{-2}) * U^T * A * delta_phi
+        #                  = diag(s^{-2}) * U^T * A * delta_phi,
+        # so this z_phi satisfies the equation, and is the minimum norm solution.
+        #
+        # When A has full row rank, z_phi is the *unique* solution to the equation,
+        # but this strategy works even when A is rank deficient.
+        U, s, Vh = linalg.svd((1 / self.dimension) * self.X.T, full_matrices=False)
+        rank = int(np.sum(s > 1e-5))
+        U = U[:, 0:rank]
+        s = s[0:rank]
+        z_phi = U @ ((U.T @ A_delta_phi) / np.square(s))
+        z_f0 = U @ ((U.T @ A_delta_f0) / np.square(s))
+
+        t2 = -(
+            (np.dot(delta_f0, delta_phi) - np.dot(A_delta_f0, z_phi))
+            / (np.dot(delta_f0, delta_f0) - np.dot(A_delta_f0, z_f0))
+        )
+        return max(1.0, t1, t2)
 
     def calculate_newton_step(
         self, x: npt.NDArray[np.float64], t: float
@@ -161,8 +199,8 @@ class Rake(InteriorPointMethodSolver):
         return solve_kkt_system(
             A=(1.0 / self.dimension) * self.X.T,
             g=-self.gradient_barrier(x, t),
-            hessian_solve=solve_diagonal_plus_rank_one,
-            eta=self._hessian_ft_diagonal(x, t),
+            hessian_solve=solve_diagonal_plus_rank_one_eta_inverse,
+            eta_inverse=self._hessian_ft_diagonal_inverse(x, t),
             zeta=self._hessian_ft_rank_one(x),
         )
 
@@ -189,7 +227,6 @@ class Rake(InteriorPointMethodSolver):
         is no need to enforce a lower bound.
 
         """
-        beta = self.settings.backtracking_beta
         M = self.dimension
 
         quad_a = np.dot(delta_x, delta_x)
@@ -200,10 +237,10 @@ class Rake(InteriorPointMethodSolver):
         )
 
         btls_s = min(
-            1.0,
-            beta * -np.max(np.where(delta_x < 0, x / delta_x, -np.inf)),
-            beta * btls_s_high,
+            -np.max(np.where(delta_x < 0, x / delta_x, -np.inf)),
+            btls_s_high,
         )
+
         return btls_s
 
     def evaluate_objective(self, x: npt.NDArray[np.float64]) -> float:
@@ -218,10 +255,9 @@ class Rake(InteriorPointMethodSolver):
         self, x: npt.NDArray[np.float64], t: float
     ) -> npt.NDArray[np.float64]:
         """Calculate gradient of ft at x."""
-        den = 1.0 - (1.0 / (self.dimension * self.phi)) * np.dot(x, x)
         return (
             t * self.distance.gradient(x)
-            - (2.0 / (den * self.dimension * self.phi)) * x
+            + (2.0 / (self.dimension * self.phi - np.dot(x, x))) * x
             - 1.0 / x
         )
 
@@ -242,21 +278,30 @@ class Rake(InteriorPointMethodSolver):
         self, x: npt.NDArray[np.float64], t: float
     ) -> npt.NDArray[np.float64]:
         """Calculate diagonal component of Hessian of ft at w."""
-        M = self.dimension
-        den = 1.0 - (1.0 / (M * self.phi)) * np.dot(x, x)
+        M_phi_den = self.dimension * self.phi - np.dot(x, x)
         return (
             t * self.distance.hessian_diagonal(x)
-            + np.full_like(x, 2.0 / (M * self.phi * den))
+            + np.full_like(x, 2.0 / M_phi_den)
             + np.square(1.0 / x)
         )
+
+    def _hessian_ft_diagonal_inverse(
+        self, x: npt.NDArray[np.float64], t: float
+    ) -> npt.NDArray[np.float64]:
+        """Calculate diagonal component of Hessian of ft at w."""
+        M_phi_den = self.dimension * self.phi - np.dot(x, x)
+
+        tx2 = np.square(
+            np.sqrt(t * self.distance.hessian_diagonal(x) + 2.0 / M_phi_den) * x
+        )
+        return np.square(x / np.sqrt(1.0 + tx2))
 
     def _hessian_ft_rank_one(
         self, x: npt.NDArray[np.float64]
     ) -> npt.NDArray[np.float64]:
         """Calculate rank one component of Hessian of ft at w."""
-        M = self.dimension
-        den = 1.0 - (1.0 / (M * self.phi)) * np.dot(x, x)
-        return x * (2.0 / (M * self.phi * den))
+        M_phi_den = self.dimension * self.phi - np.dot(x, x)
+        return x * (2.0 / M_phi_den)
 
     def constraints(self, x: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
         r"""Calculate the vector of constraints, fi(x) <= 0.
@@ -330,41 +375,50 @@ class Rake(InteriorPointMethodSolver):
         npt.NDArray[np.float64]
             The predicted weights for the next barrier parameter.
 
+        Notes
+        -----
+        This function is experimental. In principle, it should reduce the number of
+        Newton steps required, but in practice it *increase* the number of steps, and
+        seems to destabilize the problem, in the sense that the predicted step is
+        actually worse than just using the result of the last centering step. I'm
+        keeping it for now to keep playing with it.
+
         """
+        return x
         # 1. Calculate the gradient of ft at w
         grad_ft = self.gradient_barrier(x, t)
 
         # 2. Compute the Hessian diagonal and rank one component
-        eta = self._hessian_ft_diagonal(x, t)
+        eta_inverse = self._hessian_ft_diagonal_inverse(x, t)
         zeta = self._hessian_ft_rank_one(x)
 
         # 3. Solve for dx/dt
         dx_dt, _ = solve_kkt_system(
             A=(1.0 / self.dimension) * self.X.T,
             g=-grad_ft,
-            hessian_solve=solve_diagonal_plus_rank_one,
-            eta=eta,
+            hessian_solve=solve_diagonal_plus_rank_one_eta_inverse,
+            eta_inverse=eta_inverse,
             zeta=zeta,
         )
-        # try:
-        #     np.testing.assert_allclose(
-        #         (1 / self.dimension) * (self.X.T @ dx_dt)),
-        #         np.zeros_like(self.mu),
-        #     )
-        # except AssertionError as e:
-        #     print(e)
+        try:
+            np.testing.assert_allclose(
+                (1 / self.dimension) * (self.X.T @ dx_dt),
+                np.zeros_like(self.mu),
+                atol=1e-9,
+            )
+        except AssertionError as e:
+            print(e)
 
-        # 4. Calculate the barrier multiplier mu from settings
-        mu = self.settings.barrier_multiplier
-
-        # 5. Use the predictor formula to calculate the next weights
+        # 4. Use the predictor formula to calculate the next weights
         # x_star(t) + (dx^star(t) / dt) * (mu * t - t)
-        predicted_weights = x + dx_dt * (mu * t - t)
+        predicted_weights = x + dx_dt * t * (self.settings.barrier_multiplier - 1)
         try:
             np.testing.assert_allclose(
                 (1 / self.dimension) * (self.X.T @ predicted_weights) - self.mu,
                 np.zeros_like(self.mu),
+                atol=1e-9,
             )
         except AssertionError as e:
             print(e)
+
         return predicted_weights

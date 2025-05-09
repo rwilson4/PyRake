@@ -1,5 +1,7 @@
 """Custom exceptions."""
 
+from typing import Optional
+
 import numpy as np
 import numpy.typing as npt
 
@@ -110,6 +112,18 @@ class OptimizationError(Exception):
 
 class CenteringStepError(OptimizationError):
     """Raised when centering step fails."""
+
+    def __init__(
+        self,
+        message: str,
+        suboptimality: float,
+        last_iterate: npt.NDArray[np.float64],
+        equality_multipliers: Optional[npt.NDArray[np.float64]] = None,
+        inequality_multipliers: Optional[npt.NDArray[np.float64]] = None,
+    ) -> None:
+        super().__init__(message, suboptimality, last_iterate)
+        self.equality_multipliers = equality_multipliers
+        self.inequality_multipliers = inequality_multipliers
 
 
 class InteriorPointMethodError(OptimizationError):

@@ -7,25 +7,50 @@ from .exceptions import (
     CenteringStepError,
     InteriorPointMethodError,
     InvalidDescentDirectionError,
+    NewtonStepError,
+    OptimizationError,
     ProblemInfeasibleError,
     SevereCurvatureError,
 )
 from .frontier import EfficientFrontier, EfficientFrontierResults
-from .rake import OptimizationSettings, Rake
+from .optimization import (
+    InteriorPointMethodResult,
+    InteriorPointMethodSolver,
+    NewtonResult,
+    OptimizationResult,
+    OptimizationSettings,
+    Optimizer,
+    PhaseIInteriorPointSolver,
+    PhaseISolver,
+    ProblemCertifiablyInfeasibleError,
+    ProblemMarginallyFeasibleError,
+)
+from .rake import Rake
 
 __all__ = [
     "Rake",
-    "KLDivergence",
     "Huber",
+    "KLDivergence",
     "SquaredL2",
     "OptimizationSettings",
     "EfficientFrontier",
     "EfficientFrontierResults",
+    "InteriorPointMethodResult",
+    "NewtonResult",
+    "OptimizationResult",
+    "Optimizer",
+    "PhaseISolver",
+    "InteriorPointMethodSolver",
+    "PhaseIInteriorPointSolver",
     "BacktrackingLineSearchError",
     "CenteringStepError",
     "ConstraintBoundaryError",
     "InteriorPointMethodError",
     "InvalidDescentDirectionError",
+    "NewtonStepError",
+    "OptimizationError",
+    "ProblemCertifiablyInfeasibleError",
+    "ProblemMarginallyFeasibleError",
     "ProblemInfeasibleError",
     "SevereCurvatureError",
 ]
