@@ -1,18 +1,33 @@
 """Test Rake."""
 
-import matplotlib.pyplot as plt
+import time
+
 import numpy as np
 import pytest
+from scipy.special import logit, expit
 
 from pyrake.distance_metrics import KLDivergence, SquaredL2, Huber
-from pyrake.exceptions import ProblemInfeasibleError
-from pyrake.optimization import InteriorPointMethodResult, OptimizationSettings
+from pyrake.optimization import (
+    InteriorPointMethodResult,
+    OptimizationSettings,
+    ProblemCertifiablyInfeasibleError,
+)
 from pyrake.rake import Rake
 
 
-def test_rake_solve() -> None:
-    np.random.seed(23)
-    M, p = 100, 20
+@pytest.mark.parametrize(
+    "seed,M,p,phi",
+    [
+        (101, 100, 20, 2.0),
+        (201, 200, 30, 1.5),
+        (301, 50, 5, 1.5),
+        (401, 500, 100, 1.5),
+        (501, 13, 3, 1.5),
+    ],
+)
+def test_rake_solve_kl_divergence(seed: int, M: int, p: int, phi: float) -> None:
+    """Test problems with KL Divergence as objective."""
+    np.random.seed(seed)
     X = np.random.rand(M, p)
 
     # To generate population mean, simulate true propensity scores with mean 0.1 and
@@ -33,8 +48,7 @@ def test_rake_solve() -> None:
 
     # Now forget we know w. We just know X for respondents and mu for the target
     # population.
-    phi = 1.5
-
+    start_time = time.time()
     rake = Rake(
         distance=KLDivergence(),
         X=X,
@@ -43,35 +57,244 @@ def test_rake_solve() -> None:
         settings=OptimizationSettings(verbose=True),
     )
     res = rake.solve()
-    # if isinstance(res, InteriorPointMethodResult):
-    #     res.plot_convergence()
-    #     plt.show()
+    end_time = time.time()
+    print(f"Complete in {1e3 * (end_time - start_time):.03f} ms")
 
+    # Verify solution is feasible
+    np.testing.assert_allclose((1 / M) * X.T @ res.solution, mu)
+    assert np.all(res.solution > 0)
+    assert np.dot(res.solution, res.solution) < M * phi
 
-@pytest.mark.parametrize("dist", [KLDivergence(), SquaredL2(), Huber()])
-def test_rake_solve_returns_feasible_weights(dist) -> None:
-    np.random.seed(0)
-    M, p = 200, 5
-    X = np.random.rand(M, p)
-    mu = X.mean(axis=0)
-    phi = 1.5
+    assert isinstance(res, InteriorPointMethodResult)
+    assert res.duality_gaps[-1] <= 1e-6
 
-    rake = Rake(distance=dist, X=X, mu=mu, phi=phi, constrain_mean_weight_to=None)
+    # Now test specifying baseline weights
+    estimated_propensity = expit(logit(true_propensity) + 0.1 * np.random.randn(M))
+
+    start_time = time.time()
+    rake = Rake(
+        distance=KLDivergence(v=1.0 / estimated_propensity),
+        X=X,
+        mu=mu,
+        phi=phi,
+        settings=OptimizationSettings(verbose=True),
+    )
     res = rake.solve()
-    w = res.solution
+    end_time = time.time()
+    print(f"Complete in {1e3 * (end_time - start_time):.03f} ms")
 
-    # Feasibility checks
-    assert np.all(w > 0)
-    np.testing.assert_allclose((X.T @ w) / M, mu, atol=1e-6)
-    assert np.sum(w**2) / M < phi + 1e-6
+    # Verify solution is feasible
+    np.testing.assert_allclose((1 / M) * X.T @ res.solution, mu)
+    assert np.all(res.solution > 0)
+    assert np.dot(res.solution, res.solution) < M * phi
+
+    assert isinstance(res, InteriorPointMethodResult)
+    assert res.duality_gaps[-1] <= 1e-6
 
 
-def test_phase1_infeasible() -> None:
-    X = np.array([[1.0, 2.0], [3.0, 4.0]])
-    mu = np.array([100.0, 100.0])  # clearly infeasible
-    phi = 1.0
-    dist = SquaredL2()
-    rake = Rake(distance=dist, X=X, mu=mu, phi=phi, constrain_mean_weight_to=None)
+@pytest.mark.parametrize(
+    "seed,M,p,phi",
+    [
+        (102, 100, 20, 2.0),
+        (202, 200, 30, 2.0),
+        (302, 50, 5, 2.0),
+        (402, 500, 100, 2.0),
+        (502, 13, 3, 2.0),
+    ],
+)
+def test_rake_solve_squaredl2(seed: int, M: int, p: int, phi: float) -> None:
+    """Test problems with SquaredL2 as objective."""
+    np.random.seed(seed)
+    X = np.random.rand(M, p)
 
-    with pytest.raises(ProblemInfeasibleError):
+    # To generate population mean, simulate true propensity scores with mean 0.1 and
+    # variance 0.0045
+    q = 0.1
+    sigma2 = 0.05 * q * (1 - q)
+    s = q * (1 - q) / sigma2 - 1
+    alpha = q * s
+    beta = (1 - q) * s
+    true_propensity = np.random.beta(alpha, beta, size=M)
+
+    # Ideal weights are (M/N) / true_propensity, but to make it simple, do:
+    w = 1.0 / true_propensity
+    w /= np.mean(w)
+
+    # Compute population mean
+    mu = (1 / M) * (X.T @ w)
+
+    # Now forget we know w. We just know X for respondents and mu for the target
+    # population.
+    start_time = time.time()
+    rake = Rake(
+        distance=SquaredL2(),
+        X=X,
+        mu=mu,
+        phi=phi,
+        settings=OptimizationSettings(verbose=True),
+    )
+    res = rake.solve()
+    end_time = time.time()
+    print(f"Complete in {1e3 * (end_time - start_time):.03f} ms")
+
+    # Verify solution is feasible
+    np.testing.assert_allclose((1 / M) * X.T @ res.solution, mu)
+    assert np.all(res.solution > 0)
+    assert np.dot(res.solution, res.solution) < M * phi
+
+    assert isinstance(res, InteriorPointMethodResult)
+    assert res.duality_gaps[-1] <= 1e-6
+
+    # Now test specifying baseline weights
+    estimated_propensity = expit(logit(true_propensity) + 0.1 * np.random.randn(M))
+
+    start_time = time.time()
+    rake = Rake(
+        distance=SquaredL2(v=1.0 / estimated_propensity),
+        X=X,
+        mu=mu,
+        phi=phi,
+        settings=OptimizationSettings(verbose=True),
+    )
+    res = rake.solve()
+    end_time = time.time()
+    print(f"Complete in {1e3 * (end_time - start_time):.03f} ms")
+
+    # Verify solution is feasible
+    np.testing.assert_allclose((1 / M) * X.T @ res.solution, mu)
+    assert np.all(res.solution > 0)
+    assert np.dot(res.solution, res.solution) < M * phi
+
+    assert isinstance(res, InteriorPointMethodResult)
+    assert res.duality_gaps[-1] <= 1e-6
+
+
+@pytest.mark.parametrize(
+    "seed,M,p,phi",
+    [
+        (103, 100, 20, 1.5),
+        (203, 200, 30, 1.5),
+        (303, 50, 5, 2.0),
+        (403, 500, 100, 2.5),
+        (503, 13, 3, 1.5),
+    ],
+)
+def test_rake_solve_huber(seed: int, M: int, p: int, phi: float) -> None:
+    """Test problems with Huber as objective."""
+    np.random.seed(seed)
+    X = np.random.rand(M, p)
+
+    # To generate population mean, simulate true propensity scores with mean 0.1 and
+    # variance 0.0045
+    q = 0.1
+    sigma2 = 0.05 * q * (1 - q)
+    s = q * (1 - q) / sigma2 - 1
+    alpha = q * s
+    beta = (1 - q) * s
+    true_propensity = np.random.beta(alpha, beta, size=M)
+
+    # Ideal weights are (M/N) / true_propensity, but to make it simple, do:
+    w = 1.0 / true_propensity
+    w /= np.mean(w)
+
+    # Compute population mean
+    mu = (1 / M) * (X.T @ w)
+
+    # Now forget we know w. We just know X for respondents and mu for the target
+    # population.
+    start_time = time.time()
+    rake = Rake(
+        distance=Huber(),
+        X=X,
+        mu=mu,
+        phi=phi,
+        settings=OptimizationSettings(verbose=True),
+    )
+    res = rake.solve()
+    end_time = time.time()
+    print(f"Complete in {1e3 * (end_time - start_time):.03f} ms")
+
+    # Verify solution is feasible
+    np.testing.assert_allclose((1 / M) * X.T @ res.solution, mu)
+    assert np.all(res.solution > 0)
+    assert np.dot(res.solution, res.solution) < M * phi
+
+    assert isinstance(res, InteriorPointMethodResult)
+    assert res.duality_gaps[-1] <= 1e-6
+
+    # Now test specifying baseline weights
+    estimated_propensity = expit(logit(true_propensity) + 0.1 * np.random.randn(M))
+
+    start_time = time.time()
+    rake = Rake(
+        distance=Huber(v=1.0 / estimated_propensity),
+        X=X,
+        mu=mu,
+        phi=phi,
+        settings=OptimizationSettings(verbose=True),
+    )
+    res = rake.solve()
+    end_time = time.time()
+    print(f"Complete in {1e3 * (end_time - start_time):.03f} ms")
+
+    # Verify solution is feasible
+    np.testing.assert_allclose((1 / M) * X.T @ res.solution, mu)
+    assert np.all(res.solution > 0)
+    assert np.dot(res.solution, res.solution) < M * phi
+
+    assert isinstance(res, InteriorPointMethodResult)
+    assert res.duality_gaps[-1] <= 1e-6
+
+
+@pytest.mark.parametrize(
+    "seed,M,p",
+    [
+        (1203, 100, 20),
+        (2203, 200, 30),
+        (3203, 50, 5),
+        (4203, 500, 100),
+        (5203, 13, 3),
+    ],
+)
+def test_rake_solve_infeasible(seed: int, M: int, p: int) -> None:
+    """Test a scenario where the problem is infeasible.
+
+    See test_phase1solvers.py::TestEqualityWithBoundsSolver::test_solver_infeasible.
+
+    """
+    np.random.seed(seed)
+    nu = np.random.randn(p)
+
+    # Construct A such that A^T nu >= 0
+    A = np.random.randn(p, M)
+    for ic in range(M):
+        if np.dot(A[:, ic], nu) < 0:
+            A[:, ic] = -A[:, ic]
+
+    assert np.all(A.T @ nu >= 0)
+
+    # Scale A such that c^T * nu = 1
+    A /= np.dot(A @ np.ones((M,)), nu)
+    assert np.all(A.T @ nu >= 0)
+    assert abs(np.dot(A @ np.ones((M,)), nu) - 1) <= 1e-6
+
+    # Construct b such that b^T nu < 0.
+    b = np.random.randn(p)
+    alpha = np.dot(nu, b) / np.dot(nu, nu)
+    b = b - (alpha + 0.1) * nu
+    assert np.all(A.T @ nu >= 0)
+    assert abs(np.dot(A @ np.ones((M,)), nu) - 1) <= 1e-6
+    assert np.dot(b, nu) < 0
+
+    phi = 1_000.0
+
+    rake = Rake(
+        distance=Huber(),
+        X=M * A.T,
+        mu=b,
+        phi=phi,
+        settings=OptimizationSettings(verbose=True),
+    )
+
+    with pytest.raises(ProblemCertifiablyInfeasibleError):
         rake.solve()

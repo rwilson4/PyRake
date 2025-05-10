@@ -76,7 +76,7 @@ class OptimizationSettings:
     barrier_multiplier: float = 10.0
     inner_tolerance: float = 1e-6
     inner_tolerance_soft: float = 1e-4
-    max_inner_iterations: int = 100
+    max_inner_iterations: int = 200
     backtracking_alpha: float = 0.01
     backtracking_beta: float = 0.5
     backtracking_min_step: float = 1e-3
@@ -380,7 +380,7 @@ class BaseInteriorPointMethodSolver(Optimizer):
         )
         for ii in range(num_steps):
             if self.settings.verbose:
-                print(f"  {ii:02d} Beginning centering step with {t=:}")
+                print(f"  {ii + 1:02d} Beginning centering step with {t=:}")
                 start_time = time.time()
 
             try:
@@ -424,7 +424,7 @@ class BaseInteriorPointMethodSolver(Optimizer):
             if self.settings.verbose:
                 end_time = time.time()
                 print(
-                    f"  {ii:02d} Centering step completed in "
+                    f"  {ii + 1:02d} Centering step completed in "
                     f"{1000 * (end_time - start_time):.03f} ms"
                 )
 
@@ -436,7 +436,7 @@ class BaseInteriorPointMethodSolver(Optimizer):
             if not fully_optimize and self.is_feasible(x):
                 if self.settings.verbose:
                     print(
-                        f"  {ii:02d} Result was strictly feasible so we're "
+                        f"  {ii + 1:02d} Result was strictly feasible so we're "
                         "early-stopping."
                     )
                 break
@@ -580,7 +580,7 @@ class BaseInteriorPointMethodSolver(Optimizer):
                     quadratic_convergence = ""
 
                 print(
-                    f"    {nit:02d} Newton step calculated in "
+                    f"    {nit + 1:02d} Newton step calculated in "
                     f"{1000 * (end_time - start_time):.03f} ms; "
                     f"Sub-optimality {suboptimality} = 0.5 * {np.sqrt(lambda_squared)}^2"
                     f"{quadratic_convergence}"
@@ -654,7 +654,7 @@ class BaseInteriorPointMethodSolver(Optimizer):
                     / (1 + np.sqrt(lambda_squared))
                 )
                 print(
-                    f"    {nit:02d} {btls_s=:}, improvement={ft - ft_new}, "
+                    f"    {nit + 1:02d} {btls_s=:}, improvement={ft - ft_new}, "
                     f"expected improvement = {expected_improvement}"
                 )
 
