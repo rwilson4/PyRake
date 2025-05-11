@@ -15,26 +15,29 @@ where M people respond to the survey out of a total population size of
 N, and $` \pi_i `$ is the response propensity score. Then
 $` (1/M) \sum_i w_i \cdot Y_i `$ is unbiased for the population
 average.
+
 Typically the propensity scores are unknown and must be estimated, but
-in that scenario the best we can hope for is the bias is small. Given
-that an unbiased estimator is unattainable, we might as well see what
-else weights can give us.
+in that scenario we cannot expect the corresponding estimator to be
+unbiased. The best we can hope is for the bias to be small. Given that
+an unbiased estimator is unattainable, we might as well see what else
+weights can give us.
 
 We might ask the weights exactly balance important covariates. If
 $` X_i `$ is the covariate value for person i, and we know the mean of
-this covariate is $` \mu `$ in the population, we might demand
-$` (1 / M) \sum_i w_i \cdot X_i = \mu, `$ and we might demand this not
-just for one covariate but perhaps several important ones believed to
-be correlated with the response of interest. Enforcing this constraint
-may force us to deviate from estimated propensity scores, but since
-those are just estimates, forcing balance on important covariates may
+this covariate is $` \mu `$ in the population, we might ask
+$` (1 / M) \sum_i w_i \cdot X_i = \mu, `$ and we might ask this not
+just for one covariate but perhaps several important covariates
+believed to be correlated with the response of interest. Enforcing
+this constraint may force us to deviate from estimated propensity
+scores, but since those are just estimates and the corresponding
+estimator not unbiased, forcing balance on important covariates may
 actually *reduce* the bias.
 
 The variance of the estimator is proportional to $` \sum_i w_i^2, `$
-so all else being equal, we would prefer small weights to larger ones.
-This leads to a bias/variance tradeoff: staying close to the estimated
-propensity scores keeps the bias in check, while pursuing smaller
-weights reduces variance.
+so all else being equal, we would prefer smaller weights to larger
+ones. This leads to a bias/variance tradeoff: staying close to the
+estimated propensity scores keeps the bias in check, while pursuing
+smaller weights reduces variance.
 
 PyRake can be used for solving problems of the form:<br />
 $`
@@ -45,14 +48,25 @@ $`
            & w \succeq 0,
 \end{array}
 `$<br />
-where D is a distance metric that keeps w close to v = (M/N)/estimated
-propensity. We support multiple distance metrics, including an L2
-error metric, KL Divergence, and a Huber penalty. If the user does not
-have estimated propensity scores, the code defaults to v=1.
+where D is a distance metric that keeps w close to $` v = (M/N)/\hat{\pi}, `$
+and $` \hat{\pi} `$ are the estimated propensity scores. We support
+multiple distance metrics, including an L2 error metric, KL
+Divergence, and a Huber penalty. If the user does not have estimated
+propensity scores, the code defaults to v=1. This will give you
+weights that exactly balance the specified covariates with a
+constraint on variance, but no connection to propensity scores.
 
 PyRake can also be used to solve a sequence of these problems, with
 varying $` \phi `$. This allows the user to visualize the bias/variance
 tradeoff.
+
+![Bias-Variance Tradeoff](docs/efficient_frontier.png)
+
+While it may seem desirable to stay as close as possible to the
+baseline weights (while enforcing balance on important covariates),
+graphs like the one above show that it is often possible to
+dramatically reduce variance, by deviating only slightly farther from
+the baseline weights.
 
 ## Connection with Other Methods
 Popular methods for reweighting include Raking, Entropy Balancing, and
@@ -64,15 +78,13 @@ $`
 \begin{array}{ll}
 \textrm{minimize}    & D(w, v) \\
 \textrm{subject to}  & (1/M) X^T w = \mu \\
-           &  (1/M) \| w \|_2^2 \leq \phi \\
            & w \succeq 0,
 \end{array}
 `$<br />
 where D(w, v) is the KL divergence; v is typically chosen to be
-uniform. Raking sets $` \phi `$ to be large enough so that the
-variance constraint is not active; equivalently the constraint is
-simply omitted. As the name implies, PyRake can be used to calculate
-Raking weights.
+uniform (that is, all entries of v are ones). As the name implies,
+PyRake can be used to calculate Raking weights, if we set $` \phi `$
+to be large enough that the variance constraint is not active.
 
 Like Raking, Entropy Balancing (Hainmuller, 2012) uses KL divergence
 as the distance metric and omits the variance constraint. An
@@ -81,8 +93,13 @@ can be accommodated by adding an extra column to X having all ones;
 the corresponding entry in $`\mu`$ should be $` (1/M) \cdot 1^T v `$.
 PyRake makes it easy to add such a constraint, just pass
 `constrain_mean_weight_to=np.mean(v)` to the Rake constructor.
+(We tend to think in terms of mean weights rather than sums of
+weights; a mean weight of 1 corresponds to a true weighted average.
+Note that if we knew the true propensity scores, unbiased weights
+would not necessarily have mean 1, and would not correspond to a
+true weighted average.)
 
-Stable Balancing Weights (Zubizarreta, 2015) uses
+Stable Balancing Weights (Zubizarreta, 2015) use
 $` D(w, v) = \| w - v \|_2^2, `$ which is supported by PyRake.
 
 ### References
@@ -110,11 +127,15 @@ pip install .
 from pyrake import Rake, KLDivergence, EfficientFrontier
 
 # Inputs: X (M x p), mu (p,), v (M,)
-rake = Rake(distance=KLDivergence(), phi=1.0)
-ef = EfficientFrontier(rake)
-
-results = ef.trace(X, mu, v=v, num_points=30)
-results.plot()
+rake = Rake(
+    distance=KLDivergence(),
+    X=X,
+    mu=mu,
+    phi=2.0,
+)
+frontier = EfficientFrontier(rake)
+res = frontier.trace()
+res.plot()
 ```
 
 ## Development
@@ -140,5 +161,4 @@ properly formatted, use: `python -m ruff check pyrake test` and
 `python -m black --check pyrake/ test/`.
 
 ## License
-
 Apache

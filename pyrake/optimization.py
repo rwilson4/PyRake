@@ -946,7 +946,7 @@ class InteriorPointMethodSolver(BaseInteriorPointMethodSolver):
         x0: Optional[npt.NDArray[np.float64]] = None,
         fully_optimize: bool = False,
         **kwargs,
-    ) -> OptimizationResult:
+    ) -> InteriorPointMethodResult:
         r"""Solve optimization problem.
 
         Uses an interior point method with a logarithmic barrier penalty to
@@ -970,7 +970,12 @@ class InteriorPointMethodSolver(BaseInteriorPointMethodSolver):
             the solution and other helpful info.
 
         """
-        return super().solve(x0, fully_optimize=True, **kwargs)
+        res = super().solve(x0, fully_optimize=True, **kwargs)
+
+        # This is just a hack to tell the type checker that res has the desired type. By
+        # construction, it always will.
+        assert isinstance(res, InteriorPointMethodResult)
+        return res
 
 
 class PhaseIInteriorPointSolver(BaseInteriorPointMethodSolver, PhaseISolver):

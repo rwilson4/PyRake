@@ -70,7 +70,8 @@ class EqualitySolver(PhaseISolver):
 
         """
         if x0 is not None and np.all(np.abs(self.A @ x0 - self.b) < 1e-10):
-            print("  Initial guess was feasible.")
+            if self.settings.verbose:
+                print("  Initial guess was feasible.")
             return OptimizationResult(solution=x0)
 
         # If A = U * s * Vh, then we seek to solve:
