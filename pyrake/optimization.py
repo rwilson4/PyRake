@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import numpy.typing as npt
 from matplotlib.axes import Axes
+from scipy import linalg
 
 from .exceptions import (
     BacktrackingLineSearchError,
@@ -374,18 +375,21 @@ class BaseInteriorPointMethodSolver(Optimizer):
 
         inner_nits = []
         duality_gaps = []
-        status: Literal[0, 1] = 0
+        status: Literal[0, 1, 2] = 0
         message = (
             "Interior Point Method completed successfully to the desired tolerance"
         )
-        for ii in range(num_steps):
+        for nit in range(num_steps):
             if self.settings.verbose:
-                print(f"  {ii + 1:02d} Beginning centering step with {t=:}")
+                print(f"  {nit + 1:02d} Beginning centering step with {t=:}")
                 start_time = time.time()
 
             try:
                 result = self.centering_step(
-                    x, t, last_step=(ii + 1 == num_steps), fully_optimize=fully_optimize
+                    x,
+                    t,
+                    last_step=(nit + 1 == num_steps),
+                    fully_optimize=fully_optimize,
                 )
             except CenteringStepError as e:
                 suboptimality = (
@@ -414,7 +418,7 @@ class BaseInteriorPointMethodSolver(Optimizer):
 
                 raise InteriorPointMethodError(
                     message="Centering step failed",
-                    remaining_steps=num_steps - ii - 1,
+                    remaining_steps=num_steps - nit - 1,
                     suboptimality=self.num_ineq_constraints
                     * self.settings.barrier_multiplier
                     / t,
@@ -424,7 +428,7 @@ class BaseInteriorPointMethodSolver(Optimizer):
             if self.settings.verbose:
                 end_time = time.time()
                 print(
-                    f"  {ii + 1:02d} Centering step completed in "
+                    f"  {nit + 1:02d} Centering step completed in "
                     f"{1000 * (end_time - start_time):.03f} ms"
                 )
 
@@ -434,9 +438,11 @@ class BaseInteriorPointMethodSolver(Optimizer):
 
             # Applicable only for Phase I methods.
             if not fully_optimize and self.is_feasible(x):
+                status = 2
+                message = "Feasibility method successfully found a feasible point"
                 if self.settings.verbose:
                     print(
-                        f"  {ii + 1:02d} Result was strictly feasible so we're "
+                        f"  {nit + 1:02d} Result was strictly feasible so we're "
                         "early-stopping."
                     )
                 break
@@ -481,7 +487,7 @@ class BaseInteriorPointMethodSolver(Optimizer):
             * self.settings.barrier_multiplier
             / t,
             duality_gaps=duality_gaps,
-            nits=num_steps,
+            nits=nit + 1,
             inner_nits=inner_nits,
             status=status,
             message=message,
@@ -502,6 +508,16 @@ class BaseInteriorPointMethodSolver(Optimizer):
 
         We can often skip early centering steps by initializing the barrier parameter to
         a higher value. See the discussion in Boyd and Vandenberghe, section 11.3.1.
+
+        Parameters
+        ----------
+         x0 : npt.NDArray[np.float64]
+            Initial guess. Must be strictly feasible.
+
+        Returns
+        -------
+         t : float
+            Barrier parameter.
 
         """
         return 1.0
@@ -794,7 +810,9 @@ class BaseInteriorPointMethodSolver(Optimizer):
         """Calculate Lagrange multipliers for inequality constraints."""
         lmbda = -1.0 / (t * self.constraints(x))
         if not centering_step_solved_perfectly:
-            lmbda *= 1.0 - (self.grad_constraints(x) @ delta_x) / self.constraints(x)
+            lmbda *= 1.0 - (
+                self.grad_constraints_multiply(x, delta_x)
+            ) / self.constraints(x)
         return lmbda
 
     @abstractmethod
@@ -884,7 +902,7 @@ class BaseInteriorPointMethodSolver(Optimizer):
 
         """
         return t * self.gradient(x) - (
-            self.grad_constraints(x).T @ (1.0 / self.constraints(x))
+            self.grad_constraints_transpose_multiply(x, 1.0 / self.constraints(x))
         )
 
     @abstractmethod
@@ -900,6 +918,28 @@ class BaseInteriorPointMethodSolver(Optimizer):
     @abstractmethod
     def grad_constraints(self, x: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
         """Calculate the gradients of constraints, fi(x) <= 0."""
+
+    def grad_constraints_multiply(
+        self, x: npt.NDArray[np.float64], y: npt.NDArray[np.float64]
+    ) -> npt.NDArray[np.float64]:
+        """Calculate grad_constraints(x) @ y.
+
+        This is provided as a convenience function, but it's typically possible to speed
+        up this calculation by providing a custom implementation.
+
+        """
+        return self.grad_constraints(x) @ y
+
+    def grad_constraints_transpose_multiply(
+        self, x: npt.NDArray[np.float64], y: npt.NDArray[np.float64]
+    ) -> npt.NDArray[np.float64]:
+        """Calculate grad_constraints(x).T @ y.
+
+        This is provided as a convenience function, but it's typically possible to speed
+        up this calculation by providing a custom implementation.
+
+        """
+        return self.grad_constraints(x).T @ y
 
     @abstractmethod
     def evaluate_dual(
@@ -1046,3 +1086,111 @@ class PhaseIInteriorPointSolver(BaseInteriorPointMethodSolver, PhaseISolver):
 
         """
         return super().solve(x0, fully_optimize=fully_optimize, **kwargs)
+
+
+class EqualityConstrainedInteriorPointMethodSolver(BaseInteriorPointMethodSolver):
+    """Class for problems with equality constraints, A * x = b."""
+
+    @abstractproperty
+    def A(self) -> npt.NDArray[np.float64]:
+        """Matrix representing equality constraints."""
+
+    @abstractproperty
+    def b(self) -> npt.NDArray[np.float64]:
+        """Right-hand side of equality constraints."""
+
+    def initialize_barrier_parameter(self, x0: npt.NDArray[np.float64]) -> float:
+        r"""Initialize barrier penalty.
+
+        Parameters
+        ----------
+         x0 : npt.NDArray[np.float64]
+            Initial guess. Must be strictly feasible.
+
+        Returns
+        -------
+         t : float
+            Barrier parameter.
+
+        Notes
+        -----
+        Per the discussion in Boyd and Vandenberghe, section 11.3.1, we can choose the
+        initial barrier penalty, t, to minimize:
+           inf_nu \| t * ∇f0 + ∇phi + A^T nu \|_2,
+        where phi is the barrier penalty encoding the inequality constraints, and the
+        gradients are evaluated at x0.
+
+        This leads to the system of equations:
+               A * A^T * nu_star +       A * ∇f0 * t_star = -A * ∇phi
+           (A * ∇f0)^T * nu_star + \| ∇f0 \|_2^2 * t_star = -∇f0^T ∇phi.
+
+        We solve this using the Schur complement, per the discussion in Boyd and
+        Vandenberghe A.5.5. In this case,
+           S = \| ∇f0 \|_2^2 - (A * ∇f0)^T * (A * A^T)^{-1} * (A * ∇f0),
+        which is a scalar. Then:
+           t_star = (1 / S) * (-∇f0^T * ∇phi + (A * ∇f0)^T (A * A^T)^{-1} * (A * ∇phi)).
+
+        We do *not* assume that A is full rank, so A * A^T may be singular. Define z_f0
+        and z_phi as any solutions of:
+           (A * A^T) *  z_f0 = (A * ∇f0)
+           (A * A^T) * z_phi = (A * ∇phi).
+        We use the Singular Value Decomposition to select the minimum norm solution.
+
+        Then
+           S = \| ∇f0 \|_2^2 - (A * ∇f0)^T * z_f0,
+        and
+           t_star = (1 / S) * (-∇f0^T * ∇phi + (A * ∇f0)^T * z_phi).
+
+        If A is full rank, S >= 0 since the problem is convex (and so the matrix
+        corresponding to the system of equations is positive semidefinite). Yet due to
+        numerical issues, sometimes S as calculated is slightly less than zero. For this
+        reason, we clip S at 1e-16. In practice this seems to happen when x0 is very
+        close to optimal.
+
+        We always want to do at least one centering step, so we clip t_star at m / eps.
+
+        """
+        delta_f0 = self.gradient(x0)
+        delta_phi = -self.grad_constraints_transpose_multiply(x0, 1.0 / self.constraints(x0))
+
+        A_delta_f0 = self.A @ delta_f0
+        A_delta_phi = self.A @ delta_phi
+
+        # z_phi = (A * A^T)^{-1} * A * delta_phi
+        # Singular Value Decomposition: A = U * diag(s) * V^T,
+        # where U is p-by-r (r is the rank of A), s is length r, V is M-by-r.
+        # Since the columns of U and V are orthonormal, U^T U = V^T V = I_r,
+        # but in general U * U^T does not equal I_p and V^T * V does not equal I_M.
+        #
+        # A * A^T = U * diag(s) * V^T * V * diag(s) * U^T
+        #            = U * diag(s^2) * U^T
+        # A * A^T * z_phi = A * delta_phi
+        # -> U * diag(s^2) * U^T * z_phi = A * delta_phi
+        # -> diag(s^2) * U^T * z_phi = U^T * A * delta_phi
+        # -> U^T * z_phi = diag(s^{-2}) * U^T * A * delta_phi
+        #
+        # Now, in general U * U^T does not equal I_p, but if we *define*
+        # z_phi = U * diag(s^{-2}) * U^T * A * delta_phi,
+        # then U^T * z_phi = U^T * U * diag(s^{-2}) * U^T * A * delta_phi
+        #                  = diag(s^{-2}) * U^T * A * delta_phi,
+        # so this z_phi satisfies the equation, and is the minimum norm solution.
+        #
+        # When A has full row rank, z_phi is the *unique* solution to the equation,
+        # but this strategy works even when A is rank deficient.
+        U, s, Vh = linalg.svd(self.A, full_matrices=False)
+        rank = int(np.sum(s > 1e-5))
+        U = U[:, 0:rank]
+        s = s[0:rank]
+        z_phi = U @ ((U.T @ A_delta_phi) / np.square(s))
+        z_f0 = U @ ((U.T @ A_delta_f0) / np.square(s))
+
+        schur_complement = np.dot(delta_f0, delta_f0) - np.dot(A_delta_f0, z_f0)
+        t_star_s = -np.dot(delta_f0, delta_phi) + np.dot(A_delta_f0, z_phi)
+
+        return min(
+            self.num_ineq_constraints / self.settings.outer_tolerance,
+            max(
+                super().initialize_barrier_parameter(x0),
+                t_star_s / max(schur_complement, 1e-16),
+            ),
+        )

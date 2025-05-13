@@ -73,7 +73,7 @@ class EfficientFrontier:
         # 100, which assumes the unconstrained variance is less than this. Eventually
         # I'd like to make this constraint optional, at which point we can do this more
         # elegantly.
-        self.rake.phi = phi_max or phi_min * 100
+        self.rake.update_phi(phi_max or phi_min * 100)
         res_max = self.rake.solve(x0=w0)
         phi_max_nn = np.dot(res_max.solution, res_max.solution) / self.rake.dimension
 
@@ -81,7 +81,7 @@ class EfficientFrontier:
         phi_grid = np.geomspace(phi_min, phi_max_nn, num=num_points)[1:]
         w = w0
         for phi in phi_grid:
-            self.rake.phi = phi
+            self.rake.update_phi(phi)
             res = self.rake.solve(x0=w)
             weights.append(res.solution)
             phis.append(phi)

@@ -123,6 +123,48 @@ class TestEqualitySolver:
         w = solver.solve().solution
         np.testing.assert_allclose(A @ w, b)
 
+    @pytest.mark.parametrize(
+        "seed,M,p",
+        [
+            (1105, 100, 20),
+            (2105, 200, 30),
+            (3105, 50, 5),
+            (4105, 500, 100),
+            (5105, 13, 3),
+        ],
+    )
+    def test_solver_with_x0(self, seed: int, M: int, p: int) -> None:
+        """Test solver with x0."""
+        np.random.seed(seed)
+        A = np.random.randn(p, M)
+        w = np.random.randn(M)
+
+        # Use a rank deficient A
+        U, s, Vh = linalg.svd(A, full_matrices=False)
+        s[-1] = 0.0
+        s[-2] = 0.0
+        A = U @ np.diag(s) @ Vh
+
+        b = A @ w
+
+        solver = EqualitySolver(A=A, b=b)
+        # Give a set of weights close to the true w as a starting point.
+        w0 = w + 0.01 * np.random.randn(M)
+        w = solver.solve(x0=w0).solution
+
+        # Verify w is feasible.
+        np.testing.assert_allclose(A @ w, b)
+
+        # Check that w is close to w0
+        dist = np.dot(w - w0, w - w0)
+
+        # Solve without passing w0
+        w = solver.solve().solution
+
+        # Verify the w we calculated when passing w0, is closer to w0 than the w we
+        # calculate when not passing w0.
+        assert dist < np.dot(w - w0, w - w0)
+
 
 class TestEqualityWithBoundsSolver:
     """Test EqualityWithBoundsSolver."""
@@ -330,7 +372,11 @@ class TestEqualityWithBoundsSolver:
         np.random.seed(seed)
 
         w_star = np.random.rand(M)
-        w_star[0] = 0
+
+        # This is a little hacky. We're basically counting on the method to not certify
+        # the problem as infeasible.
+        w_star[0] = -1e-8
+
         # Generate a random orthonormal matrix
         A, _, _ = linalg.svd(np.random.randn(M, M))
         b = A @ w_star
@@ -665,3 +711,52 @@ class TestEqualityWithBoundsAndNormConstraintSolver:
         np.testing.assert_allclose(A @ res.solution, b)
         assert np.all(res.solution > 0)
         assert np.dot(res.solution, res.solution) < phi
+
+    def test_solver_feasible_good_initial_guess(self) -> None:
+        """Test solver when we pass a good initial guess."""
+        seed = 1234
+        M = 100
+        p = 20
+        np.random.seed(seed)
+        phi = 1.0
+
+        w = np.random.rand(M)
+        # Constrain to norm < phi
+        w /= np.sqrt(np.dot(w, w))
+        w /= 1.1 * phi
+        assert np.dot(w, w) < phi
+
+        A = np.random.randn(p, M)
+        b = A @ w
+
+        # Solve it once, and then pass the solution as the initial guess on another
+        # round.
+        solver = EqualityWithBoundsAndNormConstraintSolver(
+            phase1_solver=EqualityWithBoundsSolver(
+                phase1_solver=EqualitySolver(
+                    A=A, b=b, settings=OptimizationSettings(verbose=True)
+                ),
+                settings=OptimizationSettings(verbose=True),
+            ),
+            phi=phi,
+            settings=OptimizationSettings(verbose=True),
+        )
+
+        res = solver.solve(fully_optimize=True)
+        w_star = res.solution
+        np.testing.assert_allclose(A @ res.solution, b)
+        assert np.all(res.solution > 0)
+        assert np.dot(res.solution, res.solution) < phi
+
+        solver = EqualityWithBoundsAndNormConstraintSolver(
+            phase1_solver=EqualityWithBoundsSolver(
+                phase1_solver=EqualitySolver(
+                    A=A, b=b, settings=OptimizationSettings(verbose=True)
+                ),
+                settings=OptimizationSettings(verbose=True),
+            ),
+            phi=phi,
+            settings=OptimizationSettings(verbose=True),
+        )
+        res = solver.solve(x0=w_star, fully_optimize=True)
+        assert res.nits == 1

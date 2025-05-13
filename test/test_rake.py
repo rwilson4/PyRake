@@ -79,7 +79,8 @@ def test_rake_solve_kl_divergence(seed: int, M: int, p: int, phi: float) -> None
         phi=phi,
         settings=OptimizationSettings(verbose=True),
     )
-    res = rake.solve()
+    # Use v as the initial guess
+    res = rake.solve(x0=1.0 / estimated_propensity)
     end_time = time.time()
     print(f"Complete in {1e3 * (end_time - start_time):.03f} ms")
 
@@ -156,7 +157,8 @@ def test_rake_solve_squaredl2(seed: int, M: int, p: int, phi: float) -> None:
         phi=phi,
         settings=OptimizationSettings(verbose=True),
     )
-    res = rake.solve()
+    # Use v as the initial guess
+    res = rake.solve(x0=1.0 / estimated_propensity)
     end_time = time.time()
     print(f"Complete in {1e3 * (end_time - start_time):.03f} ms")
 
@@ -233,7 +235,8 @@ def test_rake_solve_huber(seed: int, M: int, p: int, phi: float) -> None:
         phi=phi,
         settings=OptimizationSettings(verbose=True),
     )
-    res = rake.solve()
+    # Use v as the initial guess
+    res = rake.solve(x0=1.0 / estimated_propensity)
     end_time = time.time()
     print(f"Complete in {1e3 * (end_time - start_time):.03f} ms")
 

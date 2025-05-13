@@ -14,6 +14,7 @@ from .numerical_helpers import (
     solve_kkt_system,
 )
 from .optimization import (
+    EqualityConstrainedInteriorPointMethodSolver,
     NewtonResult,
     OptimizationResult,
     OptimizationSettings,
@@ -56,17 +57,48 @@ class EqualitySolver(PhaseISolver):
         fully_optimize: bool = False,
         **kwargs,
     ) -> OptimizationResult:
-        """Solve A * x = b.
+        r"""Solve A * x = b.
 
         Parameters
         ----------
          x0 : vector, optional
-            Initial guess.
+            Initial guess. See Notes.
 
         Returns
         -------
          res : OptimizationResult
             The solution.
+
+        Notes
+        -----
+        If x0 is feasible (that is, A * x0 = b), we simply return it.
+
+        Otherwise, if x0 is passed, we solve:
+           minimize    \| x - x0 \|_2^2
+           subject to  A * x = b.
+        There is an analytic solution to this problem. The Lagrangian is:
+            L(x, nu) = \| x - x0 \|_2^2 + nu^T * (A * x - b).
+        The dual function is:
+            g(nu) = inf_x {L(x, nu)}.
+        The x that achieves this infimum satisfies:
+            2 * (x - x0) + A^T * nu = 0, or
+            x = x0 - (1/2) * A^T * nu.
+        Thus, the dual function is:
+            -(1/4) * nu^T * A * A^T * nu + nu^T * (A * x0 - b).
+        The dual problem is:
+            maximize g(nu),
+        whose solution satisfies:
+            (A * A^T) * nu_star = 2 * (A * x0 - b).
+        We do *not* assume A is full rank, but instead use the SVD to find such a
+        nu_star. Then the solution is:
+            x_star = x0 - (1/2) * A^T * nu_star.
+
+        When x0 is not passed, we use the SVD to find the minimum norm solution to A * x
+        = b.
+
+        When x0 is passed, it takes a little longer to calculate a feasible x (less than
+        twice as long), but this part is super fast anyway, and lets us stay true to the
+        point passed.
 
         """
         if x0 is not None and np.all(np.abs(self.A @ x0 - self.b) < 1e-10):
@@ -89,13 +121,30 @@ class EqualitySolver(PhaseISolver):
         if not np.allclose(U_r @ (U_r.T @ self.b), self.b):
             raise ProblemInfeasibleError("b was not in the range of A.")
 
-        s_inv = np.zeros_like(s)
-        s_inv[0:rank] = 1.0 / s[0:rank]
+        if x0 is not None:
+            # Step 1: find nu such that
+            # (A * A^T) nu = 2 * (A * x0 - b) =: rhs
+            # Since A = U * diag(s) * V^T, we have:
+            #   U * diag(s^2) * U^T * nu = rhs
+            #   U^T * nu = diag(s^{-2}) * (U * rhs).
+            # In general, U * U^T does not equal the identity matrix (unless A is full rank),
+            # but if we define nu_star = U * diag(s^{-2}) * (U * rhs), then
+            #   U^T * nu_star = diag(s^{-2}) * (U * rhs).
+            # This works even when A is not full rank.
+            rhs = 2.0 * (self.A @ x0 - self.b)
+            nu_star = U_r @ ((U_r.T @ rhs) / np.square(s[0:rank]))
 
-        x = Vh.T @ (s_inv * (U.T @ self.b))
+            # Step 2: Calculate x as x0 - (1/2) * A^T nu_star.
+            x = x0 - 0.5 * (self.A.T @ nu_star)
+        else:
+            s_inv = np.zeros_like(s)
+            s_inv[0:rank] = 1.0 / s[0:rank]
+            x = Vh.T @ (s_inv * (U.T @ self.b))
+
         if self.settings.verbose:
             end_time = time.time()
             print(f"  SVD calculated in {1000 * (end_time - start_time):.03f} ms")
+
         return OptimizationResult(solution=x)
 
 
@@ -171,7 +220,9 @@ class EqualityWithBoundsSolver(PhaseIInteriorPointSolver):
 
     def is_feasible(self, x: npt.NDArray[np.float64]) -> bool:
         """Determine whether a feasible point has been found."""
-        return x[-1] < 0
+        if np.all(x[0 : self.dimension] > 0):
+            return True
+        return False
 
     def check_for_infeasibility(self, result: NewtonResult):
         """Check if infeasible."""
@@ -469,6 +520,26 @@ class EqualityWithBoundsSolver(PhaseIInteriorPointSolver):
         G[M, M] = 1
         return G
 
+    def grad_constraints_multiply(
+        self, x: npt.NDArray[np.float64], y: npt.NDArray[np.float64]
+    ) -> npt.NDArray[np.float64]:
+        """Calculate grad_constraints(x) @ y."""
+        M = self.dimension
+        b = np.zeros((M + 1,))
+        b[0:M] = -y[0:M] - y[M]
+        b[M] = y[M]
+        return b
+
+    def grad_constraints_transpose_multiply(
+        self, x: npt.NDArray[np.float64], y: npt.NDArray[np.float64]
+    ) -> npt.NDArray[np.float64]:
+        """Calculate grad_constraints(x).T @ y."""
+        M = self.dimension
+        b = np.zeros((M + 1,))
+        b[0:M] = -y[0:M]
+        b[M] = -sum(y[0:M]) + y[M]
+        return b
+
     def evaluate_dual(
         self,
         lmbda: npt.NDArray[np.float64],
@@ -511,7 +582,9 @@ class EqualityWithBoundsSolver(PhaseIInteriorPointSolver):
         return -np.dot(self.b, nu) - M * lmbda[M] * self.s0_plus_eps
 
 
-class EqualityWithBoundsAndNormConstraintSolver(PhaseIInteriorPointSolver):
+class EqualityWithBoundsAndNormConstraintSolver(
+    EqualityConstrainedInteriorPointMethodSolver, PhaseIInteriorPointSolver
+):
     r"""Find x satisfying A * x = b, x > 0, and \| x \|_2^2 < phi.
 
     We do this by solving:
@@ -617,44 +690,7 @@ class EqualityWithBoundsAndNormConstraintSolver(PhaseIInteriorPointSolver):
             self.settings.outer_tolerance, np.dot(x0, x0)
         )
 
-        delta_phi = -(self.grad_constraints(x0).T @ (1.0 / self.constraints(x0)))
-        delta_f0 = self.gradient(x0)
-        A_delta_phi = self.A @ delta_phi
-        A_delta_f0 = self.A @ delta_f0
-
-        # z_phi = (A * A^T)^{-1} * A * delta_phi
-        # Singular Value Decomposition: A = U * diag(s) * V^T,
-        # where U is p-by-r (r is the rank of A), s is length r, V is M-by-r.
-        # Since the columns of U and V are orthonormal, U^T U = V^T V = I_r,
-        # but in general U * U^T does not equal I_p and V^T * V does not equal I_M.
-        #
-        # A * A^T = U * diag(s) * V^T * V * diag(s) * U^T
-        #            = U * diag(s^2) * U^T
-        # A * A^T * z_phi = A * delta_phi
-        # -> U * diag(s^2) * U^T * z_phi = A * delta_phi
-        # -> diag(s^2) * U^T * z_phi = U^T * A * delta_phi
-        # -> U^T * z_phi = diag(s^{-2}) * U^T * A * delta_phi
-        #
-        # Now, in general U * U^T does not equal I_p, but if we *define*
-        # z_phi = U * diag(s^{-2}) * U^T * A * delta_phi,
-        # then U^T * z_phi = U^T * U * diag(s^{-2}) * U^T * A * delta_phi
-        #                  = diag(s^{-2}) * U^T * A * delta_phi,
-        # so this z_phi satisfies the equation, and is the minimum norm solution.
-        #
-        # When A has full row rank, z_phi is the *unique* solution to the equation,
-        # but this strategy works even when A is rank deficient.
-        U, s, Vh = linalg.svd(self.A, full_matrices=False)
-        rank = int(np.sum(s > 1e-5))
-        U = U[:, 0:rank]
-        s = s[0:rank]
-        z_phi = U @ ((U.T @ A_delta_phi) / np.square(s))
-        z_f0 = U @ ((U.T @ A_delta_f0) / np.square(s))
-
-        t2 = -(
-            (np.dot(delta_f0, delta_phi) - np.dot(A_delta_f0, z_phi))
-            / (np.dot(delta_f0, delta_f0) - np.dot(A_delta_f0, z_f0))
-        )
-        return max(1.0, t1, t2)
+        return max(t1, super().initialize_barrier_parameter(x0))
 
     def calculate_newton_step(
         self,
@@ -778,6 +814,18 @@ class EqualityWithBoundsAndNormConstraintSolver(PhaseIInteriorPointSolver):
     def grad_constraints(self, x: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
         """Calculate the gradients of constraints, fi(x) <= 0."""
         return -np.eye(len(x))
+
+    def grad_constraints_multiply(
+        self, x: npt.NDArray[np.float64], y: npt.NDArray[np.float64]
+    ) -> npt.NDArray[np.float64]:
+        """Calculate grad_constraints(x) @ y."""
+        return -y
+
+    def grad_constraints_transpose_multiply(
+        self, x: npt.NDArray[np.float64], y: npt.NDArray[np.float64]
+    ) -> npt.NDArray[np.float64]:
+        """Calculate grad_constraints(x).T @ y."""
+        return -y
 
     def evaluate_dual(
         self,

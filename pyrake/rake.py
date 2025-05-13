@@ -4,7 +4,6 @@ from typing import Optional, Tuple
 
 import numpy as np
 import numpy.typing as npt
-from scipy import linalg
 
 from .distance_metrics import Distance
 from .numerical_helpers import (
@@ -12,6 +11,7 @@ from .numerical_helpers import (
     solve_kkt_system,
 )
 from .optimization import (
+    EqualityConstrainedInteriorPointMethodSolver,
     InteriorPointMethodSolver,
     OptimizationSettings,
 )
@@ -22,7 +22,7 @@ from .phase1solvers import (
 )
 
 
-class Rake(InteriorPointMethodSolver):
+class Rake(EqualityConstrainedInteriorPointMethodSolver, InteriorPointMethodSolver):
     r"""Solve optimization problem.
 
     Class for solving problems of the form:
@@ -100,6 +100,32 @@ class Rake(InteriorPointMethodSolver):
         )
 
     @property
+    def A(self) -> npt.NDArray[np.float64]:
+        """Matrix representing equality constraints."""
+        return (1 / self.dimension) * self.X.T
+
+    @property
+    def b(self) -> npt.NDArray[np.float64]:
+        """Right-hand side of equality constraints."""
+        return self.mu
+
+    def update_phi(self, phi: float) -> None:
+        """Update phi, mostly for EfficientFrontier."""
+        self.phi = phi
+        self.phase1_solver = EqualityWithBoundsAndNormConstraintSolver(
+            phi=self.dimension * phi,
+            settings=self.settings,
+            phase1_solver=EqualityWithBoundsSolver(
+                settings=self.settings,
+                phase1_solver=EqualitySolver(
+                    A=(1 / self.dimension) * self.X.T,
+                    b=self.mu,
+                    settings=self.settings,
+                ),
+            ),
+        )
+
+    @property
     def num_eq_constraints(self) -> int:
         """Count equality constraints."""
         return self.X.shape[1]
@@ -119,44 +145,7 @@ class Rake(InteriorPointMethodSolver):
             self.settings.outer_tolerance, self.distance.evaluate(x0)
         )
 
-        delta_phi = -(self.grad_constraints(x0).T @ (1.0 / self.constraints(x0)))
-        delta_f0 = self.gradient(x0)
-        A_delta_phi = (1 / self.dimension) * (self.X.T @ delta_phi)
-        A_delta_f0 = (1 / self.dimension) * (self.X.T @ delta_f0)
-
-        # z_phi = (A * A^T)^{-1} * A * delta_phi
-        # Singular Value Decomposition: A = U * diag(s) * V^T,
-        # where U is p-by-r (r is the rank of A), s is length r, V is M-by-r.
-        # Since the columns of U and V are orthonormal, U^T U = V^T V = I_r,
-        # but in general U * U^T does not equal I_p and V^T * V does not equal I_M.
-        #
-        # A * A^T = U * diag(s) * V^T * V * diag(s) * U^T
-        #            = U * diag(s^2) * U^T
-        # A * A^T * z_phi = A * delta_phi
-        # -> U * diag(s^2) * U^T * z_phi = A * delta_phi
-        # -> diag(s^2) * U^T * z_phi = U^T * A * delta_phi
-        # -> U^T * z_phi = diag(s^{-2}) * U^T * A * delta_phi
-        #
-        # Now, in general U * U^T does not equal I_p, but if we *define*
-        # z_phi = U * diag(s^{-2}) * U^T * A * delta_phi,
-        # then U^T * z_phi = U^T * U * diag(s^{-2}) * U^T * A * delta_phi
-        #                  = diag(s^{-2}) * U^T * A * delta_phi,
-        # so this z_phi satisfies the equation, and is the minimum norm solution.
-        #
-        # When A has full row rank, z_phi is the *unique* solution to the equation,
-        # but this strategy works even when A is rank deficient.
-        U, s, Vh = linalg.svd((1 / self.dimension) * self.X.T, full_matrices=False)
-        rank = int(np.sum(s > 1e-5))
-        U = U[:, 0:rank]
-        s = s[0:rank]
-        z_phi = U @ ((U.T @ A_delta_phi) / np.square(s))
-        z_f0 = U @ ((U.T @ A_delta_f0) / np.square(s))
-
-        t2 = -(
-            (np.dot(delta_f0, delta_phi) - np.dot(A_delta_f0, z_phi))
-            / (np.dot(delta_f0, delta_f0) - np.dot(A_delta_f0, z_f0))
-        )
-        return max(1.0, t1, t2)
+        return max(t1, super().initialize_barrier_parameter(x0))
 
     def calculate_newton_step(
         self, x: npt.NDArray[np.float64], t: float
@@ -197,7 +186,7 @@ class Rake(InteriorPointMethodSolver):
 
         """
         return solve_kkt_system(
-            A=(1.0 / self.dimension) * self.X.T,
+            A=self.A,
             g=-self.gradient_barrier(x, t),
             hessian_solve=solve_diagonal_plus_rank_one_eta_inverse,
             eta_inverse=self._hessian_ft_diagonal_inverse(x, t),
@@ -304,7 +293,7 @@ class Rake(InteriorPointMethodSolver):
         return x * (2.0 / M_phi_den)
 
     def constraints(self, x: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
-        r"""Calculate the vector of constraints, fi(x) <= 0.
+        r"""Calculate the vector of (inequality) constraints, fi(x) <= 0.
 
         Our constraints are x >= 0 and 1 - (1 / M*\phi) * \| x \|_2^2 >= 0, or
            -x <= 0
@@ -317,11 +306,40 @@ class Rake(InteriorPointMethodSolver):
         return c
 
     def grad_constraints(self, x: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
-        """Calculate the gradients of constraints, fi(x) <= 0."""
+        """Calculate the gradients of constraints, fi(x) <= 0.
+
+        If phi is None, G = -I. Otherwise, G is -I, with a row at the bottom of
+        (2 / (M * phi)) * x
+
+        """
         G = np.zeros((self.dimension + 1, self.dimension))
         G[0:-1, :] = -np.eye(self.dimension)
         G[-1, :] = (2.0 / (self.dimension * self.phi)) * x
         return G
+
+    def grad_constraints_multiply(
+        self, x: npt.NDArray[np.float64], y: npt.NDArray[np.float64]
+    ) -> npt.NDArray[np.float64]:
+        """Calculate grad_constraints(x) @ y.
+
+        If phi is None, this is just -y. Otherwise, the first entries are -y, and the
+        last entry is (2 / (M * phi)) * <x, y>.
+
+        """
+        assert len(y) == self.dimension
+        M = self.dimension
+        b = np.zeros((M + 1,))
+        b[0:M] = -y
+        b[M] = (2.0 / (self.dimension * self.phi)) * np.dot(x, y)
+        return b
+
+    def grad_constraints_transpose_multiply(
+        self, x: npt.NDArray[np.float64], y: npt.NDArray[np.float64]
+    ) -> npt.NDArray[np.float64]:
+        """Calculate grad_constraints(x).T @ y."""
+        assert len(y) == self.dimension + 1
+        M = self.dimension
+        return -y[0:M] + ((2.0 * y[M]) / (M * self.phi)) * x
 
     def evaluate_dual(
         self,
@@ -351,7 +369,7 @@ class Rake(InteriorPointMethodSolver):
         return (
             self.evaluate_objective(x_star)
             + np.dot(lmbda, self.constraints(x_star))
-            + np.dot(nu, (1 / self.dimension) * (self.X.T @ x_star) - self.mu)
+            + np.dot(nu, self.A @ x_star - self.b)
         )
 
     def predictor_corrector(
@@ -394,18 +412,14 @@ class Rake(InteriorPointMethodSolver):
 
         # 3. Solve for dx/dt
         dx_dt, _ = solve_kkt_system(
-            A=(1.0 / self.dimension) * self.X.T,
+            A=self.A,
             g=-grad_ft,
             hessian_solve=solve_diagonal_plus_rank_one_eta_inverse,
             eta_inverse=eta_inverse,
             zeta=zeta,
         )
         try:
-            np.testing.assert_allclose(
-                (1 / self.dimension) * (self.X.T @ dx_dt),
-                np.zeros_like(self.mu),
-                atol=1e-9,
-            )
+            np.testing.assert_allclose(self.A @ dx_dt, np.zeros_like(self.b), atol=1e-9)
         except AssertionError as e:
             print(e)
 
@@ -414,9 +428,7 @@ class Rake(InteriorPointMethodSolver):
         predicted_weights = x + dx_dt * t * (self.settings.barrier_multiplier - 1)
         try:
             np.testing.assert_allclose(
-                (1 / self.dimension) * (self.X.T @ predicted_weights) - self.mu,
-                np.zeros_like(self.mu),
-                atol=1e-9,
+                self.A @ predicted_weights - self.mu, np.zeros_like(self.mu), atol=1e-9
             )
         except AssertionError as e:
             print(e)
