@@ -379,6 +379,8 @@ class BaseInteriorPointMethodSolver(Optimizer):
         message = (
             "Interior Point Method completed successfully to the desired tolerance"
         )
+        equality_multipliers = np.zeros(1)
+        inequality_multipliers = np.zeros(1)
         for nit in range(num_steps):
             if self.settings.verbose:
                 print(f"  {nit + 1:02d} Beginning centering step with {t=:}")
@@ -397,23 +399,27 @@ class BaseInteriorPointMethodSolver(Optimizer):
                 )
                 if suboptimality < self.settings.outer_tolerance_soft:
                     # Convergence was good enough
+                    x = e.last_iterate
                     status = 1
                     message = (
                         "Interior Point Method reached an acceptable precision but "
-                        "then ran into numerical difficulties"
+                        f"then ran into numerical difficulties -- {e.__str__()}"
                     )
                     if (
                         e.equality_multipliers is not None
                         and e.inequality_multipliers is not None
                     ):
+                        equality_multipliers = e.equality_multipliers
+                        inequality_multipliers = e.inequality_multipliers
                         duality_gaps.append(
-                            self.evaluate_objective(e.last_iterate)
+                            self.evaluate_objective(x)
                             - self.evaluate_dual(
                                 lmbda=e.inequality_multipliers,
                                 nu=e.equality_multipliers,
-                                x_star=e.last_iterate,
+                                x_star=x,
                             )
                         )
+
                     break
 
                 raise InteriorPointMethodError(
@@ -433,6 +439,8 @@ class BaseInteriorPointMethodSolver(Optimizer):
                 )
 
             x = result.solution
+            equality_multipliers = result.equality_multipliers
+            inequality_multipliers = result.inequality_multipliers
             inner_nits.append(result.nits)
             duality_gaps.append(result.objective_value - result.dual_value)
 
@@ -475,14 +483,14 @@ class BaseInteriorPointMethodSolver(Optimizer):
 
         return InteriorPointMethodResult(
             solution=self.finalize_solution(x),
-            objective_value=result.objective_value,
+            objective_value=self.evaluate_objective(x),
             dual_value=self.evaluate_dual(
-                lmbda=result.inequality_multipliers,
-                nu=result.equality_multipliers,
+                lmbda=inequality_multipliers,
+                nu=equality_multipliers,
                 x_star=x,
             ),
-            equality_multipliers=result.equality_multipliers,
-            inequality_multipliers=result.inequality_multipliers,
+            equality_multipliers=equality_multipliers,
+            inequality_multipliers=inequality_multipliers,
             suboptimality=self.num_ineq_constraints
             * self.settings.barrier_multiplier
             / t,
@@ -648,12 +656,12 @@ class BaseInteriorPointMethodSolver(Optimizer):
                         status=1,
                         message=(
                             "Newton's method achieved an acceptable tolerance but then "
-                            "ran into numerical issues."
+                            f"ran into numerical issues -- {e.__str__()}"
                         ),
                     )
 
                 raise CenteringStepError(
-                    message="Backtracking line search failed",
+                    message=f"Backtracking line search failed -- {e.__str__()}",
                     suboptimality=suboptimality,
                     last_iterate=x,
                     equality_multipliers=nu_star,

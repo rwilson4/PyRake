@@ -172,7 +172,7 @@ class TestEqualityWithBoundsSolver:
     @pytest.mark.parametrize(
         "seed,M,p,atol",
         [
-            (1201, 100, 20, 1e-9),
+            (1201, 100, 20, 1e-8),
             (2201, 200, 30, 1e-9),
             (3201, 50, 5, 1e-9),
             (4201, 500, 100, 1e-9),

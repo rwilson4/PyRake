@@ -7,6 +7,7 @@ import numpy.typing as npt
 
 from .distance_metrics import Distance
 from .numerical_helpers import (
+    solve_diagonal_eta_inverse,
     solve_diagonal_plus_rank_one_eta_inverse,
     solve_kkt_system,
 )
@@ -56,7 +57,7 @@ class Rake(EqualityConstrainedInteriorPointMethodSolver, InteriorPointMethodSolv
         distance: Distance,
         X: npt.NDArray[np.float64],
         mu: npt.NDArray[np.float64],
-        phi: float,
+        phi: Optional[float] = None,
         constrain_mean_weight_to: Optional[float] = 1.0,
         settings: Optional[OptimizationSettings] = None,
     ) -> None:
@@ -86,18 +87,28 @@ class Rake(EqualityConstrainedInteriorPointMethodSolver, InteriorPointMethodSolv
         else:
             self.settings = settings
 
-        self.phase1_solver = EqualityWithBoundsAndNormConstraintSolver(
-            phi=M * phi,
-            settings=self.settings,
-            phase1_solver=EqualityWithBoundsSolver(
+        if phi is not None:
+            self.phase1_solver = EqualityWithBoundsAndNormConstraintSolver(
+                phi=M * phi,
+                settings=self.settings,
+                phase1_solver=EqualityWithBoundsSolver(
+                    settings=self.settings,
+                    phase1_solver=EqualitySolver(
+                        A=(1 / M) * self.X.T,
+                        b=self.mu,
+                        settings=self.settings,
+                    ),
+                ),
+            )
+        else:
+            self.phase1_solver = EqualityWithBoundsSolver(
                 settings=self.settings,
                 phase1_solver=EqualitySolver(
                     A=(1 / M) * self.X.T,
                     b=self.mu,
                     settings=self.settings,
                 ),
-            ),
-        )
+            )
 
     @property
     def A(self) -> npt.NDArray[np.float64]:
@@ -109,21 +120,31 @@ class Rake(EqualityConstrainedInteriorPointMethodSolver, InteriorPointMethodSolv
         """Right-hand side of equality constraints."""
         return self.mu
 
-    def update_phi(self, phi: float) -> None:
+    def update_phi(self, phi: Optional[float] = None) -> None:
         """Update phi, mostly for EfficientFrontier."""
         self.phi = phi
-        self.phase1_solver = EqualityWithBoundsAndNormConstraintSolver(
-            phi=self.dimension * phi,
-            settings=self.settings,
-            phase1_solver=EqualityWithBoundsSolver(
+        if phi is not None:
+            self.phase1_solver = EqualityWithBoundsAndNormConstraintSolver(
+                phi=self.dimension * phi,
+                settings=self.settings,
+                phase1_solver=EqualityWithBoundsSolver(
+                    settings=self.settings,
+                    phase1_solver=EqualitySolver(
+                        A=(1 / self.dimension) * self.X.T,
+                        b=self.mu,
+                        settings=self.settings,
+                    ),
+                ),
+            )
+        else:
+            self.phase1_solver = EqualityWithBoundsSolver(
                 settings=self.settings,
                 phase1_solver=EqualitySolver(
                     A=(1 / self.dimension) * self.X.T,
                     b=self.mu,
                     settings=self.settings,
                 ),
-            ),
-        )
+            )
 
     @property
     def num_eq_constraints(self) -> int:
@@ -133,7 +154,9 @@ class Rake(EqualityConstrainedInteriorPointMethodSolver, InteriorPointMethodSolv
     @property
     def num_ineq_constraints(self) -> int:
         """Count inequality constraints."""
-        return self.dimension + 1
+        if self.phi is not None:
+            return self.dimension + 1
+        return self.dimension
 
     def initialize_barrier_parameter(self, x0: npt.NDArray[np.float64]) -> float:
         """Initialize barrier parameter."""
@@ -185,6 +208,14 @@ class Rake(EqualityConstrainedInteriorPointMethodSolver, InteriorPointMethodSolv
         O(p^3 + p^2 * M) time.
 
         """
+        if self.phi is None:
+            return solve_kkt_system(
+                A=self.A,
+                g=-self.gradient_barrier(x, t),
+                hessian_solve=solve_diagonal_eta_inverse,
+                eta_inverse=self._hessian_ft_diagonal_inverse(x, t),
+            )
+
         return solve_kkt_system(
             A=self.A,
             g=-self.gradient_barrier(x, t),
@@ -218,6 +249,10 @@ class Rake(EqualityConstrainedInteriorPointMethodSolver, InteriorPointMethodSolv
         """
         M = self.dimension
 
+        btls_s = -np.max(np.where(delta_x < 0, x / delta_x, -np.inf))
+        if self.phi is None:
+            return btls_s
+
         quad_a = np.dot(delta_x, delta_x)
         quad_b = 2.0 * np.dot(x, delta_x)
         quad_c = np.dot(x, x) - M * self.phi
@@ -225,12 +260,7 @@ class Rake(EqualityConstrainedInteriorPointMethodSolver, InteriorPointMethodSolv
             2.0 * quad_a
         )
 
-        btls_s = min(
-            -np.max(np.where(delta_x < 0, x / delta_x, -np.inf)),
-            btls_s_high,
-        )
-
-        return btls_s
+        return min(btls_s, btls_s_high)
 
     def evaluate_objective(self, x: npt.NDArray[np.float64]) -> float:
         """Calculate f0 at x."""
@@ -244,11 +274,11 @@ class Rake(EqualityConstrainedInteriorPointMethodSolver, InteriorPointMethodSolv
         self, x: npt.NDArray[np.float64], t: float
     ) -> npt.NDArray[np.float64]:
         """Calculate gradient of ft at x."""
-        return (
-            t * self.distance.gradient(x)
-            + (2.0 / (self.dimension * self.phi - np.dot(x, x))) * x
-            - 1.0 / x
-        )
+        grad = t * self.distance.gradient(x) - 1.0 / x
+        if self.phi is not None:
+            grad += (2.0 / (self.dimension * self.phi - np.dot(x, x))) * x
+
+        return grad
 
     def hessian_multiply(
         self, x: npt.NDArray, t: float, y: npt.NDArray
@@ -267,28 +297,34 @@ class Rake(EqualityConstrainedInteriorPointMethodSolver, InteriorPointMethodSolv
         self, x: npt.NDArray[np.float64], t: float
     ) -> npt.NDArray[np.float64]:
         """Calculate diagonal component of Hessian of ft at w."""
+        d = t * self.distance.hessian_diagonal(x) + np.square(1.0 / x)
+        if self.phi is None:
+            return d
+
         M_phi_den = self.dimension * self.phi - np.dot(x, x)
-        return (
-            t * self.distance.hessian_diagonal(x)
-            + np.full_like(x, 2.0 / M_phi_den)
-            + np.square(1.0 / x)
-        )
+        return d + np.full_like(x, 2.0 / M_phi_den)
 
     def _hessian_ft_diagonal_inverse(
         self, x: npt.NDArray[np.float64], t: float
     ) -> npt.NDArray[np.float64]:
         """Calculate diagonal component of Hessian of ft at w."""
-        M_phi_den = self.dimension * self.phi - np.dot(x, x)
+        if self.phi is None:
+            tx2 = self.distance.hessian_diagonal(x) * np.square(np.sqrt(t) * x)
+        else:
+            M_phi_den = self.dimension * self.phi - np.dot(x, x)
+            tx2 = np.square(
+                np.sqrt(t * self.distance.hessian_diagonal(x) + 2.0 / M_phi_den) * x
+            )
 
-        tx2 = np.square(
-            np.sqrt(t * self.distance.hessian_diagonal(x) + 2.0 / M_phi_den) * x
-        )
         return np.square(x / np.sqrt(1.0 + tx2))
 
     def _hessian_ft_rank_one(
         self, x: npt.NDArray[np.float64]
     ) -> npt.NDArray[np.float64]:
         """Calculate rank one component of Hessian of ft at w."""
+        if self.phi is None:
+            return np.zeros_like(x)
+
         M_phi_den = self.dimension * self.phi - np.dot(x, x)
         return x * (2.0 / M_phi_den)
 
@@ -300,6 +336,9 @@ class Rake(EqualityConstrainedInteriorPointMethodSolver, InteriorPointMethodSolv
            -1 + (1 / M*\phi) * \| x \|_2^2 <= 0
 
         """
+        if self.phi is None:
+            return -x
+
         c = np.zeros((self.dimension + 1,))
         c[0:-1] = -x
         c[-1] = -1.0 + (1.0 / (self.dimension * self.phi)) * np.dot(x, x)
@@ -312,6 +351,9 @@ class Rake(EqualityConstrainedInteriorPointMethodSolver, InteriorPointMethodSolv
         (2 / (M * phi)) * x
 
         """
+        if self.phi is None:
+            return -np.eye(self.dimension)
+
         G = np.zeros((self.dimension + 1, self.dimension))
         G[0:-1, :] = -np.eye(self.dimension)
         G[-1, :] = (2.0 / (self.dimension * self.phi)) * x
@@ -327,6 +369,9 @@ class Rake(EqualityConstrainedInteriorPointMethodSolver, InteriorPointMethodSolv
 
         """
         assert len(y) == self.dimension
+        if self.phi is None:
+            return -y
+
         M = self.dimension
         b = np.zeros((M + 1,))
         b[0:M] = -y
@@ -337,6 +382,10 @@ class Rake(EqualityConstrainedInteriorPointMethodSolver, InteriorPointMethodSolv
         self, x: npt.NDArray[np.float64], y: npt.NDArray[np.float64]
     ) -> npt.NDArray[np.float64]:
         """Calculate grad_constraints(x).T @ y."""
+        if self.phi is None:
+            assert len(y) == self.dimension
+            return -y
+
         assert len(y) == self.dimension + 1
         M = self.dimension
         return -y[0:M] + ((2.0 * y[M]) / (M * self.phi)) * x

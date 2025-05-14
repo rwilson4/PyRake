@@ -69,11 +69,8 @@ class EfficientFrontier:
         distances = [self.rake.distance.evaluate(w0)]
 
         # Find the feasible weights that most closely match baseline, regardless of
-        # variance. This is a little hacky, but we do this by multiplying phi_min by
-        # 100, which assumes the unconstrained variance is less than this. Eventually
-        # I'd like to make this constraint optional, at which point we can do this more
-        # elegantly.
-        self.rake.update_phi(phi_max or phi_min * 100)
+        # variance.
+        self.rake.update_phi(phi_max)
         res_max = self.rake.solve(x0=w0)
         phi_max_nn = np.dot(res_max.solution, res_max.solution) / self.rake.dimension
 

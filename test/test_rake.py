@@ -18,10 +18,10 @@ from pyrake.rake import Rake
 @pytest.mark.parametrize(
     "seed,M,p,phi",
     [
-        (101, 100, 20, 2.0),
+        (101, 100, 20, None),
         (201, 200, 30, 1.5),
         (301, 50, 5, 1.5),
-        (401, 500, 100, 1.5),
+        (401, 500, 100, None),
         (501, 13, 3, 1.5),
     ],
 )
@@ -63,7 +63,8 @@ def test_rake_solve_kl_divergence(seed: int, M: int, p: int, phi: float) -> None
     # Verify solution is feasible
     np.testing.assert_allclose((1 / M) * X.T @ res.solution, mu)
     assert np.all(res.solution > 0)
-    assert np.dot(res.solution, res.solution) < M * phi
+    if phi is not None:
+        assert np.dot(res.solution, res.solution) < M * phi
 
     assert isinstance(res, InteriorPointMethodResult)
     assert res.duality_gaps[-1] <= 1e-6
@@ -87,7 +88,8 @@ def test_rake_solve_kl_divergence(seed: int, M: int, p: int, phi: float) -> None
     # Verify solution is feasible
     np.testing.assert_allclose((1 / M) * X.T @ res.solution, mu)
     assert np.all(res.solution > 0)
-    assert np.dot(res.solution, res.solution) < M * phi
+    if phi is not None:
+        assert np.dot(res.solution, res.solution) < M * phi
 
     assert isinstance(res, InteriorPointMethodResult)
     assert res.duality_gaps[-1] <= 1e-6
@@ -96,10 +98,10 @@ def test_rake_solve_kl_divergence(seed: int, M: int, p: int, phi: float) -> None
 @pytest.mark.parametrize(
     "seed,M,p,phi",
     [
-        (102, 100, 20, 2.0),
+        (102, 100, 20, None),
         (202, 200, 30, 2.0),
         (302, 50, 5, 2.0),
-        (402, 500, 100, 2.0),
+        (702, 500, 100, None),
         (502, 13, 3, 2.0),
     ],
 )
@@ -141,7 +143,8 @@ def test_rake_solve_squaredl2(seed: int, M: int, p: int, phi: float) -> None:
     # Verify solution is feasible
     np.testing.assert_allclose((1 / M) * X.T @ res.solution, mu)
     assert np.all(res.solution > 0)
-    assert np.dot(res.solution, res.solution) < M * phi
+    if phi is not None:
+        assert np.dot(res.solution, res.solution) < M * phi
 
     assert isinstance(res, InteriorPointMethodResult)
     assert res.duality_gaps[-1] <= 1e-6
@@ -165,7 +168,8 @@ def test_rake_solve_squaredl2(seed: int, M: int, p: int, phi: float) -> None:
     # Verify solution is feasible
     np.testing.assert_allclose((1 / M) * X.T @ res.solution, mu)
     assert np.all(res.solution > 0)
-    assert np.dot(res.solution, res.solution) < M * phi
+    if phi is not None:
+        assert np.dot(res.solution, res.solution) < M * phi
 
     assert isinstance(res, InteriorPointMethodResult)
     assert res.duality_gaps[-1] <= 1e-6
@@ -174,7 +178,7 @@ def test_rake_solve_squaredl2(seed: int, M: int, p: int, phi: float) -> None:
 @pytest.mark.parametrize(
     "seed,M,p,phi",
     [
-        (103, 100, 20, 1.5),
+        (103, 100, 20, None),
         (203, 200, 30, 1.5),
         (303, 50, 5, 2.0),
         (403, 500, 100, 2.5),
@@ -219,7 +223,8 @@ def test_rake_solve_huber(seed: int, M: int, p: int, phi: float) -> None:
     # Verify solution is feasible
     np.testing.assert_allclose((1 / M) * X.T @ res.solution, mu)
     assert np.all(res.solution > 0)
-    assert np.dot(res.solution, res.solution) < M * phi
+    if phi is not None:
+        assert np.dot(res.solution, res.solution) < M * phi
 
     assert isinstance(res, InteriorPointMethodResult)
     assert res.duality_gaps[-1] <= 1e-6
@@ -243,7 +248,8 @@ def test_rake_solve_huber(seed: int, M: int, p: int, phi: float) -> None:
     # Verify solution is feasible
     np.testing.assert_allclose((1 / M) * X.T @ res.solution, mu)
     assert np.all(res.solution > 0)
-    assert np.dot(res.solution, res.solution) < M * phi
+    if phi is not None:
+        assert np.dot(res.solution, res.solution) < M * phi
 
     assert isinstance(res, InteriorPointMethodResult)
     assert res.duality_gaps[-1] <= 1e-6
