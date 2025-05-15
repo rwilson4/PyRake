@@ -1,6 +1,6 @@
 """Solve optimization problem."""
 
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Union
 
 import numpy as np
 import numpy.typing as npt
@@ -119,6 +119,29 @@ class Rake(EqualityConstrainedInteriorPointMethodSolver, InteriorPointMethodSolv
     def b(self) -> npt.NDArray[np.float64]:
         """Right-hand side of equality constraints."""
         return self.mu
+
+    def svd_A(
+        self,
+    ) -> Tuple[
+        npt.NDArray[Union[np.float32, np.float64]],
+        npt.NDArray[Union[np.float32, np.float64]],
+        npt.NDArray[Union[np.float32, np.float64]],
+    ]:
+        """Calculate and cache SVD of A."""
+        if self.phase1_solver is None:
+            raise ValueError("phase1_solver is required.")
+
+        if (not isinstance(self.phase1_solver, EqualityWithBoundsSolver)) and (
+            not isinstance(
+                self.phase1_solver, EqualityWithBoundsAndNormConstraintSolver
+            )
+        ):
+            raise ValueError(
+                "phase1_solver must be an EqualityWithBoundsSolver or "
+                "EqualityWithBoundsAndNormConstraintSolver"
+            )
+
+        return self.phase1_solver.svd_A()
 
     def update_phi(self, phi: Optional[float] = None) -> None:
         """Update phi, mostly for EfficientFrontier."""

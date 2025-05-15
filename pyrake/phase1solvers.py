@@ -1,7 +1,8 @@
 """Phase I solvers."""
 
 import time
-from typing import Optional, Tuple
+from functools import cache
+from typing import Optional, Tuple, Union
 
 import numpy as np
 import numpy.typing as npt
@@ -115,7 +116,7 @@ class EqualitySolver(PhaseISolver):
         if self.settings.verbose:
             start_time = time.time()
 
-        U, s, Vh = linalg.svd(self.A, full_matrices=False)
+        U, s, Vh = self.svd_A()
         rank = int(np.sum(s > 1e-10))
         U_r = U[:, 0:rank]
         if not np.allclose(U_r @ (U_r.T @ self.b), self.b):
@@ -146,6 +147,17 @@ class EqualitySolver(PhaseISolver):
             print(f"  SVD calculated in {1000 * (end_time - start_time):.03f} ms")
 
         return OptimizationResult(solution=x)
+
+    @cache
+    def svd_A(
+        self,
+    ) -> Tuple[
+        npt.NDArray[Union[np.float32, np.float64]],
+        npt.NDArray[Union[np.float32, np.float64]],
+        npt.NDArray[Union[np.float32, np.float64]],
+    ]:
+        """Calculate and cache SVD of A."""
+        return linalg.svd(self.A, full_matrices=False)
 
 
 class EqualityWithBoundsSolver(PhaseIInteriorPointSolver):
@@ -217,6 +229,22 @@ class EqualityWithBoundsSolver(PhaseIInteriorPointSolver):
             raise ValueError("PhaseISolver must be an EqualitySolver.")
 
         return self.phase1_solver.b
+
+    def svd_A(
+        self,
+    ) -> Tuple[
+        npt.NDArray[Union[np.float32, np.float64]],
+        npt.NDArray[Union[np.float32, np.float64]],
+        npt.NDArray[Union[np.float32, np.float64]],
+    ]:
+        """Calculate and cache SVD of A."""
+        if self.phase1_solver is None:
+            raise ValueError("phase1_solver is required.")
+
+        if not isinstance(self.phase1_solver, EqualitySolver):
+            raise ValueError("phase1_solver must be an EqualitySolver")
+
+        return self.phase1_solver.svd_A()
 
     def is_feasible(self, x: npt.NDArray[np.float64]) -> bool:
         """Determine whether a feasible point has been found."""
@@ -656,6 +684,22 @@ class EqualityWithBoundsAndNormConstraintSolver(
             raise ValueError("PhaseISolver must be an EqualityWithBoundsSolver.")
 
         return self.phase1_solver.b
+
+    def svd_A(
+        self,
+    ) -> Tuple[
+        npt.NDArray[Union[np.float32, np.float64]],
+        npt.NDArray[Union[np.float32, np.float64]],
+        npt.NDArray[Union[np.float32, np.float64]],
+    ]:
+        """Calculate and cache SVD of A."""
+        if self.phase1_solver is None:
+            raise ValueError("phase1_solver is required.")
+
+        if not isinstance(self.phase1_solver, EqualityWithBoundsSolver):
+            raise ValueError("phase1_solver must be an EqualityWithBoundsSolver")
+
+        return self.phase1_solver.svd_A()
 
     def is_feasible(self, x: npt.NDArray[np.float64]) -> bool:
         """Determine whether a feasible point has been found."""

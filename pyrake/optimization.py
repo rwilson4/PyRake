@@ -3,7 +3,7 @@
 import time
 from abc import ABC, abstractmethod, abstractproperty
 from dataclasses import dataclass
-from typing import List, Literal, Optional, Tuple
+from typing import List, Literal, Optional, Tuple, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -1107,6 +1107,16 @@ class EqualityConstrainedInteriorPointMethodSolver(BaseInteriorPointMethodSolver
     def b(self) -> npt.NDArray[np.float64]:
         """Right-hand side of equality constraints."""
 
+    def svd_A(
+        self,
+    ) -> Tuple[
+        npt.NDArray[Union[np.float32, np.float64]],
+        npt.NDArray[Union[np.float32, np.float64]],
+        npt.NDArray[Union[np.float32, np.float64]],
+    ]:
+        """Calculate and cache SVD of A."""
+        return linalg.svd(self.A, full_matrices=False)
+
     def initialize_barrier_parameter(self, x0: npt.NDArray[np.float64]) -> float:
         r"""Initialize barrier penalty.
 
@@ -1185,7 +1195,7 @@ class EqualityConstrainedInteriorPointMethodSolver(BaseInteriorPointMethodSolver
         #
         # When A has full row rank, z_phi is the *unique* solution to the equation,
         # but this strategy works even when A is rank deficient.
-        U, s, Vh = linalg.svd(self.A, full_matrices=False)
+        U, s, Vh = self.svd_A()
         rank = int(np.sum(s > 1e-5))
         U = U[:, 0:rank]
         s = s[0:rank]
