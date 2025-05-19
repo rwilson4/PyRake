@@ -460,32 +460,34 @@ def solve_kkt_system(
         )
 
     # Step 1: form B = H^{-1} * A^T and b = H^{-1} * g
-    Bb = hessian_solve(np.hstack((A.T, g[:, np.newaxis])), **kwargs)
+    B = hessian_solve(A.T, **kwargs)
+    b = hessian_solve(g, **kwargs)
 
     # Step 2: form -S = A * B and -c = A * b
-    neg_Sc = A @ Bb
+    neg_S = A @ B
+    neg_c = A @ b
 
     # Step 3: Solve -S * xi = -c
     try:
-        c, lower = linalg.cho_factor(neg_Sc[:, 0:p], lower=True)
-        nu = linalg.cho_solve((c, lower), neg_Sc[:, p])
+        c, lower = linalg.cho_factor(neg_S, lower=True)
+        nu = linalg.cho_solve((c, lower), neg_c)
     except np.linalg.LinAlgError:
         # This can happen when A is not full rank; fall back to SVD, which is slower but
         # more numerically stable. To be honest though, in my timing experiments, this
         # is really about the same speed as Cholesky, so consider just always doing SVD.
-        U, s, Vh = linalg.svd(neg_Sc[:, 0:p], full_matrices=False)
+        U, s, Vh = linalg.svd(neg_S, full_matrices=False)
         rank = int(np.sum(s > 1e-10))
         U_r = U[:, 0:rank]
-        if not np.allclose(U_r @ (U_r.T @ neg_Sc[:, p]), neg_Sc[:, p]):
+        if not np.allclose(U_r @ (U_r.T @ neg_c), neg_c):
             raise NewtonStepError(
                 "KKT system did not have a solution, because A is not full rank."
             )
 
         s_inv = np.zeros_like(s)
         s_inv[0:rank] = 1.0 / s[0:rank]
-        nu = Vh.T @ (s_inv * (U.T @ neg_Sc[:, p]))
+        nu = Vh.T @ (s_inv * (U.T @ neg_c))
 
-    # Step 4: Solve H * delta_w = -grad_ft - A^T * xi
+    # Step 4: Solve H * delta_x = -grad_ft - A^T * xi
     delta_x = hessian_solve(g - (A.T @ nu), **kwargs)
 
     return delta_x, nu
