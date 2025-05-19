@@ -1169,7 +1169,9 @@ class EqualityConstrainedInteriorPointMethodSolver(BaseInteriorPointMethodSolver
 
         """
         delta_f0 = self.gradient(x0)
-        delta_phi = -self.grad_constraints_transpose_multiply(x0, 1.0 / self.constraints(x0))
+        delta_phi = -self.grad_constraints_transpose_multiply(
+            x0, 1.0 / self.constraints(x0)
+        )
 
         A_delta_f0 = self.A @ delta_f0
         A_delta_phi = self.A @ delta_phi
