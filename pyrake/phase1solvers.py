@@ -156,8 +156,31 @@ class EqualitySolver(PhaseISolver):
         npt.NDArray[Union[np.float32, np.float64]],
         npt.NDArray[Union[np.float32, np.float64]],
     ]:
-        """Calculate and cache SVD of A."""
-        return linalg.svd(self.A, full_matrices=False)
+        """Calculate and cache SVD of A.
+
+        When A is large with a high "aspect ratio", that is a huge number of weights but
+        a modest number of constraints, it pays to first calculate the QR factorization
+        of A^T, then compute the SVD of R. R will have dimension corresponding to the
+        number of constraints, so computing the SVD of R is much faster than computing
+        the SVD of A. But empirically, this only starts to pay off when we have around
+        10,000 weights. When the number of weights is small (e.g. 100), just directly
+        calculating the SVD of A is faster. We check the shape of A and choose
+        appropriately.
+
+        """
+        if self.A.shape[1] < 1_000 or self.A.shape[0] > 0.1 * self.A.shape[1]:
+            return linalg.svd(self.A, full_matrices=False)
+
+        # Compute the QR factorization of A^T = Q*R
+        Q, R = linalg.qr(self.A.T, mode="economic")
+
+        # Compute the SVD of R = U * diag(s) * Vh
+        U, s, Vh = linalg.svd(R)
+
+        # SVD of A is R^T * Q^T = V * diag(s) * U^T * Q^T
+        #                       = V * diag(s) * (Q * U)^T
+        QU = Q @ U
+        return Vh.T, s, QU.T
 
 
 class EqualityWithBoundsSolver(PhaseIInteriorPointSolver):

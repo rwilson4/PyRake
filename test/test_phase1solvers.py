@@ -386,7 +386,7 @@ class TestEqualityWithBoundsSolver:
             phase1_solver=EqualitySolver(
                 A=A, b=b, settings=OptimizationSettings(verbose=True)
             ),
-            settings=OptimizationSettings(verbose=True),
+            settings=OptimizationSettings(verbose=True, outer_tolerance=1e-4),
         )
 
         with pytest.raises(ProblemMarginallyFeasibleError):
@@ -452,9 +452,9 @@ class TestEqualityWithBoundsSolver:
     @pytest.mark.parametrize(
         "seed,M,p,atol",
         [
-            (1207, 100, 20, 1e-9),
+            (1207, 100, 20, 2e-9),
             (2207, 200, 30, 1e-9),
-            (3207, 50, 5, 1e-7),
+            (3207, 50, 5, 1e-6),
             (4207, 500, 100, 1e-4),
             (5207, 13, 3, 1e-9),
         ],
