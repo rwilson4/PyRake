@@ -7,6 +7,7 @@ import numpy.typing as npt
 import matplotlib.pyplot as plt
 from matplotlib.axes import Axes
 
+from .optimization import InteriorPointMethodResult
 from .rake import Rake
 
 
@@ -19,11 +20,13 @@ class EfficientFrontierResults:
         distances: List[float],
         variances: List[float],
         lagrange_multipliers: List[float],
+        ipm_results: List[InteriorPointMethodResult],
     ) -> None:
         self.weights = weights
         self.distances = distances
         self.variances = variances
         self.lagrange_multipliers = lagrange_multipliers
+        self.ipm_results = ipm_results
 
     def plot(
         self,
@@ -177,6 +180,12 @@ class EfficientFrontier:
         lagrange_multipliers = [0.0]
         distances = [self.rake.distance.evaluate(w0)]
 
+        # This is just a hack to tell the type checker that res_min has the desired type. By
+        # construction, it always will.
+        assert isinstance(res_min, InteriorPointMethodResult)
+
+        ipm_results: List[InteriorPointMethodResult] = [res_min]
+
         # Find the feasible weights that most closely match baseline, regardless of
         # variance.
         self.rake.update_phi(phi_max)
@@ -184,25 +193,29 @@ class EfficientFrontier:
         phi_max_nn = np.dot(res_max.solution, res_max.solution) / self.rake.dimension
 
         # Calculate a range of optimal weights between phi_min and phi_max
-        phi_grid = np.geomspace(phi_min, phi_max_nn, num=num_points)[1:-1]
+        phi_grid = np.linspace(phi_min, phi_max_nn, num=num_points)[1:-1]
         w = w0
         for phi in phi_grid:
             self.rake.update_phi(phi)
-            res = self.rake.solve(x0=w)
-            weights.append(res.solution)
+            ipm_res = self.rake.solve(x0=w)
+
+            weights.append(ipm_res.solution)
             variances.append(phi)
-            lagrange_multipliers.append(res.inequality_multipliers[-1])
-            distances.append(res.objective_value)
-            w = res.solution
+            lagrange_multipliers.append(ipm_res.inequality_multipliers[-1])
+            distances.append(ipm_res.objective_value)
+            ipm_results.append(ipm_res)
+            w = ipm_res.solution
 
         weights.append(res_max.solution)
         variances.append(phi_max_nn)
         lagrange_multipliers.append(res_max.inequality_multipliers[-1])
         distances.append(res_max.objective_value)
+        ipm_results.append(res_max)
 
         return EfficientFrontierResults(
             weights=weights,
             distances=distances,
             variances=variances,
             lagrange_multipliers=lagrange_multipliers,
+            ipm_results=ipm_results,
         )

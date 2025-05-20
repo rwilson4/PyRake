@@ -77,7 +77,7 @@ class OptimizationSettings:
     barrier_multiplier: float = 10.0
     inner_tolerance: float = 1e-6
     inner_tolerance_soft: float = 1e-4
-    max_inner_iterations: int = 200
+    max_inner_iterations: int = 1_000
     backtracking_alpha: float = 0.01
     backtracking_beta: float = 0.5
     backtracking_min_step: float = 1e-3
@@ -182,6 +182,7 @@ class InteriorPointMethodResult(OptimizationResult):
     duality_gaps: List[float]
     nits: int
     inner_nits: List[int]
+    inner_suboptimalities: List[List[float]]
     status: Literal[0, 1, 2]
     message: str
 
@@ -198,6 +199,25 @@ class InteriorPointMethodResult(OptimizationResult):
         plt.yscale("log")
         ax.set_xlabel("Newton Iterations")
         ax.set_ylabel("Duality Gap")
+        return ax
+
+    def plot_newton_convergence(self, it: int, ax: Optional[Axes] = None) -> Axes:
+        """Plot convergence."""
+        if ax is None:
+            _, ax = plt.subplots()
+
+        if it < 1 or it > len(self.inner_nits):
+            raise ValueError(
+                f"`it` must be between 1 and {len(self.inner_nits)}, inclusive"
+            )
+
+        nits = self.inner_nits[it - 1]
+        suboptimalities = self.inner_suboptimalities[it - 1]
+        ax.plot([ii + 1 for ii in range(nits)], suboptimalities, marker="o")
+        plt.yscale("log")
+        ax.set_title(f"Convergence of Centering Step {it}")
+        ax.set_xlabel("Iteration")
+        ax.set_ylabel("Sub-Optimality")
         return ax
 
 
@@ -374,6 +394,7 @@ class BaseInteriorPointMethodSolver(Optimizer):
             print("  Starting IPM")
 
         inner_nits = []
+        inner_suboptimalities = []
         duality_gaps = []
         status: Literal[0, 1, 2] = 0
         message = (
@@ -442,6 +463,7 @@ class BaseInteriorPointMethodSolver(Optimizer):
             equality_multipliers = result.equality_multipliers
             inequality_multipliers = result.inequality_multipliers
             inner_nits.append(result.nits)
+            inner_suboptimalities.append(result.suboptimalities)
             duality_gaps.append(result.objective_value - result.dual_value)
 
             # Applicable only for Phase I methods.
@@ -497,6 +519,7 @@ class BaseInteriorPointMethodSolver(Optimizer):
             duality_gaps=duality_gaps,
             nits=nit + 1,
             inner_nits=inner_nits,
+            inner_suboptimalities=inner_suboptimalities,
             status=status,
             message=message,
         )

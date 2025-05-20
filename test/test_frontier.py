@@ -15,10 +15,10 @@ from pyrake.rake import Rake
     "seed,M,p",
     [
         (101, 100, 20),
-        # (201, 200, 30),
-        # (301, 50, 5),
-        # (401, 500, 100),
-        # (501, 13, 3),
+        (201, 200, 30),
+        (301, 50, 5),
+        (401, 500, 100),
+        (501, 13, 3),
     ],
 )
 def test_frontier(seed: int, M: int, p: int) -> None:
@@ -58,6 +58,28 @@ def test_frontier(seed: int, M: int, p: int) -> None:
 
     frontier = EfficientFrontier(rake)
     start_time = time.time()
-    frontier.trace()
+    efr = frontier.trace()
     end_time = time.time()
     print(f"Complete in {1e3 * (end_time - start_time):.03f} ms")
+
+    # efr.plot()
+    # plt.show()
+
+    assert efr.variances[0] <= efr.variances[-1]
+    assert efr.distances[-1] <= efr.distances[0]
+
+    variance_reduction = (
+        efr.variances[-1] - efr.variances[efr.max_chord_distance()]
+    ) / (efr.variances[-1] - efr.variances[0])
+
+    bias_increase = (efr.distances[efr.max_chord_distance()] - efr.distances[-1]) / (
+        efr.distances[0] - efr.distances[-1]
+    )
+
+    weights = efr.weights[efr.max_chord_distance()]
+    np.testing.assert_allclose((1 / M) * (X.T @ weights), mu)
+    assert np.all(weights >= 0)
+
+    # 80/20 rule -- more like 70/30 in our case
+    assert variance_reduction > 0.7
+    assert bias_increase < 0.3
