@@ -8,6 +8,10 @@ import matplotlib.pyplot as plt
 from matplotlib.axes import Axes
 
 from .optimization import InteriorPointMethodResult
+from .phase1solvers import (
+    EqualityWithBoundsSolver,
+    EqualityWithBoundsAndNormConstraintSolver,
+)
 from .rake import Rake
 
 
@@ -172,7 +176,17 @@ class EfficientFrontier:
             raise ValueError("Must specify a Phase I solver")
 
         # Find the minimum variance weights, regardless of distance from baseline
-        res_min = self.rake.phase1_solver.solve(fully_optimize=True)
+        if isinstance(
+            self.rake.phase1_solver, EqualityWithBoundsAndNormConstraintSolver
+        ):
+            res_min = self.rake.phase1_solver.solve(fully_optimize=True)
+        elif isinstance(self.rake.phase1_solver, EqualityWithBoundsSolver):
+            solver = EqualityWithBoundsAndNormConstraintSolver(
+                phase1_solver=self.rake.phase1_solver,
+                settings=self.rake.settings,
+                phi=np.inf,
+            )
+            res_min = solver.solve(fully_optimize=True)
         w0 = res_min.solution
         phi_min = np.dot(w0, w0) / self.rake.dimension
         weights = [w0]
