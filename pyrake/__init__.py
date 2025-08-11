@@ -1,6 +1,25 @@
 """Balancing Weights and Raking."""
 
 from .distance_metrics import Huber, KLDivergence, SquaredL2
+from .estimators import (
+    AIPWEstimator,
+    ATCEstimator,
+    ATEEstimator,
+    ATTEstimator,
+    Estimand,
+    IPWEstimator,
+    MeanEstimator,
+    NonRespondentMean,
+    PATEEstimator,
+    PopulationMean,
+    SAIPWEstimator,
+    SampleMean,
+    SimpleDifferenceEstimator,
+    SIPWEstimator,
+    TransportEstimator,
+    TreatmentEffectEstimator,
+    WeightingEstimator,
+)
 from .exceptions import (
     BacktrackingLineSearchError,
     CenteringStepError,
@@ -30,6 +49,23 @@ from .visualizations import plot_balance
 
 __all__ = [
     "Rake",
+    "Estimand",
+    "PopulationMean",
+    "NonRespondentMean",
+    "SampleMean",
+    "WeightingEstimator",
+    "MeanEstimator",
+    "IPWEstimator",
+    "AIPWEstimator",
+    "SIPWEstimator",
+    "SAIPWEstimator",
+    "TreatmentEffectEstimator",
+    "SimpleDifferenceEstimator",
+    "ATCEstimator",
+    "ATEEstimator",
+    "ATTEstimator",
+    "PATEEstimator",
+    "TransportEstimator",
     "Huber",
     "KLDivergence",
     "SquaredL2",
