@@ -15,6 +15,7 @@ from .optimization import (
     EqualityConstrainedInteriorPointMethodSolver,
     InteriorPointMethodSolver,
     OptimizationSettings,
+    PhaseISolver,
 )
 from .phase1solvers import (
     EqualitySolver,
@@ -70,17 +71,17 @@ class Rake(EqualityConstrainedInteriorPointMethodSolver, InteriorPointMethodSolv
                 raise ValueError("constrain_mean_weight_to must be positive or None.")
 
             # Add a column of ones to X
-            self.X = np.hstack((X, np.ones((M, 1))))
+            self.X: npt.NDArray[np.float64] = np.hstack((X, np.ones((M, 1))))
             # Append the new mean constraint value to mu
-            self.mu = np.append(mu, constrain_mean_weight_to)
-            self.covariates_balanced = p + 1
+            self.mu: npt.NDArray[np.float64] = np.append(mu, constrain_mean_weight_to)
+            self.covariates_balanced: int = p + 1
         else:
             self.X = X
             self.mu = mu
             self.covariates_balanced = p
 
         self.distance = distance
-        self.dimension = M
+        self.dimension: int = M
         self.phi = phi
         if settings is None:
             self.settings: OptimizationSettings = OptimizationSettings()
@@ -101,7 +102,7 @@ class Rake(EqualityConstrainedInteriorPointMethodSolver, InteriorPointMethodSolv
                 ),
             )
         else:
-            self.phase1_solver = EqualityWithBoundsSolver(
+            self.phase1_solver: PhaseISolver = EqualityWithBoundsSolver(
                 settings=self.settings,
                 phase1_solver=EqualitySolver(
                     A=(1 / M) * self.X.T,
@@ -443,66 +444,3 @@ class Rake(EqualityConstrainedInteriorPointMethodSolver, InteriorPointMethodSolv
             + np.dot(lmbda, self.constraints(x_star))
             + np.dot(nu, self.A @ x_star - self.b)
         )
-
-    def predictor_corrector(
-        self, x: npt.NDArray[np.float64], t: float
-    ) -> npt.NDArray[np.float64]:
-        """Predictor step of a predictor/corrector method.
-
-        Given the current weights from the previous centering step and the
-        barrier parameter, this method calculates a predicted solution
-        for the next barrier parameter using a linear approximation.
-
-        Parameters
-        ----------
-        w : npt.NDArray[np.float64]
-            Weights obtained from the previous centering step.
-        t : float
-            The current barrier parameter.
-
-        Returns
-        -------
-        npt.NDArray[np.float64]
-            The predicted weights for the next barrier parameter.
-
-        Notes
-        -----
-        This function is experimental. In principle, it should reduce the number of
-        Newton steps required, but in practice it *increase* the number of steps, and
-        seems to destabilize the problem, in the sense that the predicted step is
-        actually worse than just using the result of the last centering step. I'm
-        keeping it for now to keep playing with it.
-
-        """
-        return x
-        # 1. Calculate the gradient of ft at w
-        grad_ft = self.gradient_barrier(x, t)
-
-        # 2. Compute the Hessian diagonal and rank one component
-        eta_inverse = self._hessian_ft_diagonal_inverse(x, t)
-        zeta = self._hessian_ft_rank_one(x)
-
-        # 3. Solve for dx/dt
-        dx_dt, _ = solve_kkt_system(
-            A=self.A,
-            g=-grad_ft,
-            hessian_solve=solve_diagonal_plus_rank_one_eta_inverse,
-            eta_inverse=eta_inverse,
-            zeta=zeta,
-        )
-        try:
-            np.testing.assert_allclose(self.A @ dx_dt, np.zeros_like(self.b), atol=1e-9)
-        except AssertionError as e:
-            print(e)
-
-        # 4. Use the predictor formula to calculate the next weights
-        # x_star(t) + (dx^star(t) / dt) * (mu * t - t)
-        predicted_weights = x + dx_dt * t * (self.settings.barrier_multiplier - 1)
-        try:
-            np.testing.assert_allclose(
-                self.A @ predicted_weights - self.mu, np.zeros_like(self.mu), atol=1e-9
-            )
-        except AssertionError as e:
-            print(e)
-
-        return predicted_weights

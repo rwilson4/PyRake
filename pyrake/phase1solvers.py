@@ -275,7 +275,7 @@ class EqualityWithBoundsSolver(PhaseIInteriorPointSolver):
             return True
         return False
 
-    def check_for_infeasibility(self, result: NewtonResult):
+    def check_for_infeasibility(self, result: NewtonResult) -> None:
         """Check if infeasible."""
         if result.dual_value > 0:
             raise ProblemCertifiablyInfeasibleError(
@@ -287,7 +287,9 @@ class EqualityWithBoundsSolver(PhaseIInteriorPointSolver):
             )
 
     def augment_previous_solution(
-        self, phase1_res: OptimizationResult, **kwargs
+        self,
+        phase1_res: OptimizationResult,
+        **kwargs,
     ) -> npt.NDArray[np.float64]:
         """Initialize variable based on Phase I result."""
         x = np.zeros((len(phase1_res.solution) + 1,))
@@ -400,7 +402,11 @@ class EqualityWithBoundsSolver(PhaseIInteriorPointSolver):
         #   s + btls_s * delta_s < s0 + eps
         btls_s = min(
             np.min(
-                np.where(delta_w + delta_s < 0, (w + s) / -(delta_w + delta_s), np.inf)
+                np.where(
+                    delta_w + delta_s < 0,
+                    (w + s) / -(delta_w + delta_s),
+                    np.inf,
+                )
             ),
             (self.s0_plus_eps - s) / delta_s if delta_s > 0 else np.inf,
         )
@@ -728,7 +734,7 @@ class EqualityWithBoundsAndNormConstraintSolver(
         """Determine whether a feasible point has been found."""
         return np.dot(x, x) < self.phi
 
-    def check_for_infeasibility(self, result: NewtonResult):
+    def check_for_infeasibility(self, result: NewtonResult) -> None:
         """Check if infeasible."""
         if result.dual_value > self.phi:
             raise ProblemCertifiablyInfeasibleError(

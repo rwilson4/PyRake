@@ -1,7 +1,12 @@
 """Test distance metrics."""
 
 import numpy as np
-from pyrake.distance_metrics import SquaredL2, KLDivergence, Huber
+
+from pyrake.distance_metrics import (
+    Huber,
+    KLDivergence,
+    SquaredL2,
+)
 
 
 def test_squared_l2() -> None:

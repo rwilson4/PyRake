@@ -3,8 +3,8 @@
 from .distance_metrics import Huber, KLDivergence, SquaredL2
 from .exceptions import (
     BacktrackingLineSearchError,
-    ConstraintBoundaryError,
     CenteringStepError,
+    ConstraintBoundaryError,
     InteriorPointMethodError,
     InvalidDescentDirectionError,
     NewtonStepError,

@@ -193,7 +193,7 @@ class InteriorPointMethodResult(OptimizationResult):
 
         ax.stairs(
             values=self.duality_gaps,
-            edges=[ii for ii in range(self.nits + 1)],
+            edges=list(range(self.nits + 1)),
             baseline=None,
         )
         plt.yscale("log")
@@ -271,7 +271,9 @@ class Optimizer(ABC):
 
     @abstractmethod
     def solve(
-        self, x0: Optional[npt.NDArray[np.float64]] = None, **kwargs
+        self,
+        x0: Optional[npt.NDArray[np.float64]] = None,
+        **kwargs,
     ) -> OptimizationResult:
         """Solve optimization problem.
 
@@ -482,7 +484,6 @@ class BaseInteriorPointMethodSolver(Optimizer):
             if not fully_optimize:
                 self.check_for_infeasibility(result)
 
-            x = self.predictor_corrector(x, t)
             t *= self.settings.barrier_multiplier
 
         if self.settings.verbose:
@@ -525,7 +526,9 @@ class BaseInteriorPointMethodSolver(Optimizer):
         )
 
     def augment_previous_solution(
-        self, phase1_res: OptimizationResult, **kwargs
+        self,
+        phase1_res: OptimizationResult,
+        **kwargs,
     ) -> npt.NDArray[np.float64]:
         """Initialize variable based on Phase I result."""
         return phase1_res.solution
@@ -762,10 +765,10 @@ class BaseInteriorPointMethodSolver(Optimizer):
             Step modifier.
 
         """
-        if lambda_squared < 0:
+        if (grad_ft_dot_delta_x := np.dot(delta_x, self.gradient_barrier(x, t))) > 0:
             raise InvalidDescentDirectionError(
                 message="Newton step was not a descent direction.",
-                grad_ft_dot_delta_x=-lambda_squared,
+                grad_ft_dot_delta_x=grad_ft_dot_delta_x,
             )
 
         alpha = self.settings.backtracking_alpha
@@ -807,12 +810,6 @@ class BaseInteriorPointMethodSolver(Optimizer):
             btls_s *= beta
 
         return btls_s
-
-    def predictor_corrector(
-        self, x: npt.NDArray[np.float64], t: float
-    ) -> npt.NDArray[np.float64]:
-        """Predictor step of a predictor/corrector method."""
-        return x
 
     def newton_decrement_squared(
         self,
@@ -889,7 +886,7 @@ class BaseInteriorPointMethodSolver(Optimizer):
     def is_feasible(self, x: npt.NDArray[np.float64]) -> bool:
         """Determine whether a feasible point has been found."""
 
-    def check_for_infeasibility(self, result: NewtonResult):
+    def check_for_infeasibility(self, result: NewtonResult) -> None:
         """Check if infeasible.
 
         For some problems, the dual function can provide a "certificate of

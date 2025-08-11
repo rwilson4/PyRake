@@ -2,15 +2,15 @@
 
 from typing import List, Optional
 
+import matplotlib.pyplot as plt
 import numpy as np
 import numpy.typing as npt
-import matplotlib.pyplot as plt
 from matplotlib.axes import Axes
 
 from .optimization import InteriorPointMethodResult
 from .phase1solvers import (
-    EqualityWithBoundsSolver,
     EqualityWithBoundsAndNormConstraintSolver,
+    EqualityWithBoundsSolver,
 )
 from .rake import Rake
 
@@ -181,12 +181,14 @@ class EfficientFrontier:
         ):
             res_min = self.rake.phase1_solver.solve(fully_optimize=True)
         elif isinstance(self.rake.phase1_solver, EqualityWithBoundsSolver):
-            solver = EqualityWithBoundsAndNormConstraintSolver(
+            res_min = EqualityWithBoundsAndNormConstraintSolver(
+                phi=np.inf,
                 phase1_solver=self.rake.phase1_solver,
                 settings=self.rake.settings,
-                phi=np.inf,
-            )
-            res_min = solver.solve(fully_optimize=True)
+            ).solve(fully_optimize=True)
+        else:
+            raise ValueError("Unrecognized Phase I Solver")
+
         w0 = res_min.solution
         phi_min = np.dot(w0, w0) / self.rake.dimension
         weights = [w0]
@@ -211,7 +213,7 @@ class EfficientFrontier:
         w = w0
         for phi in phi_grid:
             self.rake.update_phi(phi)
-            ipm_res = self.rake.solve(x0=w)
+            ipm_res = self.rake.solve()
 
             weights.append(ipm_res.solution)
             variances.append(phi)

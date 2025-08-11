@@ -4,7 +4,7 @@ import time
 
 import numpy as np
 import pytest
-from scipy.special import logit, expit
+from scipy.special import expit, logit
 
 from pyrake.distance_metrics import KLDivergence
 from pyrake.frontier import EfficientFrontier

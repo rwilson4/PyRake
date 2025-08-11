@@ -58,7 +58,7 @@ class InvalidDescentDirectionError(BacktrackingLineSearchError):
     def __str__(self) -> str:
         """Pretty-print error."""
         msg = (
-            f"{self.message} (∇f^T △w = {self.grad_ft_dot_delta_x} > 0, "
+            f"{self.message} (∇f^T △x = {self.grad_ft_dot_delta_x} > 0, "
             "but should be <= 0)"
         )
         return msg

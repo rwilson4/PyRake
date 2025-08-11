@@ -4,7 +4,10 @@ import numpy as np
 import pytest
 from scipy import linalg
 
-from pyrake.exceptions import InteriorPointMethodError, ProblemInfeasibleError
+from pyrake.exceptions import (
+    InteriorPointMethodError,
+    ProblemInfeasibleError,
+)
 from pyrake.optimization import (
     InteriorPointMethodResult,
     OptimizationSettings,
@@ -13,8 +16,8 @@ from pyrake.optimization import (
 )
 from pyrake.phase1solvers import (
     EqualitySolver,
-    EqualityWithBoundsSolver,
     EqualityWithBoundsAndNormConstraintSolver,
+    EqualityWithBoundsSolver,
 )
 
 
@@ -759,4 +762,5 @@ class TestEqualityWithBoundsAndNormConstraintSolver:
             settings=OptimizationSettings(verbose=True),
         )
         res = solver.solve(x0=w_star, fully_optimize=True)
+        assert isinstance(res, InteriorPointMethodResult)
         assert res.nits == 1

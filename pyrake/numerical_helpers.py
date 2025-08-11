@@ -440,7 +440,8 @@ def solve_kkt_system(
     Per the discussion in Boyd and Vandenberghe (2004), Algorithm C.4 (page
     673):
       1. Form B = H^{-1} * A^T and b = H^{-1} * g. This corresponds to p+1 solves. We
-         use `hessian_solve` to solve each system in O(M) time, for O(p*M) time total.
+         use `hessian_solve` to solve each system in O(M) time, for O((p+1) * M) time
+         total.
       2. Form S = -A * B and c = -A * b. Since A is p-by-M and B is M-by-p, forming S
          involves p^2 dot products of length M, which takes (p^2 * M) time. Forming c
          takes O(p * M) time.
@@ -450,7 +451,9 @@ def solve_kkt_system(
             system using the Singular Value Decomposition (SVD) instead of the Cholesky
             decomposition. The SVD is slower, so we still at least *try* the Cholesky,
             and if that fails, we fall back to SVD.
-      4. Solve H * delta_x= g - A^T * nu. This takes O(M) time.
+      4. Solve H * delta_x = g - A^T * nu. This takes O(p*M) time to form the RHS, then
+         O(M) time to compute delta_x.
+    In total, that's O(M * p^2 + p^3), the time being dominated by forming S.
 
     """
     p, M = A.shape
@@ -467,7 +470,7 @@ def solve_kkt_system(
     neg_S = A @ B
     neg_c = A @ b
 
-    # Step 3: Solve -S * xi = -c
+    # Step 3: Solve -S * nu = -c
     try:
         c, lower = linalg.cho_factor(neg_S, lower=True)
         nu = linalg.cho_solve((c, lower), neg_c)
@@ -487,7 +490,7 @@ def solve_kkt_system(
         s_inv[0:rank] = 1.0 / s[0:rank]
         nu = Vh.T @ (s_inv * (U.T @ neg_c))
 
-    # Step 4: Solve H * delta_x = -grad_ft - A^T * xi
+    # Step 4: Solve H * delta_x = -grad_ft - A^T * nu
     delta_x = hessian_solve(g - (A.T @ nu), **kwargs)
 
     return delta_x, nu

@@ -118,7 +118,9 @@ class Huber(Distance):
 
     """
 
-    def __init__(self, v: Optional[npt.NDArray[np.float64]] = None, delta=0.1) -> None:
+    def __init__(
+        self, v: Optional[npt.NDArray[np.float64]] = None, delta: float = 0.1
+    ) -> None:
         super().__init__(v=v)
         self.delta = delta
 
