@@ -26,6 +26,7 @@ from .optimization import (
     ProblemMarginallyFeasibleError,
 )
 from .rake import Rake
+from .visualizations import plot_balance
 
 __all__ = [
     "Rake",
@@ -53,4 +54,5 @@ __all__ = [
     "ProblemMarginallyFeasibleError",
     "ProblemInfeasibleError",
     "SevereCurvatureError",
+    "plot_balance",
 ]
