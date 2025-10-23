@@ -348,6 +348,7 @@ class WeightingEstimator(ABC):
         axis_label_size: Optional[int] = None,
         tick_label_size: Optional[int] = None,
         legend_label_size: Optional[int] = None,
+        legend_placement: Optional[str] = None,
         ax: Optional[Axes] = None,
     ) -> Tuple[pd.DataFrame, Axes]:
         r"""Plot sensitivity of estimates to hidden biases.
@@ -377,6 +378,8 @@ class WeightingEstimator(ABC):
          axis_label_size, tick_label_size, legend_label_size : int, optional
             Font size for axis labels and title; tick mark labels; and legend entries,
             resp.
+         legend_placement : str, optional
+            Legend placement. Chosen automatically if not specified.
          ax : Axes, optional
             If specified, plot everything on these axes.
 
@@ -463,6 +466,8 @@ class WeightingEstimator(ABC):
 
         if ax is None:
             fig, ax = plt.subplots()
+        else:
+            plt.sca(ax)
 
         sns.lineplot(
             x="Gamma",
@@ -576,9 +581,16 @@ class WeightingEstimator(ABC):
                 label="Expanded Confidence Interval",
             ),
         ]
+
+        if legend_placement is None:
+            if side == "greater":
+                legend_placement = "upper left"
+            else:
+                legend_placement = "lower left"
+
         ax.legend(
             handles=legend_handles,
-            loc="upper left" if side == "greater" else "lower left",
+            loc=legend_placement,
             fontsize=legend_label_size,
         )
 
@@ -1402,7 +1414,7 @@ class RatioEstimator(WeightingEstimator):
             "SAIPW": SAIPWEstimator,
         }
 
-        self.numerator_estimator = classes[
+        self.numerator_estimator: MeanEstimator = classes[
             numerator_estimator_class or estimator_class
         ](
             propensity_scores=propensity_scores,
@@ -1411,7 +1423,7 @@ class RatioEstimator(WeightingEstimator):
             **numerator_kwargs_nn,
         )
 
-        self.denominator_estimator = classes[
+        self.denominator_estimator: MeanEstimator = classes[
             denominator_estimator_class or estimator_class
         ](
             propensity_scores=propensity_scores,
@@ -2471,7 +2483,7 @@ class TreatmentEffectRatioEstimator(WeightingEstimator):
         }
         EstimatorClass = classes[treatment_effect_estimator_class]
 
-        self.numerator_estimator = EstimatorClass(
+        self.numerator_estimator: TreatmentEffectEstimator = EstimatorClass(
             control_propensity_scores=control_propensity_scores,
             control_outcomes=numerator_control_outcomes,
             treated_propensity_scores=treated_propensity_scores,
@@ -2481,7 +2493,7 @@ class TreatmentEffectRatioEstimator(WeightingEstimator):
             treated_kwargs=numerator_treated_kwargs,
         )
 
-        self.denominator_estimator = EstimatorClass(
+        self.denominator_estimator: TreatmentEffectEstimator = EstimatorClass(
             control_propensity_scores=control_propensity_scores,
             control_outcomes=denominator_control_outcomes,
             treated_propensity_scores=treated_propensity_scores,

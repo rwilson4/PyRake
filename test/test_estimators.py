@@ -110,7 +110,9 @@ class TestIPWEstimator:
             propensities, outcomes, len(propensities), estimand=SampleMean()
         )
         expected = float(
-            np.mean(outcomes) * (1 - np.mean(outcomes)) / (len(propensities) - 1)
+            np.mean(outcomes)
+            * (1.0 - float(np.mean(outcomes)))
+            / (len(propensities) - 1)
         )
 
         actual = estimator.variance()
@@ -1219,7 +1221,9 @@ class TestRatioEstimator:
     """Pytest test cases for RatioEstimator class."""
 
     @staticmethod
-    def generate_data_binary(n=100, seed=42):
+    def generate_data_binary(
+        n: int = 100, seed: int = 42
+    ) -> Tuple[npt.NDArray[np.float64], npt.NDArray[np.int64], npt.NDArray[np.int64]]:
         """Generate synthetic data for binary numerator/denominator outcomes."""
         rng = np.random.default_rng(seed)
         propensity_scores = rng.uniform(0.2, 0.8, size=n)
@@ -1228,7 +1232,11 @@ class TestRatioEstimator:
         return propensity_scores, numerator_outcomes, denominator_outcomes
 
     @staticmethod
-    def generate_data_continuous(n=100, seed=24):
+    def generate_data_continuous(
+        n: int = 100, seed: int = 24
+    ) -> Tuple[
+        npt.NDArray[np.float64], npt.NDArray[np.float64], npt.NDArray[np.float64]
+    ]:
         """Generate synthetic data for continuous numerator/denominator outcomes."""
         rng = np.random.default_rng(seed)
         propensity_scores = rng.uniform(0.2, 0.9, size=n)
@@ -1236,7 +1244,7 @@ class TestRatioEstimator:
         denominator_outcomes = rng.normal(4.0, 2.0, size=n)
         return propensity_scores, numerator_outcomes, denominator_outcomes
 
-    def test_point_estimate_binary(self):
+    def test_point_estimate_binary(self) -> None:
         """Test that the point estimate is computed as expected for binary outcomes."""
         ps, num, den = self.generate_data_binary()
         estimator = RatioEstimator(
@@ -1251,7 +1259,7 @@ class TestRatioEstimator:
         expected = x_hat / y_hat
         assert estimator.point_estimate() == pytest.approx(expected, rel=1e-12)
 
-    def test_point_estimate_continuous(self):
+    def test_point_estimate_continuous(self) -> None:
         """Test point estimate for continuous outcomes."""
         ps, num, den = self.generate_data_continuous()
         estimator = RatioEstimator(
@@ -1265,7 +1273,7 @@ class TestRatioEstimator:
         expected = x_hat / y_hat
         assert estimator.point_estimate() == pytest.approx(expected, rel=1e-12)
 
-    def test_variance(self):
+    def test_variance(self) -> None:
         """Test variance calculation with delta method."""
         ps, num, den = self.generate_data_binary()
         estimator = RatioEstimator(ps, num, den)
@@ -1283,7 +1291,7 @@ class TestRatioEstimator:
         )
         assert estimator.variance() == pytest.approx(expected_var, rel=1e-12)
 
-    def test_pvalue(self):
+    def test_pvalue(self) -> None:
         """Test p-value calculation for two-sided and one-sided alternatives."""
         ps, num, den = self.generate_data_binary()
         estimator = RatioEstimator(ps, num, den)
@@ -1307,7 +1315,7 @@ class TestRatioEstimator:
             expected_pl, rel=1e-8
         )
 
-    def test_confidence_interval(self):
+    def test_confidence_interval(self) -> None:
         """Test confidence interval computation for two-sided and one-sided."""
         ps, num, den = self.generate_data_binary()
         estimator = RatioEstimator(ps, num, den)
@@ -1333,7 +1341,7 @@ class TestRatioEstimator:
         assert upper == pytest.approx(pe + z * se, rel=1e-12)
         assert lower == -np.inf
 
-    def test_sensitivity_analysis_binary(self):
+    def test_sensitivity_analysis_binary(self) -> None:
         """Test sensitivity analysis for binary outcomes returns bounds in sensible order."""
         ps, num, den = self.generate_data_binary()
         estimator = RatioEstimator(ps, num, den)
@@ -1343,7 +1351,7 @@ class TestRatioEstimator:
         lb6, ub6 = estimator.sensitivity_analysis(gamma=6.0)
         assert lb6 <= lb <= ub <= ub6
 
-    def test_sensitivity_analysis_continuous(self):
+    def test_sensitivity_analysis_continuous(self) -> None:
         """Test sensitivity analysis for continuous outcomes."""
         ps, num, den = self.generate_data_continuous()
         estimator = RatioEstimator(ps, num, den)
@@ -1352,7 +1360,7 @@ class TestRatioEstimator:
         assert isinstance(ub, float)
         assert lb <= ub
 
-    def test_expanded_confidence_interval(self):
+    def test_expanded_confidence_interval(self) -> None:
         """Test expanded confidence interval bootstrapping produces interval with proper order."""
         ps, num, den = self.generate_data_binary(n=200)
         estimator = RatioEstimator(ps, num, den)
@@ -1368,7 +1376,7 @@ class TestRatioEstimator:
         assert lb1 == pytest.approx(ci_lb, rel=1e-5)
         assert ub1 == pytest.approx(ci_ub, rel=1e-5)
 
-    def test_plot_sensitivity(self):
+    def test_plot_sensitivity(self) -> None:
         """Sanity-check test: plot sensitivity does not error out and returns DataFrame and Axes."""
         # import matplotlib
         # matplotlib.use('Agg')  # Use a non-interactive backend

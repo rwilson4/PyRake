@@ -68,6 +68,8 @@ class EfficientFrontierResults:
         """
         if ax is None:
             _, ax = plt.subplots()
+        else:
+            plt.sca(ax)
 
         ax.plot(self.distances, self.variances)
         plt.fill_between(

@@ -47,7 +47,11 @@ from .optimization import (
     ProblemMarginallyFeasibleError,
 )
 from .rake import Rake
-from .visualizations import plot_balance
+from .visualizations import (
+    meta_analysis,
+    plot_balance,
+    plot_balance_2_sample,
+)
 
 __all__ = [
     "Rake",
@@ -59,17 +63,17 @@ __all__ = [
     "MeanEstimator",
     "IPWEstimator",
     "AIPWEstimator",
+    "RatioEstimator",
+    "SimpleDifferenceEstimator",
     "SIPWEstimator",
     "SAIPWEstimator",
-    "RatioEstimator",
     "TreatmentEffectEstimator",
-    "TreatmentEffectRatioEstimator",
-    "SimpleDifferenceEstimator",
     "ATCEstimator",
     "ATEEstimator",
     "ATTEstimator",
     "PATEEstimator",
     "TransportEstimator",
+    "TreatmentEffectRatioEstimator",
     "Huber",
     "KLDivergence",
     "SquaredL2",
@@ -94,5 +98,7 @@ __all__ = [
     "ProblemMarginallyFeasibleError",
     "ProblemInfeasibleError",
     "SevereCurvatureError",
+    "meta_analysis",
     "plot_balance",
+    "plot_balance_2_sample",
 ]
