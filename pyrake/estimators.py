@@ -1,8 +1,8 @@
 """Estimate things."""
 
 import math
-from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Literal, Optional, Tuple, Union
+from abc import ABC, abstractmethod, abstractproperty
+from typing import Any, Dict, List, Literal, Optional, Self, Tuple, Type, Union
 
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
@@ -18,46 +18,66 @@ from scipy import optimize, stats
 class Estimand(ABC):
     """Base class for things that can be estimated."""
 
-    @staticmethod
-    @abstractmethod
-    def weights_from_propensity_scores(
-        propensity_scores: npt.NDArray[np.float64],
-    ) -> npt.NDArray[np.float64]:
+    @abstractproperty
+    def weights(self) -> npt.NDArray[np.float64]:
         """Calculate weights based on propensity scores."""
         pass
 
-    @staticmethod
     @abstractmethod
     def sensitivity_region(
-        weights: npt.NDArray[np.float64],
+        self,
         gamma: float,
     ) -> Tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
         """Calculate a sensitivity region around baseline weights."""
         pass
 
+    @abstractmethod
+    def resample(self, bootstrap_indices: npt.NDArray[np.int64]) -> Self:
+        """Create a new Estimand object based on resampled indices."""
+        pass
 
-class PopulationMean(Estimand):
+    @staticmethod
+    @abstractmethod
+    def normalizing_factor(sample_size: int, population_size: int) -> float:
+        """Calculate normalizing factor."""
+
+
+class SimpleEstimand(Estimand):
+    """Simple estimands."""
+
+    def __init__(self, propensity_scores: npt.NDArray[np.float64]) -> None:
+        self.propensity_scores = propensity_scores
+
+    def resample(self, bootstrap_indices: npt.NDArray[np.int64]) -> Self:
+        """Create a new Estimand object based on resampled indices."""
+        return self.__class__(self.propensity_scores[bootstrap_indices])
+
+
+class PopulationMean(SimpleEstimand):
     """Population mean."""
 
-    @staticmethod
-    def weights_from_propensity_scores(
-        propensity_scores: npt.NDArray[np.float64],
-    ) -> npt.NDArray[np.float64]:
+    @property
+    def weights(self) -> npt.NDArray[np.float64]:
         """Calculate weights based on propensity scores."""
-        return np.ones_like(propensity_scores) / propensity_scores
+        return np.ones_like(self.propensity_scores) / self.propensity_scores
 
-    @staticmethod
     def sensitivity_region(
-        weights: npt.NDArray[np.float64],
+        self,
         gamma: float,
     ) -> Tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
         """Calculate a sensitivity region around baseline weights."""
+        weights = self.weights
         wl = weights / math.sqrt(gamma) + (1.0 - 1.0 / math.sqrt(gamma))
         wu = weights * math.sqrt(gamma) - (math.sqrt(gamma) - 1.0)
         return wl, wu
 
+    @staticmethod
+    def normalizing_factor(sample_size: int, population_size: int) -> float:
+        """Calculate normalizing factor."""
+        return population_size
 
-class NonRespondentMean(Estimand):
+
+class NonRespondentMean(SimpleEstimand):
     """Non-respondent mean.
 
     The non-respondent mean is the mean response among everyone who did *not* respond.
@@ -65,25 +85,30 @@ class NonRespondentMean(Estimand):
 
     """
 
-    @staticmethod
-    def weights_from_propensity_scores(
-        propensity_scores: npt.NDArray[np.float64],
-    ) -> npt.NDArray[np.float64]:
+    @property
+    def weights(self) -> npt.NDArray[np.float64]:
         """Calculate weights based on propensity scores."""
-        return (np.ones_like(propensity_scores) - propensity_scores) / propensity_scores
+        return (
+            np.ones_like(self.propensity_scores) - self.propensity_scores
+        ) / self.propensity_scores
 
-    @staticmethod
     def sensitivity_region(
-        weights: npt.NDArray[np.float64],
+        self,
         gamma: float,
     ) -> Tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
         """Calculate a sensitivity region around baseline weights."""
+        weights = self.weights
         wl = weights / math.sqrt(gamma)
         wu = weights * math.sqrt(gamma)
         return wl, wu
 
+    @staticmethod
+    def normalizing_factor(sample_size: int, population_size: int) -> float:
+        """Calculate normalizing factor."""
+        return population_size - sample_size
 
-class SampleMean(Estimand):
+
+class SampleMean(SimpleEstimand):
     """Sample mean.
 
     The sample mean is the mean response among the population of respondents. The
@@ -91,20 +116,59 @@ class SampleMean(Estimand):
 
     """
 
-    @staticmethod
-    def weights_from_propensity_scores(
-        propensity_scores: npt.NDArray[np.float64],
-    ) -> npt.NDArray[np.float64]:
+    @property
+    def weights(self) -> npt.NDArray[np.float64]:
         """Calculate weights based on propensity scores."""
-        return np.ones_like(propensity_scores)
+        return np.ones_like(self.propensity_scores)
 
-    @staticmethod
     def sensitivity_region(
-        weights: npt.NDArray[np.float64],
+        self,
         gamma: float,
     ) -> Tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
         """Calculate a sensitivity region around baseline weights."""
+        weights = self.weights
         return weights, weights
+
+    @staticmethod
+    def normalizing_factor(sample_size: int, population_size: int) -> float:
+        """Calculate normalizing factor."""
+        return sample_size
+
+
+class DoubleSamplingEstimand(Estimand):
+    """Base class when there are two sampling mechanisms."""
+
+    def __init__(self, estimand1: SimpleEstimand, estimand2: SimpleEstimand) -> None:
+        self.estimand1 = estimand1
+        self.estimand2 = estimand2
+
+    @property
+    def weights(self) -> npt.NDArray[np.float64]:
+        """Calculate weights based on propensity scores."""
+        return self.estimand1.weights * self.estimand2.weights
+
+    def sensitivity_region(
+        self,
+        gamma: float,
+    ) -> Tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
+        """Calculate a sensitivity region around baseline weights."""
+        wl1, wu1 = self.estimand1.sensitivity_region(gamma)
+        wl2, wu2 = self.estimand2.sensitivity_region(gamma)
+        return wl1 * wl2, wu1 * wu2
+
+    def resample(
+        self, bootstrap_indices: npt.NDArray[np.int64]
+    ) -> "DoubleSamplingEstimand":
+        """Create a new Estimand object based on resampled indices."""
+        return DoubleSamplingEstimand(
+            self.estimand1.resample(bootstrap_indices),
+            self.estimand2.resample(bootstrap_indices),
+        )
+
+    @staticmethod
+    def normalizing_factor(sample_size: int, population_size: int) -> float:
+        """Calculate normalizing factor."""
+        raise NotImplementedError("Not implemented")
 
 
 class WeightingEstimator(ABC):
@@ -185,7 +249,7 @@ class WeightingEstimator(ABC):
         self,
         alpha: float = 0.10,
         gamma: float = 6.0,
-        side: Literal["two-sided", "lesser", "greater"] = "two-sided",
+        alternative: Literal["two-sided", "less", "greater"] = "two-sided",
         B: int = 1_000,
         seed: Optional[
             Union[
@@ -210,11 +274,11 @@ class WeightingEstimator(ABC):
          gamma : float, optional
             The Gamma factor. Must be >= 1.0, with 1.0 indicating perfect propensity
             scores. Defaults to 6. See Notes in `sensitivity_analysis`.
-         side : ["two-sided", "lesser", "greater"], optional
+         alternative : ["two-sided", "less", "greater"], optional
             What kind of test:
               - "two-sided": H0: theta = `null_value` vs Halt: theta <> `null_value`.
               - "greater": H0: theta <= `null_value` vs Halt: theta > `null_value`.
-              - "lesser": H0: theta >= `null_value` vs Halt: theta < `null_value`.
+              - "less": H0: theta >= `null_value` vs Halt: theta < `null_value`.
             Defaults to "two-sided".
          B : int, optional
             Number of bootstrap replications to run. Defaults to 1_000.
@@ -228,14 +292,14 @@ class WeightingEstimator(ABC):
             only one of these will be finite:
               - "two-sided": lb and ub both finite
               - "greater": lb finite, ub = np.inf
-              - "lesser": lb = -np.inf, ub finite
+              - "less": lb = -np.inf, ub finite
 
         """
 
     def pvalue(
         self,
         null_value: float,
-        side: Literal["two-sided", "lesser", "greater"] = "two-sided",
+        alternative: Literal["two-sided", "less", "greater"] = "two-sided",
     ) -> float:
         """Calculate a p-value.
 
@@ -247,12 +311,12 @@ class WeightingEstimator(ABC):
         ----------
          null_value : float
             The hypothesized theta.
-         side : ["two-sided", "lesser", "greater"], optional
+         alternative : ["two-sided", "less", "greater"], optional
             What kind of test:
               - "two-sided": H0: theta = `null_value` vs Halt: theta <> `null_value`.
               - "greater": H0: theta <= `null_value` vs Halt: theta > `null_value`.
-              - "lesser": H0: theta >= `null_value` vs Halt: theta < `null_value`.
-            For example, specifying side = "greater" returns a p-value that quantifies
+              - "less": H0: theta >= `null_value` vs Halt: theta < `null_value`.
+            For example, specifying alternative = "greater" returns a p-value that quantifies
             the strength of evidence against the null hypothesis that theta is less than
             `null_value`, in favor of the alternative hypothesis that theta is actually
             greater than `null_value`. Defaults to "two-sided".
@@ -268,25 +332,25 @@ class WeightingEstimator(ABC):
 
         t = (pe - null_value) / se
 
-        if side == "greater" or side == "two-sided":
-            p_greater = stats.norm.cdf(t)
-            if side == "greater":
+        if alternative == "greater" or alternative == "two-sided":
+            p_greater = stats.norm.sf(t)
+            if alternative == "greater":
                 return p_greater
 
-        if side == "lesser" or side == "two-sided":
-            p_lesser = stats.norm.sf(t)
-            if side == "lesser":
-                return p_lesser
+        if alternative == "less" or alternative == "two-sided":
+            p_less = stats.norm.cdf(t)
+            if alternative == "less":
+                return p_less
 
-        if side == "two-sided":
-            return min(1.0, 2.0 * min(p_lesser, p_greater))
+        if alternative == "two-sided":
+            return min(1.0, 2.0 * min(p_less, p_greater))
 
-        raise ValueError(f"Unrecognized input {side=:}")
+        raise ValueError(f"Unrecognized input {alternative=:}")
 
     def confidence_interval(
         self,
         alpha: float = 0.10,
-        side: Literal["two-sided", "lesser", "greater"] = "two-sided",
+        alternative: Literal["two-sided", "less", "greater"] = "two-sided",
     ) -> Tuple[float, float]:
         """Calculate confidence interval on a quantity, theta.
 
@@ -295,11 +359,11 @@ class WeightingEstimator(ABC):
          alpha : float, optional
             P-value threshold, e.g. specify alpha=0.05 for a 95% confidence interval.
             Defaults to 0.10, corresponding to a 90% confidence interval.
-         side : ["two-sided", "lesser", "greater"], optional
+         alternative : ["two-sided", "less", "greater"], optional
             What kind of test:
               - "two-sided": H0: theta = `null_value` vs Halt: theta <> `null_value`.
               - "greater": H0: theta <= `null_value` vs Halt: theta > `null_value`.
-              - "lesser": H0: theta >= `null_value` vs Halt: theta < `null_value`.
+              - "less": H0: theta >= `null_value` vs Halt: theta < `null_value`.
             Defaults to "two-sided".
 
         Returns
@@ -308,31 +372,31 @@ class WeightingEstimator(ABC):
             Lower and upper bounds on the confidence interval. For one-sided intervals,
             only one of these will be finite:
               - "two-sided": lb and ub both finite
-              - "greater": lb = -np.inf, ub = finite
-              - "lesser": lb finite, ub = np.inf
+              - "greater": lb finite, ub = np.inf
+              - "less": lb = -np.inf, ub finite
 
         """
         pe = self.point_estimate()
         se = math.sqrt(self.variance())
-        if side == "two-sided":
+        if alternative == "two-sided":
             zcrit = stats.norm.isf(alpha / 2)
         else:
             zcrit = stats.norm.isf(alpha)
 
-        if side == "lesser" or side == "two-sided":
+        if alternative == "greater" or alternative == "two-sided":
             lb = pe - zcrit * se
-            if side == "lesser":
+            if alternative == "greater":
                 return lb, np.inf
 
-        if side == "greater" or side == "two-sided":
+        if alternative == "less" or alternative == "two-sided":
             ub = pe + zcrit * se
-            if side == "greater":
+            if alternative == "less":
                 return -np.inf, ub
 
-        if side == "two-sided":
+        if alternative == "two-sided":
             return lb, ub
 
-        raise ValueError(f"Unrecognized input {side=:}")
+        raise ValueError(f"Unrecognized input {alternative=:}")
 
     def plot_sensitivity(
         self,
@@ -340,7 +404,7 @@ class WeightingEstimator(ABC):
         gamma_upper: float = 6.0,
         num_points: int = 50,
         alpha: float = 0.10,
-        side: Literal["two-sided", "lesser", "greater"] = "two-sided",
+        alternative: Literal["two-sided", "less", "greater"] = "two-sided",
         B: int = 1_000,
         title: Optional[str] = None,
         ylabel: str = "Sensitivity Interval",
@@ -362,12 +426,12 @@ class WeightingEstimator(ABC):
          alpha : float, optional
             P-value threshold, e.g. specify alpha=0.05 for a 95% confidence interval.
             Defaults to 0.10, corresponding to a 90% confidence interval.
-         side : ["two-sided", "lesser", "greater"], optional
+         alternative : ["two-sided", "less", "greater"], optional
             What kind of test:
               - "two-sided": H0: \bar{Y} = `null_value` vs Halt: \bar{Y} <>
                 `null_value`.
               - "greater": H0: \bar{Y} <= `null_value` vs Halt: \bar{Y} > `null_value`.
-              - "lesser": H0: \bar{Y} >= `null_value` vs Halt: \bar{Y} < `null_value`.
+              - "less": H0: \bar{Y} >= `null_value` vs Halt: \bar{Y} < `null_value`.
          B : int, optional
             Number of bootstrap replications to run. Defaults to 1_000.
          title, ylabel : str, optional
@@ -411,11 +475,11 @@ class WeightingEstimator(ABC):
                 eci_lb[ii],
                 eci_ub[ii],
             ) = self.expanded_confidence_interval(
-                alpha=alpha, gamma=gamma, side=side, B=B, seed=42
+                alpha=alpha, gamma=gamma, alternative=alternative, B=B, seed=42
             )
 
         # Create a dataframe for plotting
-        ci_lb, ci_ub = self.confidence_interval(alpha=alpha, side=side)
+        ci_lb, ci_ub = self.confidence_interval(alpha=alpha, alternative=alternative)
         df = pd.DataFrame(
             {
                 "Gamma": gammas,
@@ -428,7 +492,7 @@ class WeightingEstimator(ABC):
         )
 
         # Melt the dataframe for plotting
-        if side == "two-sided":
+        if alternative == "two-sided":
             value_vars = [
                 "Point Estimate",
                 "Sen Lower Bound",
@@ -436,20 +500,20 @@ class WeightingEstimator(ABC):
                 "ECI Lower Bound",
                 "ECI Upper Bound",
             ]
-        elif side == "lesser":
+        elif alternative == "greater":
             value_vars = [
                 "Point Estimate",
                 "Sen Lower Bound",
                 "ECI Lower Bound",
             ]
-        elif side == "greater":
+        elif alternative == "less":
             value_vars = [
                 "Point Estimate",
                 "Sen Upper Bound",
                 "ECI Upper Bound",
             ]
         else:
-            raise ValueError(f"Unrecognized input {side=:}")
+            raise ValueError(f"Unrecognized input {alternative=:}")
 
         df_melt = pd.melt(
             df,
@@ -479,7 +543,7 @@ class WeightingEstimator(ABC):
             ax=ax,
         )
 
-        if side == "two-sided":
+        if alternative == "two-sided":
             ax.plot(
                 df["Gamma"],
                 np.full_like(df["Gamma"], ci_lb),
@@ -505,7 +569,7 @@ class WeightingEstimator(ABC):
             plt.fill_between(
                 gammas, sensitivities_ub, eci_ub, alpha=0.2, color="orange"
             )
-        elif side == "lesser":
+        elif alternative == "greater":
             ax.plot(
                 df["Gamma"],
                 np.full_like(df["Gamma"], ci_lb),
@@ -522,7 +586,7 @@ class WeightingEstimator(ABC):
                 alpha=0.2,
                 color="blue",
             )
-        elif side == "greater":
+        elif alternative == "less":
             ax.plot(
                 df["Gamma"],
                 np.full_like(df["Gamma"], ci_ub),
@@ -583,7 +647,7 @@ class WeightingEstimator(ABC):
         ]
 
         if legend_placement is None:
-            if side == "greater":
+            if alternative == "greater":
                 legend_placement = "upper left"
             else:
                 legend_placement = "lower left"
@@ -620,6 +684,7 @@ class MeanEstimator(WeightingEstimator):
             List[Union[float, int]], npt.NDArray[Union[np.float64, np.int64]]
         ],
         estimand: Optional[Estimand] = None,
+        estimand_class: Optional[Type[SimpleEstimand]] = None,
         **kwargs,
     ) -> None:
         if len(propensity_scores) != len(outcomes):
@@ -628,20 +693,20 @@ class MeanEstimator(WeightingEstimator):
             )
 
         if np.min(propensity_scores) <= 0.0 or np.max(propensity_scores) > 1.0:
-            raise ValueError("Propensitiy scores must be strictly positive and <= 1")
+            raise ValueError("Propensity scores must be strictly positive and <= 1")
 
         self.propensity_scores: npt.NDArray[np.float64] = np.asarray(propensity_scores)
-        self.estimand: Estimand = estimand or PopulationMean()
-        self.weights: npt.NDArray[np.float64] = (
-            self.estimand.weights_from_propensity_scores(self.propensity_scores)
-        )
+        if estimand is None:
+            estimand = (estimand_class or PopulationMean)(self.propensity_scores)
+        self.estimand: Estimand = estimand
+        self.weights: npt.NDArray[np.float64] = self.estimand.weights
         self.outcomes: npt.NDArray[np.float64] = np.asarray(outcomes)
         self.extra_args: Dict[str, Any] = kwargs
 
     def pvalue(
         self,
         null_value: float,
-        side: Literal["two-sided", "lesser", "greater"] = "two-sided",
+        alternative: Literal["two-sided", "less", "greater"] = "two-sided",
     ) -> float:
         r"""Calculate a p-value.
 
@@ -653,13 +718,13 @@ class MeanEstimator(WeightingEstimator):
         ----------
          null_value : float
             The hypothesized mean.
-         side : ["two-sided", "lesser", "greater"], optional
+         alternative : ["two-sided", "less", "greater"], optional
             What kind of test:
               - "two-sided": H0: \bar{Y} = `null_value` vs Halt: \bar{Y} <>
                 `null_value`.
               - "greater": H0: \bar{Y} <= `null_value` vs Halt: \bar{Y} > `null_value`.
-              - "lesser": H0: \bar{Y} >= `null_value` vs Halt: \bar{Y} < `null_value`.
-            For example, specifying side = "greater" returns a p-value that quantifies
+              - "less": H0: \bar{Y} >= `null_value` vs Halt: \bar{Y} < `null_value`.
+            For example, specifying alternative = "greater" returns a p-value that quantifies
             the strength of evidence against the null hypothesis that the mean is less
             than `null_value`, in favor of the alternative hypothesis that the mean is
             actually greater than `null_value`. Defaults to "two-sided".
@@ -670,12 +735,12 @@ class MeanEstimator(WeightingEstimator):
             P-value.
 
         """
-        return super().pvalue(null_value=null_value, side=side)
+        return super().pvalue(null_value=null_value, alternative=alternative)
 
     def confidence_interval(
         self,
         alpha: float = 0.10,
-        side: Literal["two-sided", "lesser", "greater"] = "two-sided",
+        alternative: Literal["two-sided", "less", "greater"] = "two-sided",
     ) -> Tuple[float, float]:
         r"""Calculate confidence interval on mean in target population.
 
@@ -684,12 +749,12 @@ class MeanEstimator(WeightingEstimator):
          alpha : float, optional
             P-value threshold, e.g. specify alpha=0.05 for a 95% confidence interval.
             Defaults to 0.10, corresponding to a 90% confidence interval.
-         side : ["two-sided", "lesser", "greater"], optional
+         alternative : ["two-sided", "less", "greater"], optional
             What kind of test:
               - "two-sided": H0: \bar{Y} = `null_value` vs Halt: \bar{Y} <>
                 `null_value`.
               - "greater": H0: \bar{Y} <= `null_value` vs Halt: \bar{Y} > `null_value`.
-              - "lesser": H0: \bar{Y} >= `null_value` vs Halt: \bar{Y} < `null_value`.
+              - "less": H0: \bar{Y} >= `null_value` vs Halt: \bar{Y} < `null_value`.
             Defaults to "two-sided".
 
         Returns
@@ -699,16 +764,16 @@ class MeanEstimator(WeightingEstimator):
             only one of these will be finite:
               - "two-sided": lb and ub both finite
               - "greater": lb = -np.inf, ub = finite
-              - "lesser": lb finite, ub = np.inf
+              - "less": lb finite, ub = np.inf
 
         """
-        return super().confidence_interval(alpha=alpha, side=side)
+        return super().confidence_interval(alpha=alpha, alternative=alternative)
 
     def expanded_confidence_interval(
         self,
         alpha: float = 0.10,
         gamma: float = 6.0,
-        side: Literal["two-sided", "lesser", "greater"] = "two-sided",
+        alternative: Literal["two-sided", "less", "greater"] = "two-sided",
         B: int = 1_000,
         seed: Optional[
             Union[
@@ -733,12 +798,12 @@ class MeanEstimator(WeightingEstimator):
          gamma : float, optional
             The Gamma factor. Must be >= 1.0, with 1.0 indicating perfect propensity
             scores. Defaults to 6. See Notes in `sensitivity_analysis`.
-         side : ["two-sided", "lesser", "greater"], optional
+         alternative : ["two-sided", "less", "greater"], optional
             What kind of test:
               - "two-sided": H0: \bar{Y} = `null_value` vs Halt: \bar{Y} <>
                 `null_value`.
               - "greater": H0: \bar{Y} <= `null_value` vs Halt: \bar{Y} > `null_value`.
-              - "lesser": H0: \bar{Y} >= `null_value` vs Halt: \bar{Y} < `null_value`.
+              - "less": H0: \bar{Y} >= `null_value` vs Halt: \bar{Y} < `null_value`.
             Defaults to "two-sided".
          B : int, optional
             Number of bootstrap replications to run. Defaults to 1_000.
@@ -752,14 +817,14 @@ class MeanEstimator(WeightingEstimator):
             only one of these will be finite:
               - "two-sided": lb and ub both finite
               - "greater": lb finite, ub = np.inf
-              - "lesser": lb = -np.inf, ub finite
+              - "less": lb = -np.inf, ub finite
 
         """
         if gamma < 1.0:
             raise ValueError("`gamma` must be >= 1")
 
         if gamma == 1.0:
-            return self.confidence_interval(alpha=alpha, side=side)
+            return self.confidence_interval(alpha=alpha, alternative=alternative)
 
         lb_bootstrap = np.zeros(B)
         ub_bootstrap = np.zeros(B)
@@ -767,8 +832,8 @@ class MeanEstimator(WeightingEstimator):
         for b in range(B):
             # Resample with replacement
             bootstrap_indices = rng.choice(
-                range(len(self.propensity_scores)),
-                size=len(self.propensity_scores),
+                range(len(self.weights)),
+                size=len(self.weights),
                 replace=True,
             )
             bootstrap_propensities = self.propensity_scores[bootstrap_indices]
@@ -786,22 +851,22 @@ class MeanEstimator(WeightingEstimator):
             ) = self.__class__(
                 propensity_scores=bootstrap_propensities,
                 outcomes=bootstrap_outcomes,
-                estimand=self.estimand,
+                estimand=self.estimand.resample(bootstrap_indices),
                 **self.extra_args,
             ).sensitivity_analysis(gamma=gamma)
 
         # Calculate the expanded confidence interval as percentiles of the bootstrap estimates
-        if side == "two-sided":
+        if alternative == "two-sided":
             lb = float(np.percentile(lb_bootstrap, 100 * alpha / 2))
             ub = float(np.percentile(ub_bootstrap, 100 * (1 - (alpha / 2))))
-        elif side == "lesser":
+        elif alternative == "less":
             lb = -np.inf
             ub = float(np.percentile(ub_bootstrap, 100 * (1 - alpha)))
-        elif side == "greater":
+        elif alternative == "greater":
             lb = float(np.percentile(lb_bootstrap, 100 * alpha))
             ub = np.inf
         else:
-            raise ValueError(f"Unrecognized input {side=:}")
+            raise ValueError(f"Unrecognized input {alternative=:}")
 
         return lb, ub
 
@@ -846,12 +911,27 @@ class IPWEstimator(MeanEstimator):
         ],
         population_size: int,
         estimand: Optional[Estimand] = None,
+        estimand_class: Optional[Type[SimpleEstimand]] = None,
         **kwargs,
     ) -> None:
+        if estimand is not None and not isinstance(estimand, PopulationMean):
+            # When estimating something other than the PopulationMean, the weights are
+            # different, so the point estimate and variance are different. The point
+            # estimate is easy, but the variance is tricky. Punting for now.
+            raise NotImplementedError(
+                "Implementation has not been checked except for PopulationMean"
+            )
+
+        if estimand_class is not None and estimand_class != PopulationMean:
+            raise NotImplementedError(
+                "Implementation has not been checked except for PopulationMean"
+            )
+
         super().__init__(
             propensity_scores=propensity_scores,
             outcomes=outcomes,
             estimand=estimand,
+            estimand_class=estimand_class,
             population_size=population_size,
             **kwargs,
         )
@@ -859,15 +939,18 @@ class IPWEstimator(MeanEstimator):
 
     def point_estimate(self) -> float:
         """Calculate a point estimate."""
-        return np.dot(self.weights, self.outcomes) / self.population_size
+        nf = self.estimand.normalizing_factor(
+            sample_size=len(self.weights), population_size=self.population_size
+        )
+        return np.dot(self.weights, self.outcomes) / nf
 
     def variance(self) -> float:
         r"""Calculate the variance.
 
         Per (Wilson 2025, §2), an estimator for the variance is:
-                   \sum_i (w_i * y_i - pe)^2
-                  ---------------------------,
-                           n * (n - 1)
+                   \sum_i (((n/N) / pi_i) * y_i - pe)^2
+                  --------------------------------------,
+                                n * (n - 1)
         where pe is the point estimate and n is the sample size.
 
         References
@@ -876,10 +959,11 @@ class IPWEstimator(MeanEstimator):
            Sampling." https://adventuresinwhy.com/post/survey_sampling/
 
         """
-        n_over_N = len(self.propensity_scores) / self.population_size
+        n = len(self.weights)
+        n_over_N = n / self.population_size
         return np.mean(
             np.square(n_over_N * self.weights * self.outcomes - self.point_estimate())
-        ) / (len(self.propensity_scores) - 1)
+        ) / (n - 1)
 
     def sensitivity_analysis(self, gamma: float = 6.0) -> Tuple[float, float]:
         r"""Perform a sensitivity analysis.
@@ -915,7 +999,7 @@ class IPWEstimator(MeanEstimator):
         if gamma == 1.0:
             return self.point_estimate(), self.point_estimate()
 
-        wl, wu = self.estimand.sensitivity_region(self.weights, gamma)
+        wl, wu = self.estimand.sensitivity_region(gamma)
         lb = np.where(self.outcomes >= 0, wl, wu)
         ub = np.where(self.outcomes >= 0, wu, wl)
         return (
@@ -975,6 +1059,7 @@ class AIPWEstimator(IPWEstimator):
         mean_predicted_outcome: float,
         population_size: int,
         estimand: Optional[Estimand] = None,
+        estimand_class: Optional[Type[SimpleEstimand]] = None,
         **kwargs,
     ) -> None:
         if len(propensity_scores) != len(predicted_outcomes):
@@ -990,6 +1075,7 @@ class AIPWEstimator(IPWEstimator):
             # hidden biases.
             outcomes=np.asarray(outcomes) - np.asarray(predicted_outcomes),
             estimand=estimand,
+            estimand_class=estimand_class,
             population_size=population_size,
             predicted_outcomes=np.zeros_like(np.asarray(propensity_scores)),
             mean_predicted_outcome=mean_predicted_outcome,
@@ -1016,12 +1102,12 @@ class AIPWEstimator(IPWEstimator):
            Sampling." https://adventuresinwhy.com/post/survey_sampling/
 
         """
-        n_over_N = len(self.propensity_scores) / self.population_size
+        n_over_N = len(self.weights) / self.population_size
         return np.mean(
             np.square(
                 n_over_N * self.weights * self.outcomes - super().point_estimate()
             )
-        ) / (len(self.propensity_scores) - 1)
+        ) / (len(self.weights) - 1)
 
     def sensitivity_analysis(self, gamma: float = 6.0) -> Tuple[float, float]:
         r"""Perform a sensitivity analysis.
@@ -1113,6 +1199,7 @@ class SIPWEstimator(MeanEstimator):
             List[Union[float, int]], npt.NDArray[Union[np.float64, np.int64]]
         ],
         estimand: Optional[Estimand] = None,
+        estimand_class: Optional[Type[SimpleEstimand]] = None,
         binary_outcomes: bool = True,
         **kwargs,
     ) -> None:
@@ -1120,6 +1207,7 @@ class SIPWEstimator(MeanEstimator):
             propensity_scores=propensity_scores,
             outcomes=outcomes,
             estimand=estimand,
+            estimand_class=estimand_class,
             **kwargs,
         )
 
@@ -1197,7 +1285,7 @@ class SIPWEstimator(MeanEstimator):
         if gamma == 1.0:
             return self.point_estimate(), self.point_estimate()
 
-        wl, wu = self.estimand.sensitivity_region(self.weights, gamma)
+        wl, wu = self.estimand.sensitivity_region(gamma)
         if self.binary_outcomes:
             lb = np.where(self.outcomes == 1, wl, wu)
             ub = np.where(self.outcomes == 1, wu, wl)
@@ -1275,6 +1363,7 @@ class SAIPWEstimator(SIPWEstimator):
         ],
         mean_predicted_outcome: float,
         estimand: Optional[Estimand] = None,
+        estimand_class: Optional[Type[SimpleEstimand]] = None,
         binary_outcomes: bool = True,
         **kwargs,
     ) -> None:
@@ -1287,6 +1376,7 @@ class SAIPWEstimator(SIPWEstimator):
             propensity_scores=propensity_scores,
             outcomes=np.asarray(outcomes) - np.asarray(predicted_outcomes),
             estimand=estimand,
+            estimand_class=estimand_class,
             # Even with binary outcomes, the adjusted outcomes are not binary.
             # Because of this, sensitivity analysis is slower!
             binary_outcomes=False,
@@ -1384,6 +1474,7 @@ class RatioEstimator(WeightingEstimator):
             List[Union[float, int]], npt.NDArray[Union[np.float64, np.int64]]
         ],
         estimand: Optional[Estimand] = None,
+        estimand_class: Optional[Type[SimpleEstimand]] = None,
         estimator_class: Literal["IPW", "AIPW", "SIPW", "SAIPW"] = "SIPW",
         numerator_estimator_class: Optional[
             Literal["IPW", "AIPW", "SIPW", "SAIPW"]
@@ -1420,6 +1511,7 @@ class RatioEstimator(WeightingEstimator):
             propensity_scores=propensity_scores,
             outcomes=numerator_outcomes,
             estimand=estimand,
+            estimand_class=estimand_class,
             **numerator_kwargs_nn,
         )
 
@@ -1429,6 +1521,7 @@ class RatioEstimator(WeightingEstimator):
             propensity_scores=propensity_scores,
             outcomes=denominator_outcomes,
             estimand=estimand,
+            estimand_class=estimand_class,
             **denominator_kwargs_nn,
         )
 
@@ -1526,7 +1619,7 @@ class RatioEstimator(WeightingEstimator):
         self,
         alpha: float = 0.10,
         gamma: float = 6.0,
-        side: Literal["two-sided", "lesser", "greater"] = "two-sided",
+        alternative: Literal["two-sided", "less", "greater"] = "two-sided",
         B: int = 1_000,
         seed: Optional[
             Union[
@@ -1551,12 +1644,12 @@ class RatioEstimator(WeightingEstimator):
          gamma : float, optional
             The Gamma factor. Must be >= 1.0, with 1.0 indicating perfect propensity
             scores. Defaults to 6. See Notes in `sensitivity_analysis`.
-         side : ["two-sided", "lesser", "greater"], optional
+         alternative : ["two-sided", "less", "greater"], optional
             What kind of test:
               - "two-sided": H0: \bar{Y} = `null_value` vs Halt: \bar{Y} <>
                 `null_value`.
               - "greater": H0: \bar{Y} <= `null_value` vs Halt: \bar{Y} > `null_value`.
-              - "lesser": H0: \bar{Y} >= `null_value` vs Halt: \bar{Y} < `null_value`.
+              - "less": H0: \bar{Y} >= `null_value` vs Halt: \bar{Y} < `null_value`.
             Defaults to "two-sided".
          B : int, optional
             Number of bootstrap replications to run. Defaults to 1_000.
@@ -1570,14 +1663,14 @@ class RatioEstimator(WeightingEstimator):
             only one of these will be finite:
               - "two-sided": lb and ub both finite
               - "greater": lb finite, ub = np.inf
-              - "lesser": lb = -np.inf, ub finite
+              - "less": lb = -np.inf, ub finite
 
         """
         if gamma < 1.0:
             raise ValueError("`gamma` must be >= 1")
 
         if gamma == 1.0:
-            return self.confidence_interval(alpha=alpha, side=side)
+            return self.confidence_interval(alpha=alpha, alternative=alternative)
 
         lb_bootstrap = np.zeros(B)
         ub_bootstrap = np.zeros(B)
@@ -1585,8 +1678,8 @@ class RatioEstimator(WeightingEstimator):
         for b in range(B):
             # Resample with replacement
             bootstrap_indices = rng.choice(
-                range(len(self.numerator_estimator.propensity_scores)),
-                size=len(self.numerator_estimator.propensity_scores),
+                range(len(self.numerator_estimator.weights)),
+                size=len(self.numerator_estimator.weights),
                 replace=True,
             )
             bootstrap_propensities = self.numerator_estimator.propensity_scores[
@@ -1612,23 +1705,23 @@ class RatioEstimator(WeightingEstimator):
                 propensity_scores=bootstrap_propensities,
                 numerator_outcomes=bootstrap_numerator_outcomes,
                 denominator_outcomes=bootstrap_denominator_outcomes,
-                estimand=self.numerator_estimator.estimand,
+                estimand=self.numerator_estimator.estimand.resample(bootstrap_indices),
                 numerator_kwargs=self.numerator_estimator.extra_args,
                 denominator_kwargs=self.denominator_estimator.extra_args,
             ).sensitivity_analysis(gamma=gamma)
 
         # Calculate the expanded confidence interval as percentiles of the bootstrap estimates
-        if side == "two-sided":
+        if alternative == "two-sided":
             lb = float(np.percentile(lb_bootstrap, 100 * alpha / 2))
             ub = float(np.percentile(ub_bootstrap, 100 * (1 - (alpha / 2))))
-        elif side == "lesser":
+        elif alternative == "less":
             lb = -np.inf
             ub = float(np.percentile(ub_bootstrap, 100 * (1 - alpha)))
-        elif side == "greater":
+        elif alternative == "greater":
             lb = float(np.percentile(lb_bootstrap, 100 * alpha))
             ub = np.inf
         else:
-            raise ValueError(f"Unrecognized input {side=:}")
+            raise ValueError(f"Unrecognized input {alternative=:}")
 
         return lb, ub
 
@@ -1658,7 +1751,7 @@ class TreatmentEffectEstimator(WeightingEstimator):
     def pvalue(
         self,
         null_value: float = 0.0,
-        side: Literal["two-sided", "lesser", "greater"] = "two-sided",
+        alternative: Literal["two-sided", "less", "greater"] = "two-sided",
     ) -> float:
         r"""Calculate a p-value.
 
@@ -1670,12 +1763,12 @@ class TreatmentEffectEstimator(WeightingEstimator):
         ----------
          null_value : float
             The hypothesized treatment effect.
-         side : ["two-sided", "lesser", "greater"], optional
+         alternative : ["two-sided", "less", "greater"], optional
             What kind of test:
               - "two-sided": H0: TE = `null_value` vs Halt: TE <> `null_value`.
               - "greater": H0: TE <= `null_value` vs Halt: TE > `null_value`.
-              - "lesser": H0: TE >= `null_value` vs Halt: TE < `null_value`.
-            For example, specifying side = "greater" returns a p-value that quantifies
+              - "less": H0: TE >= `null_value` vs Halt: TE < `null_value`.
+            For example, specifying alternative = "greater" returns a p-value that quantifies
             the strength of evidence against the null hypothesis that the treatment
             effect is less than `null_value`, in favor of the alternative hypothesis
             that the treatment effect is actually greater than `null_value`. Defaults to
@@ -1687,19 +1780,12 @@ class TreatmentEffectEstimator(WeightingEstimator):
             P-value.
 
         """
-        # This is hacky but side has the opposite interpretation here compared to in
-        # MeanEstimator:
-        if side == "two-sided":
-            return super().pvalue(null_value=null_value, side=side)
-        elif side == "lesser":
-            return super().pvalue(null_value=null_value, side="greater")
-
-        return super().pvalue(null_value=null_value, side="lesser")
+        return super().pvalue(null_value=null_value, alternative=alternative)
 
     def confidence_interval(
         self,
         alpha: float = 0.10,
-        side: Literal["two-sided", "lesser", "greater"] = "two-sided",
+        alternative: Literal["two-sided", "less", "greater"] = "two-sided",
     ) -> Tuple[float, float]:
         """Calculate confidence interval on the treatment effect.
 
@@ -1708,11 +1794,11 @@ class TreatmentEffectEstimator(WeightingEstimator):
          alpha : float, optional
             P-value threshold, e.g. specify alpha=0.05 for a 95% confidence interval.
             Defaults to 0.10, corresponding to a 90% confidence interval.
-         side : ["two-sided", "lesser", "greater"], optional
+         alternative : ["two-sided", "less", "greater"], optional
             What kind of test:
               - "two-sided": H0: TE = `null_value` vs Halt: TE <> `null_value`.
               - "greater": H0: TE <= `null_value` vs Halt: TE > `null_value`.
-              - "lesser": H0: TE >= `null_value` vs Halt: TE < `null_value`.
+              - "less": H0: TE >= `null_value` vs Halt: TE < `null_value`.
             Defaults to "two-sided".
 
         Returns
@@ -1722,10 +1808,10 @@ class TreatmentEffectEstimator(WeightingEstimator):
             only one of these will be finite:
               - "two-sided": lb and ub both finite
               - "greater": lb = -np.inf, ub = finite
-              - "lesser": lb finite, ub = np.inf
+              - "less": lb finite, ub = np.inf
 
         """
-        return super().confidence_interval(alpha=alpha, side=side)
+        return super().confidence_interval(alpha=alpha, alternative=alternative)
 
     def sensitivity_analysis(self, gamma: float = 6.0) -> Tuple[float, float]:
         r"""Perform a sensitivity analysis.
@@ -1763,7 +1849,7 @@ class TreatmentEffectEstimator(WeightingEstimator):
         self,
         alpha: float = 0.10,
         gamma: float = 6.0,
-        side: Literal["two-sided", "lesser", "greater"] = "two-sided",
+        alternative: Literal["two-sided", "less", "greater"] = "two-sided",
         B: int = 1_000,
         seed: Optional[
             Union[
@@ -1788,11 +1874,11 @@ class TreatmentEffectEstimator(WeightingEstimator):
          gamma : float, optional
             The Gamma factor. Must be >= 1.0, with 1.0 indicating perfect propensity
             scores. Defaults to 6. See Notes in `sensitivity_analysis`.
-         side : ["two-sided", "lesser", "greater"], optional
+         alternative : ["two-sided", "less", "greater"], optional
             What kind of test:
               - "two-sided": H0: TE = `null_value` vs Halt: TE <> `null_value`.
               - "greater": H0: TE <= `null_value` vs Halt: TE > `null_value`.
-              - "lesser": H0: TE >= `null_value` vs Halt: TE < `null_value`.
+              - "less": H0: TE >= `null_value` vs Halt: TE < `null_value`.
             Defaults to "two-sided".
          B : int, optional
             Number of bootstrap replications to run. Defaults to 1_000.
@@ -1806,7 +1892,7 @@ class TreatmentEffectEstimator(WeightingEstimator):
             only one of these will be finite:
               - "two-sided": lb and ub both finite
               - "greater": lb finite, ub = np.inf
-              - "lesser": lb = -np.inf, ub finite
+              - "less": lb = -np.inf, ub finite
 
         Notes
         -----
@@ -1825,7 +1911,7 @@ class TreatmentEffectEstimator(WeightingEstimator):
             raise ValueError("`gamma` must be >= 1")
 
         if gamma == 1.0:
-            return self.confidence_interval(alpha=alpha, side=side)
+            return self.confidence_interval(alpha=alpha, alternative=alternative)
 
         lb_bootstrap = np.zeros(B)
         ub_bootstrap = np.zeros(B)
@@ -1833,13 +1919,13 @@ class TreatmentEffectEstimator(WeightingEstimator):
         for b in range(B):
             # Resample with replacement
             control_bootstrap_indices = rng.choice(
-                range(len(self.control_estimator.propensity_scores)),
-                size=len(self.control_estimator.propensity_scores),
+                range(len(self.control_estimator.weights)),
+                size=len(self.control_estimator.weights),
                 replace=True,
             )
             treated_bootstrap_indices = rng.choice(
-                range(len(self.treated_estimator.propensity_scores)),
-                size=len(self.treated_estimator.propensity_scores),
+                range(len(self.treated_estimator.weights)),
+                size=len(self.treated_estimator.weights),
                 replace=True,
             )
 
@@ -1854,7 +1940,9 @@ class TreatmentEffectEstimator(WeightingEstimator):
                     control_bootstrap_indices
                 ],
                 outcomes=self.control_estimator.outcomes[control_bootstrap_indices],
-                estimand=self.control_estimator.estimand,
+                estimand=self.control_estimator.estimand.resample(
+                    control_bootstrap_indices
+                ),
                 **self.control_estimator.extra_args,
             )
             treated_estimator = self.treated_estimator.__class__(
@@ -1862,7 +1950,9 @@ class TreatmentEffectEstimator(WeightingEstimator):
                     treated_bootstrap_indices
                 ],
                 outcomes=self.treated_estimator.outcomes[treated_bootstrap_indices],
-                estimand=self.treated_estimator.estimand,
+                estimand=self.treated_estimator.estimand.resample(
+                    treated_bootstrap_indices
+                ),
                 **self.treated_estimator.extra_args,
             )
 
@@ -1873,17 +1963,17 @@ class TreatmentEffectEstimator(WeightingEstimator):
             ub_bootstrap[b] = treated_ub - control_lb
 
         # Calculate the expanded confidence interval as percentiles of the bootstrap estimates
-        if side == "two-sided":
+        if alternative == "two-sided":
             lb = float(np.percentile(lb_bootstrap, 100 * alpha / 2))
             ub = float(np.percentile(ub_bootstrap, 100 * (1 - (alpha / 2))))
-        elif side == "lesser":
+        elif alternative == "less":
             lb = -np.inf
             ub = float(np.percentile(ub_bootstrap, 100 * (1 - alpha)))
-        elif side == "greater":
+        elif alternative == "greater":
             lb = float(np.percentile(lb_bootstrap, 100 * alpha))
             ub = np.inf
         else:
-            raise ValueError(f"Unrecognized input {side=:}")
+            raise ValueError(f"Unrecognized input {alternative=:}")
 
         return lb, ub
 
@@ -1895,13 +1985,31 @@ class SimpleDifferenceEstimator(TreatmentEffectEstimator):
     ----------
      control_outcomes, treated_outcomes : list_like
         Outcomes or responses for control and treatment groups, resp.
+     control_sampling_propensity_scores, control_sampling_propensity_scores : list_like, optional
+        Propensity scores for the sampling mechanism for control and treatment groups,
+        resp. See Notes.
 
     Notes
     -----
-    This class simple computes the average response in treatment, minus the average
-    response in control. No weights, just straight averages. This may be helpful to see
-    how different the adjusted estimator is from the simplest comparison of treatment
-    and control, to see how biased this simple estimator is.
+    When called without sampling propensity scores, this class computes the average
+    response in treatment, minus the average response in control. No weights, just
+    straight averages. This may be helpful to see how different the adjusted estimator
+    is from the simplest comparison of treatment and control, to see how biased this
+    simple estimator is.
+
+    In situations where the treatment is randomly assigned in the population (but
+    potentially not in the sample), this estimator can also be used generalize estimated
+    treatment effects from the sample to the population (Tipton and Hartman, 2023). The
+    basic strategy here is to use the control responses to estimate the average
+    potential outcome Y(0) in the population, and the treated responses to estimate the
+    average Y(1). Since treatment is randomly assigned in the population, the population
+    average treatment effect is just the difference in these means.
+
+    References
+    ----------
+    - Tipton, Elizabeth and Erin Hartman. 2023. "Generalizability and Transportability."
+      In Handbook of Matching and Weighting Adjustments for Causal Inference, , pg.
+      39–59. Chapman and Hall/CRC.
 
     """
 
@@ -1913,21 +2021,50 @@ class SimpleDifferenceEstimator(TreatmentEffectEstimator):
         treated_outcomes: Union[
             List[Union[float, int]], npt.NDArray[Union[np.float64, np.int64]]
         ],
+        control_sampling_propensity_scores: Optional[
+            Union[List[float], npt.NDArray[np.float64]]
+        ] = None,
+        treated_sampling_propensity_scores: Optional[
+            Union[List[float], npt.NDArray[np.float64]]
+        ] = None,
+        sampling_estimand_class: Literal[
+            "PopulationMean", "NonRespondentMean", "SampleMean"
+        ] = "PopulationMean",
         **kwargs,
     ) -> None:
         control_outcomes = np.asarray(control_outcomes)
         treated_outcomes = np.asarray(treated_outcomes)
 
+        if control_sampling_propensity_scores is None:
+            control_estimand: Estimand = SampleMean(
+                np.ones_like(control_outcomes, dtype=np.float64)
+            )
+        else:
+            control_estimand = DoubleSamplingEstimand(
+                SampleMean(np.ones_like(control_outcomes, dtype=np.float64)),
+                PopulationMean(np.asarray(control_sampling_propensity_scores)),
+            )
+
+        if treated_sampling_propensity_scores is None:
+            treated_estimand: Estimand = SampleMean(
+                np.ones_like(treated_outcomes, dtype=np.float64)
+            )
+        else:
+            treated_estimand = DoubleSamplingEstimand(
+                SampleMean(np.ones_like(treated_outcomes, dtype=np.float64)),
+                PopulationMean(np.asarray(treated_sampling_propensity_scores)),
+            )
+
         super().__init__(
             control_estimator=SIPWEstimator(
                 propensity_scores=np.ones_like(control_outcomes, dtype=np.float64),
                 outcomes=control_outcomes,
-                estimand=SampleMean(),
+                estimand=control_estimand,
             ),
             treated_estimator=SIPWEstimator(
                 propensity_scores=np.ones_like(treated_outcomes, dtype=np.float64),
                 outcomes=treated_outcomes,
-                estimand=SampleMean(),
+                estimand=treated_estimand,
             ),
         )
 
@@ -1947,6 +2084,13 @@ class ATEEstimator(TreatmentEffectEstimator):
      control_estimator_class, treated_estimator_class: ["IPW", "AIPW", "SIPW", "SAIPW"], optional
         If you really want to use different estimator classes for treatment vs control,
         you can. Defaults to `estimator_class`.
+     control_sampling_propensity_scores, treated_sampling_propensity_scores : list_like, optional
+        Propensity scores for the sampling mechanism for control and treatment groups,
+        resp. See Notes.
+     sampling_estimand : ["PopulationMean", "NonRespondentMean", "SampleMean"], optional
+        Population for which to estimate the average treatment effect. Used only when
+        sampling propensity scores are specified. Defaults to "PopulationMean" in that
+        case. See Notes.
      control_kwargs, treated_kwargs, kwargs : dict_like
         Extra kwargs to pass to the estimators. `kwargs` are passed to both estimators,
         while `control_kwargs` is only passed to the control estimator and
@@ -1963,15 +2107,22 @@ class ATEEstimator(TreatmentEffectEstimator):
     two MeanEstimators, which makes calculations (including sensitivity analysis)
     straightforward.
 
+    When the units in the study are sampled from a population, and the sample is not a
+    simple random sample, we may wish to estimate treatment effects in the population,
+    which involves elements of both observational causal inference and survey
+    non-response. If sampling propensity scores are available, in additional to
+    treatment assignment propensity scores, we can adjust for both non-response bias and
+    treatment selection bias.
+
     """
 
     def __init__(
         self,
         control_propensity_scores: Union[List[float], npt.NDArray[np.float64]],
+        treated_propensity_scores: Union[List[float], npt.NDArray[np.float64]],
         control_outcomes: Union[
             List[Union[float, int]], npt.NDArray[Union[np.float64, np.int64]]
         ],
-        treated_propensity_scores: Union[List[float], npt.NDArray[np.float64]],
         treated_outcomes: Union[
             List[Union[float, int]], npt.NDArray[Union[np.float64, np.int64]]
         ],
@@ -1982,6 +2133,15 @@ class ATEEstimator(TreatmentEffectEstimator):
         treated_estimator_class: Optional[
             Literal["IPW", "AIPW", "SIPW", "SAIPW"]
         ] = None,
+        control_sampling_propensity_scores: Optional[
+            Union[List[float], npt.NDArray[np.float64]]
+        ] = None,
+        treated_sampling_propensity_scores: Optional[
+            Union[List[float], npt.NDArray[np.float64]]
+        ] = None,
+        sampling_estimand_class: Literal[
+            "PopulationMean", "NonRespondentMean", "SampleMean"
+        ] = "PopulationMean",
         control_kwargs: Optional[Dict[str, Any]] = None,
         treated_kwargs: Optional[Dict[str, Any]] = None,
         **kwargs,
@@ -2006,18 +2166,50 @@ class ATEEstimator(TreatmentEffectEstimator):
             "SAIPW": SAIPWEstimator,
         }
 
+        sampling_estimand_classes: Dict[
+            str,
+            Union[Type[PopulationMean], Type[NonRespondentMean], Type[SampleMean]],
+        ] = {
+            "PopulationMean": PopulationMean,
+            "NonRespondentMean": NonRespondentMean,
+            "SampleMean": SampleMean,
+        }
+        sampling_estimand: Union[
+            Type[PopulationMean], Type[NonRespondentMean], Type[SampleMean]
+        ] = sampling_estimand_classes[sampling_estimand_class]
+
+        if control_sampling_propensity_scores is None:
+            control_estimand: Estimand = PopulationMean(
+                np.ones_like(control_propensity_scores) - control_propensity_scores
+            )
+        else:
+            control_estimand = DoubleSamplingEstimand(
+                PopulationMean(
+                    np.ones_like(control_propensity_scores) - control_propensity_scores
+                ),
+                sampling_estimand(np.asarray(control_sampling_propensity_scores)),
+            )
+
+        if treated_sampling_propensity_scores is None:
+            treated_estimand: Estimand = PopulationMean(treated_propensity_scores)
+        else:
+            treated_estimand = DoubleSamplingEstimand(
+                PopulationMean(treated_propensity_scores),
+                sampling_estimand(np.asarray(treated_sampling_propensity_scores)),
+            )
+
         super().__init__(
             control_estimator=classes[control_estimator_class or estimator_class](
                 propensity_scores=np.ones_like(control_propensity_scores)
                 - control_propensity_scores,
                 outcomes=control_outcomes,
-                estimand=PopulationMean(),
+                estimand=control_estimand,
                 **control_kwargs_nn,
             ),
             treated_estimator=classes[treated_estimator_class or estimator_class](
                 propensity_scores=treated_propensity_scores,
                 outcomes=treated_outcomes,
-                estimand=PopulationMean(),
+                estimand=treated_estimand,
                 **treated_kwargs_nn,
             ),
         )
@@ -2038,6 +2230,13 @@ class ATTEstimator(TreatmentEffectEstimator):
      control_estimator_class, treated_estimator_class: ["IPW", "AIPW", "SIPW", "SAIPW"], optional
         If you really want to use different estimator classes for treatment vs control,
         you can. Defaults to `estimator_class`.
+     control_sampling_propensity_scores, treated_sampling_propensity_scores : list_like, optional
+        Propensity scores for the sampling mechanism for control and treatment groups,
+        resp. See Notes.
+     sampling_estimand : ["PopulationMean", "NonRespondentMean", "SampleMean"], optional
+        Population for which to estimate the average treatment effect. Used only when
+        sampling propensity scores are specified. Defaults to "PopulationMean" in that
+        case. See Notes.
      control_kwargs, treated_kwargs, kwargs : dict_like
         Extra kwargs to pass to the estimators. `kwargs` are passed to both estimators,
         while `control_kwargs` is only passed to the control estimator and
@@ -2071,6 +2270,15 @@ class ATTEstimator(TreatmentEffectEstimator):
         treated_estimator_class: Optional[
             Literal["IPW", "AIPW", "SIPW", "SAIPW"]
         ] = None,
+        control_sampling_propensity_scores: Optional[
+            Union[List[float], npt.NDArray[np.float64]]
+        ] = None,
+        treated_sampling_propensity_scores: Optional[
+            Union[List[float], npt.NDArray[np.float64]]
+        ] = None,
+        sampling_estimand_class: Literal[
+            "PopulationMean", "NonRespondentMean", "SampleMean"
+        ] = "PopulationMean",
         control_kwargs: Optional[Dict[str, Any]] = None,
         treated_kwargs: Optional[Dict[str, Any]] = None,
         **kwargs,
@@ -2094,18 +2302,52 @@ class ATTEstimator(TreatmentEffectEstimator):
             "SAIPW": SAIPWEstimator,
         }
 
+        sampling_estimand_classes: Dict[
+            str,
+            Union[Type[PopulationMean], Type[NonRespondentMean], Type[SampleMean]],
+        ] = {
+            "PopulationMean": PopulationMean,
+            "NonRespondentMean": NonRespondentMean,
+            "SampleMean": SampleMean,
+        }
+        sampling_estimand: Union[
+            Type[PopulationMean], Type[NonRespondentMean], Type[SampleMean]
+        ] = sampling_estimand_classes[sampling_estimand_class]
+
+        if control_sampling_propensity_scores is None:
+            control_estimand: Estimand = NonRespondentMean(
+                np.ones_like(control_propensity_scores) - control_propensity_scores
+            )
+        else:
+            control_estimand = DoubleSamplingEstimand(
+                NonRespondentMean(
+                    np.ones_like(control_propensity_scores) - control_propensity_scores
+                ),
+                sampling_estimand(np.asarray(control_sampling_propensity_scores)),
+            )
+
+        if treated_sampling_propensity_scores is None:
+            treated_estimand: Estimand = SampleMean(
+                np.ones_like(treated_outcomes, dtype=np.float64)
+            )
+        else:
+            treated_estimand = DoubleSamplingEstimand(
+                SampleMean(np.ones_like(treated_outcomes, dtype=np.float64)),
+                sampling_estimand(np.asarray(treated_sampling_propensity_scores)),
+            )
+
         super().__init__(
             control_estimator=classes[control_estimator_class or estimator_class](
                 propensity_scores=np.ones_like(control_propensity_scores)
                 - control_propensity_scores,
                 outcomes=control_outcomes,
-                estimand=NonRespondentMean(),
+                estimand=control_estimand,
                 **control_kwargs_nn,
             ),
             treated_estimator=classes[treated_estimator_class or estimator_class](
-                propensity_scores=np.ones_like(treated_outcomes),
+                propensity_scores=np.ones_like(treated_outcomes, dtype=np.float64),
                 outcomes=treated_outcomes,
-                estimand=SampleMean(),
+                estimand=treated_estimand,
                 **treated_kwargs_nn,
             ),
         )
@@ -2126,6 +2368,13 @@ class ATCEstimator(TreatmentEffectEstimator):
      control_estimator_class, treated_estimator_class: ["IPW", "AIPW", "SIPW", "SAIPW"], optional
         If you really want to use different estimator classes for treatment vs control,
         you can. Defaults to `estimator_class`.
+     control_sampling_propensity_scores, treated_sampling_propensity_scores : list_like, optional
+        Propensity scores for the sampling mechanism for control and treatment groups,
+        resp. See Notes.
+     sampling_estimand : ["PopulationMean", "NonRespondentMean", "SampleMean"], optional
+        Population for which to estimate the average treatment effect. Used only when
+        sampling propensity scores are specified. Defaults to "PopulationMean" in that
+        case. See Notes.
      control_kwargs, treated_kwargs, kwargs : dict_like
         Extra kwargs to pass to the estimators. `kwargs` are passed to both estimators,
         while `control_kwargs` is only passed to the control estimator and
@@ -2159,6 +2408,15 @@ class ATCEstimator(TreatmentEffectEstimator):
         treated_estimator_class: Optional[
             Literal["IPW", "AIPW", "SIPW", "SAIPW"]
         ] = None,
+        control_sampling_propensity_scores: Optional[
+            Union[List[float], npt.NDArray[np.float64]]
+        ] = None,
+        treated_sampling_propensity_scores: Optional[
+            Union[List[float], npt.NDArray[np.float64]]
+        ] = None,
+        sampling_estimand_class: Literal[
+            "PopulationMean", "NonRespondentMean", "SampleMean"
+        ] = "PopulationMean",
         control_kwargs: Optional[Dict[str, Any]] = None,
         treated_kwargs: Optional[Dict[str, Any]] = None,
         **kwargs,
@@ -2182,240 +2440,47 @@ class ATCEstimator(TreatmentEffectEstimator):
             "SAIPW": SAIPWEstimator,
         }
 
-        super().__init__(
-            control_estimator=classes[control_estimator_class or estimator_class](
-                propensity_scores=np.ones_like(control_outcomes),
-                outcomes=control_outcomes,
-                estimand=SampleMean(),
-                **control_kwargs_nn,
-            ),
-            treated_estimator=classes[treated_estimator_class or estimator_class](
-                propensity_scores=treated_propensity_scores,
-                outcomes=treated_outcomes,
-                estimand=NonRespondentMean(),
-                **treated_kwargs_nn,
-            ),
-        )
-
-
-class PATEEstimator(TreatmentEffectEstimator):
-    """Estimator for the population average treatment effect.
-
-    Parameters
-    ----------
-     control_propensity_scores, treated_propensity_scores : list_like
-        Propensity scores for control and treatment groups, resp.
-     control_outcomes, treated_outcomes : list_like
-        Outcomes or responses for control and treatment groups, resp. Should have the
-        same lengths as the corresponding `propensity_scores`.
-     estimator_class : ["IPW", "AIPW", "SIPW", "SAIPW"], optional
-        What kind of estimator to use. Defaults to "SIPW".
-     control_estimator_class, treated_estimator_class: ["IPW", "AIPW", "SIPW", "SAIPW"], optional
-        If you really want to use different estimator classes for treatment vs control,
-        you can. Defaults to `estimator_class`.
-     control_kwargs, treated_kwargs, kwargs : dict_like
-        Extra kwargs to pass to the estimators. `kwargs` are passed to both estimators,
-        while `control_kwargs` is only passed to the control estimator and
-        `treated_kwargs` is only passed to the treated estimator.
-
-    Notes
-    -----
-    When units in the study are a non-representative sample from some larger population,
-    estimating the treatment effect in the population involves elements of non-response
-    bias in addition to bias from non-random assignment. PATEEstimator addresses both of
-    these, weighting responses in both treatment and control to match the target
-    population. This is sometimes called "generalization" in the literature, e.g.
-    (Tipton and Hartman 2023).
-
-    The propensity scores used by PATEEstimator should not be the probability of
-    accepting treatment, as is the case with ATEEstimator, but rather the probability of
-    being in the sample. The intuition here is that by reweighting the control units, we
-    can estimate the population average of the control potential outcome, Y(0). Doing
-    the same for the treated units estimates the population average of the treated
-    potential outcome, Y(1). The PATE is then the difference of these estimates.
-
-    References
-    ----------
-    - Tipton, Elizabeth and Erin Hartman. 2023. "Generalizability and Transportability."
-      In Handbook of Matching and Weighting Adjustments for Causal Inference, , pg.
-      39–59. Chapman and Hall/CRC.
-
-    """
-
-    def __init__(
-        self,
-        control_propensity_scores: Union[List[float], npt.NDArray[np.float64]],
-        control_outcomes: Union[
-            List[Union[float, int]], npt.NDArray[Union[np.float64, np.int64]]
-        ],
-        treated_propensity_scores: Union[List[float], npt.NDArray[np.float64]],
-        treated_outcomes: Union[
-            List[Union[float, int]], npt.NDArray[Union[np.float64, np.int64]]
-        ],
-        estimator_class: Literal["IPW", "AIPW", "SIPW", "SAIPW"] = "SIPW",
-        control_estimator_class: Optional[
-            Literal["IPW", "AIPW", "SIPW", "SAIPW"]
-        ] = None,
-        treated_estimator_class: Optional[
-            Literal["IPW", "AIPW", "SIPW", "SAIPW"]
-        ] = None,
-        control_kwargs: Optional[Dict[str, Any]] = None,
-        treated_kwargs: Optional[Dict[str, Any]] = None,
-        **kwargs,
-    ) -> None:
-        control_propensity_scores = np.asarray(control_propensity_scores)
-        control_outcomes = np.asarray(control_outcomes)
-        treated_propensity_scores = np.asarray(treated_propensity_scores)
-        treated_outcomes = np.asarray(treated_outcomes)
-
-        control_kwargs_nn = dict(**kwargs)
-        if control_kwargs is not None:
-            control_kwargs_nn.update(**control_kwargs)
-
-        treated_kwargs_nn = dict(**kwargs)
-        if treated_kwargs is not None:
-            treated_kwargs_nn.update(**treated_kwargs)
-
-        classes = {
-            "IPW": IPWEstimator,
-            "AIPW": AIPWEstimator,
-            "SIPW": SIPWEstimator,
-            "SAIPW": SAIPWEstimator,
+        sampling_estimand_classes: Dict[
+            str,
+            Union[Type[PopulationMean], Type[NonRespondentMean], Type[SampleMean]],
+        ] = {
+            "PopulationMean": PopulationMean,
+            "NonRespondentMean": NonRespondentMean,
+            "SampleMean": SampleMean,
         }
+        sampling_estimand: Union[
+            Type[PopulationMean], Type[NonRespondentMean], Type[SampleMean]
+        ] = sampling_estimand_classes[sampling_estimand_class]
+
+        if control_sampling_propensity_scores is None:
+            control_estimand: Estimand = SampleMean(
+                np.ones_like(control_outcomes, dtype=np.float64)
+            )
+        else:
+            control_estimand = DoubleSamplingEstimand(
+                SampleMean(np.ones_like(control_outcomes, dtype=np.float64)),
+                sampling_estimand(np.asarray(control_sampling_propensity_scores)),
+            )
+
+        if treated_sampling_propensity_scores is None:
+            treated_estimand: Estimand = NonRespondentMean(treated_propensity_scores)
+        else:
+            treated_estimand = DoubleSamplingEstimand(
+                NonRespondentMean(treated_propensity_scores),
+                sampling_estimand(np.asarray(treated_sampling_propensity_scores)),
+            )
 
         super().__init__(
             control_estimator=classes[control_estimator_class or estimator_class](
-                propensity_scores=control_propensity_scores,
+                propensity_scores=np.ones_like(control_outcomes, dtype=np.float64),
                 outcomes=control_outcomes,
-                estimand=PopulationMean(),
+                estimand=control_estimand,
                 **control_kwargs_nn,
             ),
             treated_estimator=classes[treated_estimator_class or estimator_class](
                 propensity_scores=treated_propensity_scores,
                 outcomes=treated_outcomes,
-                estimand=PopulationMean(),
-                **treated_kwargs_nn,
-            ),
-        )
-
-
-class TransportEstimator(TreatmentEffectEstimator):
-    """Estimator for the out-of-sample average treatment effect.
-
-    Parameters
-    ----------
-     control_propensity_scores, treated_propensity_scores : list_like
-        Propensity scores for control and treatment groups, resp.
-     control_outcomes, treated_outcomes : list_like
-        Outcomes or responses for control and treatment groups, resp. Should have the
-        same lengths as the corresponding `propensity_scores`.
-     estimator_class : ["IPW", "AIPW", "SIPW", "SAIPW"], optional
-        What kind of estimator to use. Defaults to "SIPW".
-     control_estimator_class, treated_estimator_class: ["IPW", "AIPW", "SIPW", "SAIPW"], optional
-        If you really want to use different estimator classes for treatment vs control,
-        you can. Defaults to `estimator_class`.
-     control_kwargs, treated_kwargs, kwargs : dict_like
-        Extra kwargs to pass to the estimators. `kwargs` are passed to both estimators,
-        while `control_kwargs` is only passed to the control estimator and
-        `treated_kwargs` is only passed to the treated estimator.
-
-    Notes
-    -----
-    When interest is in the average treatment effect in a population distinct from the
-    population from which the units in the study were sampled, the average treatment
-    effect in the target population may be very different from the sample average
-    treatment effect. Indeed, without additional assumptions, there is no guarantee we
-    can learn anything about the effect of treatment on the target population, since the
-    study involved a distinct population. For example, there is no reason to think we
-    can learn about the effect of a treatment on women based on an experiment conducted
-    on men, unless we expect the effect to be "transportable" (Tipton and Hartman 2023).
-
-    If the variation in treatment effect is explained by observed covariates and the
-    sample and target populations have good overlap in these covariates, then
-    reweighting units to match the target population can provide an estimate of the
-    average treatment effect in that population. This should be preceded by an
-    exploration of treatment effect variation to identify those covariates that most
-    strongly predict heterogeneity in treatment effect, and a comparison of the sample
-    and target population in terms of these covariates.
-
-    For example, domain expertise may lead us to expect that age explains most of the
-    variation in treatment effect, and this may be supported by the data. Domain
-    expertise may lead us to expect similar treatment effects for men and women of the
-    same age, but since women were not included in the example experiment, the data
-    cannot validate this. But this would then lead us to expect that the only reason the
-    average treatment effect in the target population differs from that in the study, is
-    if the age distribution of women differed from men. Reweighting the observations in
-    the experiment to match the distribution of age in the target population would allow
-    us to estimate the ATE.
-
-    The propensity scores used by TransportEstimator should not be the probability of
-    accepting treatment, as is the case with ATEEstimator, but rather the probability of
-    being in the sample. The intuition here is that by reweighting the control units, we
-    can estimate the average of the control potential outcome, Y(0), in the target
-    population. Doing the same for the treated units estimates the average of the
-    treated potential outcome, Y(1). The out-of-sample ATE is then the difference of
-    these estimates.
-
-    References
-    ----------
-    - Tipton, Elizabeth and Erin Hartman. 2023. "Generalizability and Transportability."
-      In Handbook of Matching and Weighting Adjustments for Causal Inference, , pg.
-      39–59. Chapman and Hall/CRC.
-
-    """
-
-    def __init__(
-        self,
-        control_propensity_scores: Union[List[float], npt.NDArray[np.float64]],
-        control_outcomes: Union[
-            List[Union[float, int]], npt.NDArray[Union[np.float64, np.int64]]
-        ],
-        treated_propensity_scores: Union[List[float], npt.NDArray[np.float64]],
-        treated_outcomes: Union[
-            List[Union[float, int]], npt.NDArray[Union[np.float64, np.int64]]
-        ],
-        estimator_class: Literal["IPW", "AIPW", "SIPW", "SAIPW"] = "SIPW",
-        control_estimator_class: Optional[
-            Literal["IPW", "AIPW", "SIPW", "SAIPW"]
-        ] = None,
-        treated_estimator_class: Optional[
-            Literal["IPW", "AIPW", "SIPW", "SAIPW"]
-        ] = None,
-        control_kwargs: Optional[Dict[str, Any]] = None,
-        treated_kwargs: Optional[Dict[str, Any]] = None,
-        **kwargs,
-    ) -> None:
-        control_propensity_scores = np.asarray(control_propensity_scores)
-        control_outcomes = np.asarray(control_outcomes)
-        treated_propensity_scores = np.asarray(treated_propensity_scores)
-        treated_outcomes = np.asarray(treated_outcomes)
-
-        control_kwargs_nn = dict(**kwargs)
-        if control_kwargs is not None:
-            control_kwargs_nn.update(**control_kwargs)
-
-        treated_kwargs_nn = dict(**kwargs)
-        if treated_kwargs is not None:
-            treated_kwargs_nn.update(**treated_kwargs)
-
-        classes = {
-            "IPW": IPWEstimator,
-            "AIPW": AIPWEstimator,
-            "SIPW": SIPWEstimator,
-            "SAIPW": SAIPWEstimator,
-        }
-
-        super().__init__(
-            control_estimator=classes[control_estimator_class or estimator_class](
-                propensity_scores=control_propensity_scores,
-                outcomes=control_outcomes,
-                estimand=NonRespondentMean(),
-                **control_kwargs_nn,
-            ),
-            treated_estimator=classes[treated_estimator_class or estimator_class](
-                propensity_scores=treated_propensity_scores,
-                outcomes=treated_outcomes,
-                estimand=NonRespondentMean(),
+                estimand=treated_estimand,
                 **treated_kwargs_nn,
             ),
         )
@@ -2434,8 +2499,15 @@ class TreatmentEffectRatioEstimator(WeightingEstimator):
         Denominator outcomes for control and treated groups.
      mean_estimator_class : ["IPW", "AIPW", "SIPW", "SAIPW"], optional
         Estimator class to use for all sub-estimators. Defaults to "SIPW".
-     treatment_effect_estimator_class : [SimpleDifference, ATE, ATT, ATC, PATE, Transport], optional
+     treatment_effect_estimator_class : [SimpleDifference, ATE, ATT, ATC], optional
         Estimator class for treatment effects. Defaults to "ATE".
+     control_sampling_propensity_scores, treated_sampling_propensity_scores : list_like, optional
+        Propensity scores for the sampling mechanism for control and treatment groups,
+        resp. See Notes.
+     sampling_estimand : ["PopulationMean", "NonRespondentMean", "SampleMean"], optional
+        Population for which to estimate the average treatment effect. Used only when
+        sampling propensity scores are specified. Defaults to "PopulationMean" in that
+        case. See Notes.
      numerator_control_kwargs, numerator_treated_kwargs, denominator_control_kwargs, denominator_treated_kwargs : dict, optional
         Extra kwargs to pass to the respective estimators.
 
@@ -2457,8 +2529,17 @@ class TreatmentEffectRatioEstimator(WeightingEstimator):
         denominator_treated_outcomes: Union[List[float], npt.NDArray[np.float64]],
         mean_estimator_class: Literal["IPW", "AIPW", "SIPW", "SAIPW"] = "SIPW",
         treatment_effect_estimator_class: Literal[
-            "SimpleDifference", "ATE", "ATT", "ATC", "PATE", "Transport"
+            "SimpleDifference", "ATE", "ATT", "ATC"
         ] = "ATE",
+        control_sampling_propensity_scores: Optional[
+            Union[List[float], npt.NDArray[np.float64]]
+        ] = None,
+        treated_sampling_propensity_scores: Optional[
+            Union[List[float], npt.NDArray[np.float64]]
+        ] = None,
+        sampling_estimand_class: Literal[
+            "PopulationMean", "NonRespondentMean", "SampleMean"
+        ] = "PopulationMean",
         numerator_control_kwargs: Optional[Dict[str, Any]] = None,
         numerator_treated_kwargs: Optional[Dict[str, Any]] = None,
         denominator_control_kwargs: Optional[Dict[str, Any]] = None,
@@ -2478,8 +2559,6 @@ class TreatmentEffectRatioEstimator(WeightingEstimator):
             "ATE": ATEEstimator,
             "ATT": ATTEstimator,
             "ATC": ATCEstimator,
-            "PATE": PATEEstimator,
-            "Transport": TransportEstimator,
         }
         EstimatorClass = classes[treatment_effect_estimator_class]
 
@@ -2489,6 +2568,9 @@ class TreatmentEffectRatioEstimator(WeightingEstimator):
             treated_propensity_scores=treated_propensity_scores,
             treated_outcomes=numerator_treated_outcomes,
             estimator_class=mean_estimator_class,
+            control_sampling_propensity_scores=control_sampling_propensity_scores,
+            treated_sampling_propensity_scores=treated_sampling_propensity_scores,
+            sampling_estimand_class=sampling_estimand_class,
             control_kwargs=numerator_control_kwargs,
             treated_kwargs=numerator_treated_kwargs,
         )
@@ -2499,6 +2581,9 @@ class TreatmentEffectRatioEstimator(WeightingEstimator):
             treated_propensity_scores=treated_propensity_scores,
             treated_outcomes=denominator_treated_outcomes,
             estimator_class=mean_estimator_class,
+            control_sampling_propensity_scores=control_sampling_propensity_scores,
+            treated_sampling_propensity_scores=treated_sampling_propensity_scores,
+            sampling_estimand_class=sampling_estimand_class,
             control_kwargs=denominator_control_kwargs,
             treated_kwargs=denominator_treated_kwargs,
         )
@@ -2554,7 +2639,7 @@ class TreatmentEffectRatioEstimator(WeightingEstimator):
         self,
         alpha: float = 0.10,
         gamma: float = 6.0,
-        side: Literal["two-sided", "lesser", "greater"] = "two-sided",
+        alternative: Literal["two-sided", "less", "greater"] = "two-sided",
         B: int = 1_000,
         seed: Optional[
             Union[
