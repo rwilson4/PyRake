@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import numpy.typing as npt
 import pytest
-from scipy import optimize
+from scipy import optimize, stats
 from scipy.special import expit, logit
 
 from pyrake.estimators import (
@@ -19,10 +19,12 @@ from pyrake.estimators import (
     IPWEstimator,
     NonRespondentMean,
     PopulationMean,
+    RatioEstimator,
     SAIPWEstimator,
     SampleMean,
     SIPWEstimator,
     TreatmentEffectEstimator,
+    TreatmentEffectRatioEstimator,
 )
 
 
@@ -1213,6 +1215,183 @@ class TestSAIPWEstimator:
         plt.close("all")
 
 
+class TestRatioEstimator:
+    """Pytest test cases for RatioEstimator class."""
+
+    @staticmethod
+    def generate_data_binary(n=100, seed=42):
+        """Generate synthetic data for binary numerator/denominator outcomes."""
+        rng = np.random.default_rng(seed)
+        propensity_scores = rng.uniform(0.2, 0.8, size=n)
+        numerator_outcomes = rng.binomial(1, 0.4, size=n)
+        denominator_outcomes = rng.binomial(1, 0.8, size=n)
+        return propensity_scores, numerator_outcomes, denominator_outcomes
+
+    @staticmethod
+    def generate_data_continuous(n=100, seed=24):
+        """Generate synthetic data for continuous numerator/denominator outcomes."""
+        rng = np.random.default_rng(seed)
+        propensity_scores = rng.uniform(0.2, 0.9, size=n)
+        numerator_outcomes = rng.normal(2.0, 1.0, size=n)
+        denominator_outcomes = rng.normal(4.0, 2.0, size=n)
+        return propensity_scores, numerator_outcomes, denominator_outcomes
+
+    def test_point_estimate_binary(self):
+        """Test that the point estimate is computed as expected for binary outcomes."""
+        ps, num, den = self.generate_data_binary()
+        estimator = RatioEstimator(
+            propensity_scores=ps,
+            numerator_outcomes=num,
+            denominator_outcomes=den,
+        )
+        # Compute stabilized means directly
+        w = 1 / ps
+        x_hat = np.sum(w * num) / np.sum(w)
+        y_hat = np.sum(w * den) / np.sum(w)
+        expected = x_hat / y_hat
+        assert estimator.point_estimate() == pytest.approx(expected, rel=1e-12)
+
+    def test_point_estimate_continuous(self):
+        """Test point estimate for continuous outcomes."""
+        ps, num, den = self.generate_data_continuous()
+        estimator = RatioEstimator(
+            propensity_scores=ps,
+            numerator_outcomes=num,
+            denominator_outcomes=den,
+        )
+        w = 1 / ps
+        x_hat = np.sum(w * num) / np.sum(w)
+        y_hat = np.sum(w * den) / np.sum(w)
+        expected = x_hat / y_hat
+        assert estimator.point_estimate() == pytest.approx(expected, rel=1e-12)
+
+    def test_variance(self):
+        """Test variance calculation with delta method."""
+        ps, num, den = self.generate_data_binary()
+        estimator = RatioEstimator(ps, num, den)
+        w = 1 / ps
+        x_hat = np.sum(w * num) / np.sum(w)
+        y_hat = np.sum(w * den) / np.sum(w)
+        # Variance of stabilized mean
+        var_x = np.sum(w**2 * (num - x_hat) ** 2) / (np.sum(w) ** 2)
+        var_y = np.sum(w**2 * (den - y_hat) ** 2) / (np.sum(w) ** 2)
+        cov_xy = np.sum(w**2 * (num - x_hat) * (den - y_hat)) / (np.sum(w) ** 2)
+        expected_var = (
+            (1 / y_hat) ** 2 * var_x
+            + (x_hat / (y_hat**2)) ** 2 * var_y
+            - 2 * x_hat / (y_hat**3) * cov_xy
+        )
+        assert estimator.variance() == pytest.approx(expected_var, rel=1e-12)
+
+    def test_pvalue(self):
+        """Test p-value calculation for two-sided and one-sided alternatives."""
+        ps, num, den = self.generate_data_binary()
+        estimator = RatioEstimator(ps, num, den)
+        pe = estimator.point_estimate()
+        se = np.sqrt(estimator.variance())
+        null = pe - 0.05
+        # two-sided
+        t = (pe - null) / se
+        expected_p = min(1.0, 2 * min(stats.norm.sf(t), stats.norm.cdf(t)))
+        assert estimator.pvalue(null_value=null, side="two-sided") == pytest.approx(
+            expected_p, rel=1e-8
+        )
+        # greater
+        expected_pg = stats.norm.cdf(t)
+        assert estimator.pvalue(null_value=null, side="greater") == pytest.approx(
+            expected_pg, rel=1e-8
+        )
+        # lesser
+        expected_pl = stats.norm.sf(t)
+        assert estimator.pvalue(null_value=null, side="lesser") == pytest.approx(
+            expected_pl, rel=1e-8
+        )
+
+    def test_confidence_interval(self):
+        """Test confidence interval computation for two-sided and one-sided."""
+        ps, num, den = self.generate_data_binary()
+        estimator = RatioEstimator(ps, num, den)
+        pe = estimator.point_estimate()
+        se = np.sqrt(estimator.variance())
+
+        # Two-sided 90%
+        lower, upper = estimator.confidence_interval(alpha=0.10, side="two-sided")
+        z = stats.norm.isf(0.10 / 2)
+        expected_lb, expected_ub = pe - z * se, pe + z * se
+        assert lower == pytest.approx(expected_lb, rel=1e-12)
+        assert upper == pytest.approx(expected_ub, rel=1e-12)
+
+        # Lesser
+        lower, upper = estimator.confidence_interval(alpha=0.05, side="lesser")
+        z = stats.norm.isf(0.05)
+        expected_ub = pe + z * se
+        assert lower == pytest.approx(pe - z * se, rel=1e-12)
+        assert upper == np.inf
+
+        # Greater
+        lower, upper = estimator.confidence_interval(alpha=0.05, side="greater")
+        assert upper == pytest.approx(pe + z * se, rel=1e-12)
+        assert lower == -np.inf
+
+    def test_sensitivity_analysis_binary(self):
+        """Test sensitivity analysis for binary outcomes returns bounds in sensible order."""
+        ps, num, den = self.generate_data_binary()
+        estimator = RatioEstimator(ps, num, den)
+        lb, ub = estimator.sensitivity_analysis(gamma=2.0)
+        assert lb <= ub
+        # Should be no wider than the expanded CI with gamma=6.0
+        lb6, ub6 = estimator.sensitivity_analysis(gamma=6.0)
+        assert lb6 <= lb <= ub <= ub6
+
+    def test_sensitivity_analysis_continuous(self):
+        """Test sensitivity analysis for continuous outcomes."""
+        ps, num, den = self.generate_data_continuous()
+        estimator = RatioEstimator(ps, num, den)
+        lb, ub = estimator.sensitivity_analysis(gamma=3.0)
+        assert isinstance(lb, float)
+        assert isinstance(ub, float)
+        assert lb <= ub
+
+    def test_expanded_confidence_interval(self):
+        """Test expanded confidence interval bootstrapping produces interval with proper order."""
+        ps, num, den = self.generate_data_binary(n=200)
+        estimator = RatioEstimator(ps, num, den)
+        lb, ub = estimator.expanded_confidence_interval(
+            alpha=0.10, gamma=2.0, B=250, seed=10
+        )
+        assert lb <= ub
+        # Check that gamma=1 gives back the regular CI
+        lb1, ub1 = estimator.expanded_confidence_interval(
+            alpha=0.10, gamma=1.0, B=100, seed=11
+        )
+        ci_lb, ci_ub = estimator.confidence_interval(alpha=0.10)
+        assert lb1 == pytest.approx(ci_lb, rel=1e-5)
+        assert ub1 == pytest.approx(ci_ub, rel=1e-5)
+
+    def test_plot_sensitivity(self):
+        """Sanity-check test: plot sensitivity does not error out and returns DataFrame and Axes."""
+        # import matplotlib
+        # matplotlib.use('Agg')  # Use a non-interactive backend
+        ps, num, den = self.generate_data_binary(n=50)
+        estimator = RatioEstimator(ps, num, den)
+        expected_columns = [
+            "Gamma",
+            "ECI Lower Bound",
+            "Sen Lower Bound",
+            "Point Estimate",
+            "Sen Upper Bound",
+            "ECI Upper Bound",
+        ]
+
+        df, ax = estimator.plot_sensitivity(
+            gamma_lower=1.0, gamma_upper=2.0, B=30, title="Test Plot"
+        )
+        # plt.show()
+        assert set(df.columns) == set(expected_columns)
+        assert len(df) == 50
+        plt.close("all")
+
+
 class TestATEEstimator:
     @staticmethod
     def get_data() -> Tuple[
@@ -1679,7 +1858,7 @@ class TestATEEstimator:
             tick_label_size=14,
             ytick_format=".02%",
         )
-        plt.show()
+        # plt.show()
         assert set(df.columns) == set(expected_columns)
         assert len(df) == 50
         plt.close("all")
@@ -1977,3 +2156,212 @@ class TestATCEstimator:
         assert set(df.columns) == set(expected_columns)
         assert len(df) == 50
         plt.close("all")
+
+
+class TestTreatmentEffectRatioEstimator:
+    @staticmethod
+    def get_data() -> Tuple[
+        npt.NDArray[np.float64],
+        npt.NDArray[np.float64],
+        npt.NDArray[np.float64],
+        npt.NDArray[np.float64],
+        npt.NDArray[np.float64],
+        npt.NDArray[np.float64],
+    ]:
+        rng = np.random.default_rng(42)
+        sample_size = 2000
+        q = 0.5
+        sigma2 = 0.01 * q * (1 - q)
+        s = q * (1 - q) / sigma2 - 1
+        alpha = q * s
+        beta = (1 - q) * s
+        propensities = rng.beta(alpha, beta, size=sample_size)
+        assignments = rng.binomial(1, propensities, size=sample_size)
+
+        # Numerator outcomes: simulate treatment effect ~0.05
+        y0_num = rng.normal(0.0, 1.0, size=sample_size)
+        y1_num = rng.normal(0.05, 1.0, size=sample_size)
+        numerator_outcomes = np.where(assignments == 0, y0_num, y1_num)
+
+        # Denominator outcomes: simulate treatment effect ~0.1
+        y0_den = rng.normal(1.0, 1.0, size=sample_size)
+        y1_den = rng.normal(1.1, 1.0, size=sample_size)
+        denominator_outcomes = np.where(assignments == 0, y0_den, y1_den)
+
+        control_mask = assignments == 0
+        treated_mask = assignments == 1
+
+        return (
+            propensities[control_mask],
+            propensities[treated_mask],
+            numerator_outcomes[control_mask],
+            numerator_outcomes[treated_mask],
+            denominator_outcomes[control_mask],
+            denominator_outcomes[treated_mask],
+        )
+
+    @staticmethod
+    def test_point_estimate() -> None:
+        (
+            control_propensities,
+            treated_propensities,
+            numerator_control_outcomes,
+            numerator_treated_outcomes,
+            denominator_control_outcomes,
+            denominator_treated_outcomes,
+        ) = TestTreatmentEffectRatioEstimator.get_data()
+
+        estimator = TreatmentEffectRatioEstimator(
+            control_propensity_scores=control_propensities,
+            treated_propensity_scores=treated_propensities,
+            numerator_control_outcomes=numerator_control_outcomes,
+            numerator_treated_outcomes=numerator_treated_outcomes,
+            denominator_control_outcomes=denominator_control_outcomes,
+            denominator_treated_outcomes=denominator_treated_outcomes,
+            mean_estimator_class="SIPW",
+            treatment_effect_estimator_class="ATE",
+        )
+
+        # Calculate expected ratio of treatment effects manually
+        numerator_estimator = ATEEstimator(
+            control_propensity_scores=control_propensities,
+            treated_propensity_scores=treated_propensities,
+            control_outcomes=numerator_control_outcomes,
+            treated_outcomes=numerator_treated_outcomes,
+            estimator_class="SIPW",
+        )
+
+        denominator_estimator = ATEEstimator(
+            control_propensity_scores=control_propensities,
+            treated_propensity_scores=treated_propensities,
+            control_outcomes=denominator_control_outcomes,
+            treated_outcomes=denominator_treated_outcomes,
+            estimator_class="SIPW",
+        )
+
+        expected = (
+            numerator_estimator.point_estimate()
+            / denominator_estimator.point_estimate()
+        )
+        actual = estimator.point_estimate()
+        assert actual == pytest.approx(expected, rel=1e-1)
+
+    @staticmethod
+    def test_variance() -> None:
+        (
+            control_propensities,
+            treated_propensities,
+            numerator_control_outcomes,
+            numerator_treated_outcomes,
+            denominator_control_outcomes,
+            denominator_treated_outcomes,
+        ) = TestTreatmentEffectRatioEstimator.get_data()
+
+        estimator = TreatmentEffectRatioEstimator(
+            control_propensity_scores=control_propensities,
+            treated_propensity_scores=treated_propensities,
+            numerator_control_outcomes=numerator_control_outcomes,
+            numerator_treated_outcomes=numerator_treated_outcomes,
+            denominator_control_outcomes=denominator_control_outcomes,
+            denominator_treated_outcomes=denominator_treated_outcomes,
+            mean_estimator_class="SIPW",
+            treatment_effect_estimator_class="ATE",
+        )
+
+        expected = 0.2815034627377356
+
+        actual = estimator.variance()
+
+        # Variance should be positive and finite
+        assert actual > 0
+        assert np.isfinite(actual)
+        assert actual == pytest.approx(expected)
+
+    @staticmethod
+    def test_pvalue() -> None:
+        (
+            control_propensities,
+            treated_propensities,
+            numerator_control_outcomes,
+            numerator_treated_outcomes,
+            denominator_control_outcomes,
+            denominator_treated_outcomes,
+        ) = TestTreatmentEffectRatioEstimator.get_data()
+
+        estimator = TreatmentEffectRatioEstimator(
+            control_propensity_scores=control_propensities,
+            treated_propensity_scores=treated_propensities,
+            numerator_control_outcomes=numerator_control_outcomes,
+            numerator_treated_outcomes=numerator_treated_outcomes,
+            denominator_control_outcomes=denominator_control_outcomes,
+            denominator_treated_outcomes=denominator_treated_outcomes,
+            mean_estimator_class="SIPW",
+            treatment_effect_estimator_class="ATE",
+        )
+
+        pe = estimator.point_estimate()
+        se = np.sqrt(estimator.variance())
+        null = pe - 0.05
+        t = (pe - null) / se
+
+        # two-sided
+        expected_p = min(1.0, 2 * min(stats.norm.sf(t), stats.norm.cdf(t)))
+        assert estimator.pvalue(null_value=null, side="two-sided") == pytest.approx(
+            expected_p, rel=1e-8
+        )
+
+        # greater
+        expected_pg = stats.norm.cdf(t)
+        assert estimator.pvalue(null_value=null, side="greater") == pytest.approx(
+            expected_pg, rel=1e-8
+        )
+
+        # lesser
+        expected_pl = stats.norm.sf(t)
+        assert estimator.pvalue(null_value=null, side="lesser") == pytest.approx(
+            expected_pl, rel=1e-8
+        )
+
+    @staticmethod
+    def test_confidence_interval() -> None:
+        (
+            control_propensities,
+            treated_propensities,
+            numerator_control_outcomes,
+            numerator_treated_outcomes,
+            denominator_control_outcomes,
+            denominator_treated_outcomes,
+        ) = TestTreatmentEffectRatioEstimator.get_data()
+
+        estimator = TreatmentEffectRatioEstimator(
+            control_propensity_scores=control_propensities,
+            treated_propensity_scores=treated_propensities,
+            numerator_control_outcomes=numerator_control_outcomes,
+            numerator_treated_outcomes=numerator_treated_outcomes,
+            denominator_control_outcomes=denominator_control_outcomes,
+            denominator_treated_outcomes=denominator_treated_outcomes,
+            mean_estimator_class="SIPW",
+            treatment_effect_estimator_class="ATE",
+        )
+
+        pe = estimator.point_estimate()
+        se = np.sqrt(estimator.variance())
+
+        # Two-sided 90%
+        lower, upper = estimator.confidence_interval(alpha=0.10, side="two-sided")
+        z = stats.norm.isf(0.10 / 2)
+        expected_lb, expected_ub = pe - z * se, pe + z * se
+        assert lower == pytest.approx(expected_lb, rel=1e-12)
+        assert upper == pytest.approx(expected_ub, rel=1e-12)
+
+        # Lesser
+        lower, upper = estimator.confidence_interval(alpha=0.05, side="lesser")
+        z = stats.norm.isf(0.05)
+        expected_ub = pe + z * se
+        assert lower == pytest.approx(pe - z * se, rel=1e-12)
+        assert upper == np.inf
+
+        # Greater
+        lower, upper = estimator.confidence_interval(alpha=0.05, side="greater")
+        assert upper == pytest.approx(pe + z * se, rel=1e-12)
+        assert lower == -np.inf

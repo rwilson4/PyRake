@@ -12,7 +12,7 @@ import pandas as pd
 import seaborn as sns
 from matplotlib.axes import Axes
 from matplotlib.lines import Line2D
-from scipy import stats
+from scipy import optimize, stats
 
 
 class Estimand(ABC):
@@ -1337,6 +1337,290 @@ class SAIPWEstimator(SIPWEstimator):
         )
 
 
+class RatioEstimator(WeightingEstimator):
+    """Estimate the ratio of two means in some population.
+
+    Parameters
+    ----------
+     propensity_scores : list_like
+        Propensity scores.
+     numerator_outcomes, denominator_outcomes : list_like
+        Outcomes or responses corresponding to numerator and denominator. Should have
+        the same length as `propensity_scores`.
+     estimand : Estimand, optional
+        An Estimand object representing the thing to be estimated. Defaults to
+        PopulationMean.
+     estimator_class : ["IPW", "AIPW", "SIPW", "SAIPW"], optional
+        What kind of estimator to use. Defaults to "SIPW". Currently only "SIPW" is supported.
+     control_estimator_class, treated_estimator_class: ["IPW", "AIPW", "SIPW", "SAIPW"], optional
+        If you really want to use different estimator classes for treatment vs control,
+        you can. Defaults to `estimator_class`. Currently only "SIPW" is supported.
+     control_kwargs, treated_kwargs, kwargs : dict_like
+        Extra kwargs to pass to the estimators. `kwargs` are passed to both estimators,
+        while `control_kwargs` is only passed to the control estimator and
+        `treated_kwargs` is only passed to the treated estimator.
+
+    """
+
+    def __init__(
+        self,
+        propensity_scores: Union[List[float], npt.NDArray[np.float64]],
+        numerator_outcomes: Union[
+            List[Union[float, int]], npt.NDArray[Union[np.float64, np.int64]]
+        ],
+        denominator_outcomes: Union[
+            List[Union[float, int]], npt.NDArray[Union[np.float64, np.int64]]
+        ],
+        estimand: Optional[Estimand] = None,
+        estimator_class: Literal["IPW", "AIPW", "SIPW", "SAIPW"] = "SIPW",
+        numerator_estimator_class: Optional[
+            Literal["IPW", "AIPW", "SIPW", "SAIPW"]
+        ] = None,
+        denominator_estimator_class: Optional[
+            Literal["IPW", "AIPW", "SIPW", "SAIPW"]
+        ] = None,
+        numerator_kwargs: Optional[Dict[str, Any]] = None,
+        denominator_kwargs: Optional[Dict[str, Any]] = None,
+        **kwargs,
+    ) -> None:
+        propensity_scores = np.asarray(propensity_scores)
+        numerator_outcomes = np.asarray(numerator_outcomes)
+        denominator_outcomes = np.asarray(denominator_outcomes)
+
+        numerator_kwargs_nn = dict(**kwargs)
+        if numerator_kwargs is not None:
+            numerator_kwargs_nn.update(**numerator_kwargs)
+
+        denominator_kwargs_nn = dict(**kwargs)
+        if denominator_kwargs is not None:
+            denominator_kwargs_nn.update(**denominator_kwargs)
+
+        classes = {
+            "IPW": IPWEstimator,
+            "AIPW": AIPWEstimator,
+            "SIPW": SIPWEstimator,
+            "SAIPW": SAIPWEstimator,
+        }
+
+        self.numerator_estimator = classes[
+            numerator_estimator_class or estimator_class
+        ](
+            propensity_scores=propensity_scores,
+            outcomes=numerator_outcomes,
+            estimand=estimand,
+            **numerator_kwargs_nn,
+        )
+
+        self.denominator_estimator = classes[
+            denominator_estimator_class or estimator_class
+        ](
+            propensity_scores=propensity_scores,
+            outcomes=denominator_outcomes,
+            estimand=estimand,
+            **denominator_kwargs_nn,
+        )
+
+    def point_estimate(self) -> float:
+        """Calculate a point estimate."""
+        return (
+            self.numerator_estimator.point_estimate()
+            / self.denominator_estimator.point_estimate()
+        )
+
+    def variance(self) -> float:
+        """Calculate the variance.
+
+        Uses the delta method to calculate the variance.
+
+        """
+        mu_num = self.numerator_estimator.point_estimate()
+        var_num = self.numerator_estimator.variance()
+        mu_den = self.denominator_estimator.point_estimate()
+        var_den = self.denominator_estimator.variance()
+
+        w = self.numerator_estimator.weights
+        x = self.numerator_estimator.outcomes
+        y = self.denominator_estimator.outcomes
+        cov_num_den = np.sum(np.square(w) * (x - mu_num) * (y - mu_den)) / (
+            np.sum(w) ** 2.0
+        )
+
+        return (
+            ((1.0 / mu_den) ** 2.0) * var_num
+            + ((mu_num / (mu_den**2.0)) ** 2.0) * var_den
+            - (2.0 * mu_num / (mu_den**3.0)) * cov_num_den
+        )
+
+    def sensitivity_analysis(self, gamma: float = 6.0) -> Tuple[float, float]:
+        r"""Perform a sensitivity analysis.
+
+        Calculate a range of point estimates implied by the Gamma factor.
+
+        Parameters
+        ----------
+         gamma : float, optional
+            The Gamma factor. Must be >= 1.0, with 1.0 indicating perfect propensity
+            scores. Defaults to 6. See Notes.
+
+        Returns
+        -------
+         lb, ub : float
+            Lower and upper bounds on the point estimate.
+
+        Notes
+        -----
+        See the Notes in WeightingEstimator for overall context.
+
+        We calculate
+                 \sum_i w_i * x_i
+           inf -------------------
+                 \sum_i w_i * y_i
+        over wli <= w_i <= wui as the lower bound of the sensitivity interval, and the
+        supremum as the upper bound. These are linear fractional programs subject to
+        linear inequality constraints. They may be transformed to equivalent linear
+        programs and solved efficiently, as described in Boyd and Vandenberghe (2004).
+
+        References
+        ----------
+         - Boyd, Stephen and Vandenberghe, Lieven, Convex Optimization, Cambridge
+           University Press, 2004.
+
+        """
+        weights = self.numerator_estimator.weights
+        wl = weights / math.sqrt(gamma) + (1.0 - 1.0 / math.sqrt(gamma))
+        wu = weights * math.sqrt(gamma) - (math.sqrt(gamma) - 1.0)
+        G = np.vstack([-np.eye(len(weights)), np.eye(len(weights))])
+        h = np.concatenate([-wl, wu])
+
+        lb_res = optimize.linprog(
+            c=np.append(self.numerator_estimator.outcomes, 0),
+            A_ub=np.hstack([G, -h.reshape(-1, 1)]),
+            b_ub=np.zeros_like(h),
+            A_eq=np.append(self.denominator_estimator.outcomes, 0).reshape(1, -1),
+            b_eq=np.array([1]),
+        )
+
+        ub_res = optimize.linprog(
+            c=np.append(-self.numerator_estimator.outcomes, 0),
+            A_ub=np.hstack([G, -h.reshape(-1, 1)]),
+            b_ub=np.zeros_like(h),
+            A_eq=np.append(self.denominator_estimator.outcomes, 0).reshape(1, -1),
+            b_eq=np.array([1]),
+        )
+
+        return lb_res.fun, -ub_res.fun
+
+    def expanded_confidence_interval(
+        self,
+        alpha: float = 0.10,
+        gamma: float = 6.0,
+        side: Literal["two-sided", "lesser", "greater"] = "two-sided",
+        B: int = 1_000,
+        seed: Optional[
+            Union[
+                int,
+                List[int],
+                np.random.SeedSequence,
+                np.random.BitGenerator,
+                np.random.Generator,
+            ]
+        ] = None,
+    ) -> Tuple[float, float]:
+        r"""Calculate an expanded confidence interval.
+
+        The expanded confidence interval combines uncertainty from stochastic sampling
+        and from propensity scores estimated with error.
+
+        Parameters
+        ----------
+         alpha : float, optional
+            P-value threshold, e.g. specify alpha=0.05 for a 95% confidence interval.
+            Defaults to 0.10, corresponding to a 90% confidence interval.
+         gamma : float, optional
+            The Gamma factor. Must be >= 1.0, with 1.0 indicating perfect propensity
+            scores. Defaults to 6. See Notes in `sensitivity_analysis`.
+         side : ["two-sided", "lesser", "greater"], optional
+            What kind of test:
+              - "two-sided": H0: \bar{Y} = `null_value` vs Halt: \bar{Y} <>
+                `null_value`.
+              - "greater": H0: \bar{Y} <= `null_value` vs Halt: \bar{Y} > `null_value`.
+              - "lesser": H0: \bar{Y} >= `null_value` vs Halt: \bar{Y} < `null_value`.
+            Defaults to "two-sided".
+         B : int, optional
+            Number of bootstrap replications to run. Defaults to 1_000.
+         seed : int, list_like, etc
+            A seed for numpy.random.default_rng. See that documentation for details.
+
+        Returns
+        -------
+         lb, ub : float
+            Lower and upper bounds on the confidence interval. For one-sided intervals,
+            only one of these will be finite:
+              - "two-sided": lb and ub both finite
+              - "greater": lb finite, ub = np.inf
+              - "lesser": lb = -np.inf, ub finite
+
+        """
+        if gamma < 1.0:
+            raise ValueError("`gamma` must be >= 1")
+
+        if gamma == 1.0:
+            return self.confidence_interval(alpha=alpha, side=side)
+
+        lb_bootstrap = np.zeros(B)
+        ub_bootstrap = np.zeros(B)
+        rng = np.random.default_rng(seed)
+        for b in range(B):
+            # Resample with replacement
+            bootstrap_indices = rng.choice(
+                range(len(self.numerator_estimator.propensity_scores)),
+                size=len(self.numerator_estimator.propensity_scores),
+                replace=True,
+            )
+            bootstrap_propensities = self.numerator_estimator.propensity_scores[
+                bootstrap_indices
+            ]
+            bootstrap_numerator_outcomes = self.numerator_estimator.outcomes[
+                bootstrap_indices
+            ]
+            bootstrap_denominator_outcomes = self.denominator_estimator.outcomes[
+                bootstrap_indices
+            ]
+            # Implementation note for AIPW and SAIPW estimators: `self.outcomes` is
+            # actually the adjusted outcomes, outcome minus prediction, and
+            # `self.extra_args["predicted_outcomes"]` is actually just a vector of all
+            # zeros to make the constructor happy. So there is no need to resample those
+            # predicted outcomes.
+
+            # Calculate sensitivity interval for this bootstrap sample
+            (
+                lb_bootstrap[b],
+                ub_bootstrap[b],
+            ) = self.__class__(
+                propensity_scores=bootstrap_propensities,
+                numerator_outcomes=bootstrap_numerator_outcomes,
+                denominator_outcomes=bootstrap_denominator_outcomes,
+                estimand=self.numerator_estimator.estimand,
+                numerator_kwargs=self.numerator_estimator.extra_args,
+                denominator_kwargs=self.denominator_estimator.extra_args,
+            ).sensitivity_analysis(gamma=gamma)
+
+        # Calculate the expanded confidence interval as percentiles of the bootstrap estimates
+        if side == "two-sided":
+            lb = float(np.percentile(lb_bootstrap, 100 * alpha / 2))
+            ub = float(np.percentile(ub_bootstrap, 100 * (1 - (alpha / 2))))
+        elif side == "lesser":
+            lb = -np.inf
+            ub = float(np.percentile(ub_bootstrap, 100 * (1 - alpha)))
+        elif side == "greater":
+            lb = float(np.percentile(lb_bootstrap, 100 * alpha))
+            ub = np.inf
+        else:
+            raise ValueError(f"Unrecognized input {side=:}")
+
+        return lb, ub
+
+
 class TreatmentEffectEstimator(WeightingEstimator):
     """Base class for estimating treatment effects."""
 
@@ -2122,4 +2406,155 @@ class TransportEstimator(TreatmentEffectEstimator):
                 estimand=NonRespondentMean(),
                 **treated_kwargs_nn,
             ),
+        )
+
+
+class TreatmentEffectRatioEstimator(WeightingEstimator):
+    """Estimate the ratio of two treatment effects in some population.
+
+    Parameters
+    ----------
+     control_propensity_scores, treated_propensity_scores : list_like
+        Propensity scores for control and treatment groups, respectively.
+     numerator_control_outcomes, numerator_treated_outcomes : list_like
+        Numerator outcomes for control and treated groups.
+     denominator_control_outcomes, denominator_treated_outcomes : list_like
+        Denominator outcomes for control and treated groups.
+     mean_estimator_class : ["IPW", "AIPW", "SIPW", "SAIPW"], optional
+        Estimator class to use for all sub-estimators. Defaults to "SIPW".
+     treatment_effect_estimator_class : [SimpleDifference, ATE, ATT, ATC, PATE, Transport], optional
+        Estimator class for treatment effects. Defaults to "ATE".
+     numerator_control_kwargs, numerator_treated_kwargs, denominator_control_kwargs, denominator_treated_kwargs : dict, optional
+        Extra kwargs to pass to the respective estimators.
+
+    Notes
+    -----
+    Sensitivity analysis and expanded confidence intervals are not implemented because
+    the ratio of differences of linear-fractional problems is not quasilinear and cannot
+    be transformed to a linear program easily.
+
+    """
+
+    def __init__(
+        self,
+        control_propensity_scores: Union[List[float], npt.NDArray[np.float64]],
+        treated_propensity_scores: Union[List[float], npt.NDArray[np.float64]],
+        numerator_control_outcomes: Union[List[float], npt.NDArray[np.float64]],
+        numerator_treated_outcomes: Union[List[float], npt.NDArray[np.float64]],
+        denominator_control_outcomes: Union[List[float], npt.NDArray[np.float64]],
+        denominator_treated_outcomes: Union[List[float], npt.NDArray[np.float64]],
+        mean_estimator_class: Literal["IPW", "AIPW", "SIPW", "SAIPW"] = "SIPW",
+        treatment_effect_estimator_class: Literal[
+            "SimpleDifference", "ATE", "ATT", "ATC", "PATE", "Transport"
+        ] = "ATE",
+        numerator_control_kwargs: Optional[Dict[str, Any]] = None,
+        numerator_treated_kwargs: Optional[Dict[str, Any]] = None,
+        denominator_control_kwargs: Optional[Dict[str, Any]] = None,
+        denominator_treated_kwargs: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        # Convert inputs to arrays
+        control_propensity_scores = np.asarray(control_propensity_scores)
+        treated_propensity_scores = np.asarray(treated_propensity_scores)
+        numerator_control_outcomes = np.asarray(numerator_control_outcomes)
+        numerator_treated_outcomes = np.asarray(numerator_treated_outcomes)
+        denominator_control_outcomes = np.asarray(denominator_control_outcomes)
+        denominator_treated_outcomes = np.asarray(denominator_treated_outcomes)
+
+        # Classes dictionary for estimators
+        classes = {
+            "SimpleDifference": SimpleDifferenceEstimator,
+            "ATE": ATEEstimator,
+            "ATT": ATTEstimator,
+            "ATC": ATCEstimator,
+            "PATE": PATEEstimator,
+            "Transport": TransportEstimator,
+        }
+        EstimatorClass = classes[treatment_effect_estimator_class]
+
+        self.numerator_estimator = EstimatorClass(
+            control_propensity_scores=control_propensity_scores,
+            control_outcomes=numerator_control_outcomes,
+            treated_propensity_scores=treated_propensity_scores,
+            treated_outcomes=numerator_treated_outcomes,
+            estimator_class=mean_estimator_class,
+            control_kwargs=numerator_control_kwargs,
+            treated_kwargs=numerator_treated_kwargs,
+        )
+
+        self.denominator_estimator = EstimatorClass(
+            control_propensity_scores=control_propensity_scores,
+            control_outcomes=denominator_control_outcomes,
+            treated_propensity_scores=treated_propensity_scores,
+            treated_outcomes=denominator_treated_outcomes,
+            estimator_class=mean_estimator_class,
+            control_kwargs=denominator_control_kwargs,
+            treated_kwargs=denominator_treated_kwargs,
+        )
+
+    def point_estimate(self) -> float:
+        """Calculate a point estimate."""
+        return (
+            self.numerator_estimator.point_estimate()
+            / self.denominator_estimator.point_estimate()
+        )
+
+    def variance(self) -> float:
+        """Calculate the variance of the ratio estimator using the delta method."""
+        # Numerator treatment effect and variance
+        mu_num = self.numerator_estimator.point_estimate()
+        var_num = self.numerator_estimator.variance()
+        mu_den = self.denominator_estimator.point_estimate()
+        var_den = self.denominator_estimator.variance()
+
+        wc = self.numerator_estimator.control_estimator.weights
+        mu_num_c = self.numerator_estimator.control_estimator.point_estimate()
+        mu_den_c = self.denominator_estimator.control_estimator.point_estimate()
+        xc = self.numerator_estimator.control_estimator.outcomes
+        yc = self.denominator_estimator.control_estimator.outcomes
+        cov_num_den_c = np.sum(np.square(wc) * (xc - mu_num_c) * (yc - mu_den_c)) / (
+            np.sum(wc) ** 2.0
+        )
+
+        wt = self.numerator_estimator.treated_estimator.weights
+        mu_num_t = self.numerator_estimator.treated_estimator.point_estimate()
+        mu_den_t = self.denominator_estimator.treated_estimator.point_estimate()
+        xt = self.numerator_estimator.treated_estimator.outcomes
+        yt = self.denominator_estimator.treated_estimator.outcomes
+        cov_num_den_t = np.sum(np.square(wt) * (xt - mu_num_t) * (yt - mu_den_t)) / (
+            np.sum(wt) ** 2.0
+        )
+
+        cov_num_den = cov_num_den_c + cov_num_den_t
+
+        return (
+            ((1.0 / mu_den) ** 2.0) * var_num
+            + ((mu_num / (mu_den**2.0)) ** 2.0) * var_den
+            - (2.0 * mu_num / (mu_den**3.0)) * cov_num_den
+        )
+
+    def sensitivity_analysis(self, gamma: float = 6.0) -> Tuple[float, float]:
+        """Not implemented."""
+        raise NotImplementedError(
+            "Sensitivity analysis is not implemented for TreatmentEffectRatioEstimator."
+        )
+
+    def expanded_confidence_interval(
+        self,
+        alpha: float = 0.10,
+        gamma: float = 6.0,
+        side: Literal["two-sided", "lesser", "greater"] = "two-sided",
+        B: int = 1_000,
+        seed: Optional[
+            Union[
+                int,
+                List[int],
+                np.random.SeedSequence,
+                np.random.BitGenerator,
+                np.random.Generator,
+            ]
+        ] = None,
+    ) -> Tuple[float, float]:
+        """Not implemented."""
+        raise NotImplementedError(
+            "Expanded confidence interval is not implemented for TreatmentEffectRatioEstimator."
         )
