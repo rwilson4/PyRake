@@ -2,7 +2,7 @@
 
 import math
 from abc import ABC, abstractmethod, abstractproperty
-from typing import Any, Dict, List, Literal, Optional, Self, Tuple, Type, Union
+from typing import Any, Dict, List, Literal, Optional, Tuple, Type, Union
 
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
@@ -13,6 +13,7 @@ import seaborn as sns
 from matplotlib.axes import Axes
 from matplotlib.lines import Line2D
 from scipy import optimize, stats
+from typing_extensions import Self
 
 
 class Estimand(ABC):
@@ -27,7 +28,7 @@ class Estimand(ABC):
     def sensitivity_region(
         self,
         gamma: float,
-    ) -> Tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
+    ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
         """Calculate a sensitivity region around baseline weights."""
         pass
 
@@ -64,7 +65,7 @@ class PopulationMean(SimpleEstimand):
     def sensitivity_region(
         self,
         gamma: float,
-    ) -> Tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
+    ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
         """Calculate a sensitivity region around baseline weights."""
         weights = self.weights
         wl = weights / math.sqrt(gamma) + (1.0 - 1.0 / math.sqrt(gamma))
@@ -95,7 +96,7 @@ class NonRespondentMean(SimpleEstimand):
     def sensitivity_region(
         self,
         gamma: float,
-    ) -> Tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
+    ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
         """Calculate a sensitivity region around baseline weights."""
         weights = self.weights
         wl = weights / math.sqrt(gamma)
@@ -124,7 +125,7 @@ class SampleMean(SimpleEstimand):
     def sensitivity_region(
         self,
         gamma: float,
-    ) -> Tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
+    ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
         """Calculate a sensitivity region around baseline weights."""
         weights = self.weights
         return weights, weights
@@ -183,7 +184,7 @@ class WeightingEstimator(ABC):
         """Calculate the variance."""
 
     @abstractmethod
-    def sensitivity_analysis(self, gamma: float = 6.0) -> Tuple[float, float]:
+    def sensitivity_analysis(self, gamma: float = 6.0) -> tuple[float, float]:
         r"""Perform a sensitivity analysis.
 
         Calculate a range of point estimates implied by the Gamma factor.
@@ -251,16 +252,14 @@ class WeightingEstimator(ABC):
         gamma: float = 6.0,
         alternative: Literal["two-sided", "less", "greater"] = "two-sided",
         B: int = 1_000,
-        seed: Optional[
-            Union[
-                int,
-                List[int],
-                np.random.SeedSequence,
-                np.random.BitGenerator,
-                np.random.Generator,
-            ]
-        ] = None,
-    ) -> Tuple[float, float]:
+        seed: None | (
+            int
+            | list[int]
+            | np.random.SeedSequence
+            | np.random.BitGenerator
+            | np.random.Generator
+        ) = None,
+    ) -> tuple[float, float]:
         r"""Calculate an expanded confidence interval.
 
         The expanded confidence interval combines uncertainty from stochastic sampling
@@ -351,7 +350,7 @@ class WeightingEstimator(ABC):
         self,
         alpha: float = 0.10,
         alternative: Literal["two-sided", "less", "greater"] = "two-sided",
-    ) -> Tuple[float, float]:
+    ) -> tuple[float, float]:
         """Calculate confidence interval on a quantity, theta.
 
         Parameters
@@ -406,15 +405,15 @@ class WeightingEstimator(ABC):
         alpha: float = 0.10,
         alternative: Literal["two-sided", "less", "greater"] = "two-sided",
         B: int = 1_000,
-        title: Optional[str] = None,
+        title: str | None = None,
         ylabel: str = "Sensitivity Interval",
         ytick_format: str = ".0%",
-        axis_label_size: Optional[int] = None,
-        tick_label_size: Optional[int] = None,
-        legend_label_size: Optional[int] = None,
-        legend_placement: Optional[str] = None,
-        ax: Optional[Axes] = None,
-    ) -> Tuple[pd.DataFrame, Axes]:
+        axis_label_size: int | None = None,
+        tick_label_size: int | None = None,
+        legend_label_size: int | None = None,
+        legend_placement: str | None = None,
+        ax: Axes | None = None,
+    ) -> tuple[pd.DataFrame, Axes]:
         r"""Plot sensitivity of estimates to hidden biases.
 
         Parameters
@@ -647,7 +646,7 @@ class WeightingEstimator(ABC):
         ]
 
         if legend_placement is None:
-            if alternative == "greater":
+            if alternative == "less":
                 legend_placement = "upper left"
             else:
                 legend_placement = "lower left"
@@ -679,11 +678,9 @@ class MeanEstimator(WeightingEstimator):
 
     def __init__(
         self,
-        propensity_scores: Union[List[float], npt.NDArray[np.float64]],
-        outcomes: Union[
-            List[Union[float, int]], npt.NDArray[Union[np.float64, np.int64]]
-        ],
-        estimand: Optional[Estimand] = None,
+        propensity_scores: list[float] | npt.NDArray[np.float64],
+        outcomes: list[float | int] | npt.NDArray[np.float64 | np.int64],
+        estimand: Estimand | None = None,
         estimand_class: Optional[Type[SimpleEstimand]] = None,
         **kwargs,
     ) -> None:
@@ -693,7 +690,7 @@ class MeanEstimator(WeightingEstimator):
             )
 
         if np.min(propensity_scores) <= 0.0 or np.max(propensity_scores) > 1.0:
-            raise ValueError("Propensity scores must be strictly positive and <= 1")
+            raise ValueError("Propensitiy scores must be strictly positive and <= 1")
 
         self.propensity_scores: npt.NDArray[np.float64] = np.asarray(propensity_scores)
         if estimand is None:
@@ -701,7 +698,7 @@ class MeanEstimator(WeightingEstimator):
         self.estimand: Estimand = estimand
         self.weights: npt.NDArray[np.float64] = self.estimand.weights
         self.outcomes: npt.NDArray[np.float64] = np.asarray(outcomes)
-        self.extra_args: Dict[str, Any] = kwargs
+        self.extra_args: dict[str, Any] = kwargs
 
     def pvalue(
         self,
@@ -741,7 +738,7 @@ class MeanEstimator(WeightingEstimator):
         self,
         alpha: float = 0.10,
         alternative: Literal["two-sided", "less", "greater"] = "two-sided",
-    ) -> Tuple[float, float]:
+    ) -> tuple[float, float]:
         r"""Calculate confidence interval on mean in target population.
 
         Parameters
@@ -775,16 +772,14 @@ class MeanEstimator(WeightingEstimator):
         gamma: float = 6.0,
         alternative: Literal["two-sided", "less", "greater"] = "two-sided",
         B: int = 1_000,
-        seed: Optional[
-            Union[
-                int,
-                List[int],
-                np.random.SeedSequence,
-                np.random.BitGenerator,
-                np.random.Generator,
-            ]
-        ] = None,
-    ) -> Tuple[float, float]:
+        seed: None | (
+            int
+            | list[int]
+            | np.random.SeedSequence
+            | np.random.BitGenerator
+            | np.random.Generator
+        ) = None,
+    ) -> tuple[float, float]:
         r"""Calculate an expanded confidence interval.
 
         The expanded confidence interval combines uncertainty from stochastic sampling
@@ -905,12 +900,10 @@ class IPWEstimator(MeanEstimator):
 
     def __init__(
         self,
-        propensity_scores: Union[List[float], npt.NDArray[np.float64]],
-        outcomes: Union[
-            List[Union[float, int]], npt.NDArray[Union[np.float64, np.int64]]
-        ],
+        propensity_scores: list[float] | npt.NDArray[np.float64],
+        outcomes: list[float | int] | npt.NDArray[np.float64 | np.int64],
         population_size: int,
-        estimand: Optional[Estimand] = None,
+        estimand: Estimand | None = None,
         estimand_class: Optional[Type[SimpleEstimand]] = None,
         **kwargs,
     ) -> None:
@@ -965,7 +958,7 @@ class IPWEstimator(MeanEstimator):
             np.square(n_over_N * self.weights * self.outcomes - self.point_estimate())
         ) / (n - 1)
 
-    def sensitivity_analysis(self, gamma: float = 6.0) -> Tuple[float, float]:
+    def sensitivity_analysis(self, gamma: float = 6.0) -> tuple[float, float]:
         r"""Perform a sensitivity analysis.
 
         Calculate a range of point estimates implied by the Gamma factor.
@@ -1051,14 +1044,12 @@ class AIPWEstimator(IPWEstimator):
 
     def __init__(
         self,
-        propensity_scores: Union[List[float], npt.NDArray[np.float64]],
-        outcomes: Union[
-            List[Union[float, int]], npt.NDArray[Union[np.float64, np.int64]]
-        ],
-        predicted_outcomes: Union[List[float], npt.NDArray[np.float64]],
+        propensity_scores: list[float] | npt.NDArray[np.float64],
+        outcomes: list[float | int] | npt.NDArray[np.float64 | np.int64],
+        predicted_outcomes: list[float] | npt.NDArray[np.float64],
         mean_predicted_outcome: float,
         population_size: int,
-        estimand: Optional[Estimand] = None,
+        estimand: Estimand | None = None,
         estimand_class: Optional[Type[SimpleEstimand]] = None,
         **kwargs,
     ) -> None:
@@ -1109,7 +1100,7 @@ class AIPWEstimator(IPWEstimator):
             )
         ) / (len(self.weights) - 1)
 
-    def sensitivity_analysis(self, gamma: float = 6.0) -> Tuple[float, float]:
+    def sensitivity_analysis(self, gamma: float = 6.0) -> tuple[float, float]:
         r"""Perform a sensitivity analysis.
 
         Calculate a range of point estimates implied by the Gamma factor.
@@ -1194,11 +1185,9 @@ class SIPWEstimator(MeanEstimator):
 
     def __init__(
         self,
-        propensity_scores: Union[List[float], npt.NDArray[np.float64]],
-        outcomes: Union[
-            List[Union[float, int]], npt.NDArray[Union[np.float64, np.int64]]
-        ],
-        estimand: Optional[Estimand] = None,
+        propensity_scores: list[float] | npt.NDArray[np.float64],
+        outcomes: list[float | int] | npt.NDArray[np.float64 | np.int64],
+        estimand: Estimand | None = None,
         estimand_class: Optional[Type[SimpleEstimand]] = None,
         binary_outcomes: bool = True,
         **kwargs,
@@ -1236,7 +1225,7 @@ class SIPWEstimator(MeanEstimator):
             np.square(self.weights) * np.square(self.outcomes - self.point_estimate())
         ) / (np.sum(self.weights) ** 2)
 
-    def sensitivity_analysis(self, gamma: float = 6.0) -> Tuple[float, float]:
+    def sensitivity_analysis(self, gamma: float = 6.0) -> tuple[float, float]:
         r"""Perform a sensitivity analysis.
 
         Calculate a range of point estimates implied by the Gamma factor.
@@ -1354,15 +1343,11 @@ class SAIPWEstimator(SIPWEstimator):
 
     def __init__(
         self,
-        propensity_scores: Union[List[float], npt.NDArray[np.float64]],
-        outcomes: Union[
-            List[Union[float, int]], npt.NDArray[Union[np.float64, np.int64]]
-        ],
-        predicted_outcomes: Union[
-            List[Union[float, int]], npt.NDArray[Union[np.float64, np.int64]]
-        ],
+        propensity_scores: list[float] | npt.NDArray[np.float64],
+        outcomes: list[float | int] | npt.NDArray[np.float64 | np.int64],
+        predicted_outcomes: list[float | int] | npt.NDArray[np.float64 | np.int64],
         mean_predicted_outcome: float,
-        estimand: Optional[Estimand] = None,
+        estimand: Estimand | None = None,
         estimand_class: Optional[Type[SimpleEstimand]] = None,
         binary_outcomes: bool = True,
         **kwargs,
@@ -1405,7 +1390,7 @@ class SAIPWEstimator(SIPWEstimator):
             * np.square(self.outcomes - super().point_estimate())
         ) / (np.sum(self.weights) ** 2)
 
-    def sensitivity_analysis(self, gamma: float = 6.0) -> Tuple[float, float]:
+    def sensitivity_analysis(self, gamma: float = 6.0) -> tuple[float, float]:
         r"""Perform a sensitivity analysis.
 
         Calculate a range of point estimates implied by the Gamma factor.
@@ -1466,24 +1451,20 @@ class RatioEstimator(WeightingEstimator):
 
     def __init__(
         self,
-        propensity_scores: Union[List[float], npt.NDArray[np.float64]],
-        numerator_outcomes: Union[
-            List[Union[float, int]], npt.NDArray[Union[np.float64, np.int64]]
-        ],
-        denominator_outcomes: Union[
-            List[Union[float, int]], npt.NDArray[Union[np.float64, np.int64]]
-        ],
-        estimand: Optional[Estimand] = None,
+        propensity_scores: list[float] | npt.NDArray[np.float64],
+        numerator_outcomes: list[float | int] | npt.NDArray[np.float64 | np.int64],
+        denominator_outcomes: list[float | int] | npt.NDArray[np.float64 | np.int64],
+        estimand: Estimand | None = None,
         estimand_class: Optional[Type[SimpleEstimand]] = None,
         estimator_class: Literal["IPW", "AIPW", "SIPW", "SAIPW"] = "SIPW",
-        numerator_estimator_class: Optional[
-            Literal["IPW", "AIPW", "SIPW", "SAIPW"]
-        ] = None,
-        denominator_estimator_class: Optional[
-            Literal["IPW", "AIPW", "SIPW", "SAIPW"]
-        ] = None,
-        numerator_kwargs: Optional[Dict[str, Any]] = None,
-        denominator_kwargs: Optional[Dict[str, Any]] = None,
+        numerator_estimator_class: (
+            Literal["IPW", "AIPW", "SIPW", "SAIPW"] | None
+        ) = None,
+        denominator_estimator_class: (
+            Literal["IPW", "AIPW", "SIPW", "SAIPW"] | None
+        ) = None,
+        numerator_kwargs: dict[str, Any] | None = None,
+        denominator_kwargs: dict[str, Any] | None = None,
         **kwargs,
     ) -> None:
         propensity_scores = np.asarray(propensity_scores)
@@ -1556,7 +1537,7 @@ class RatioEstimator(WeightingEstimator):
             - (2.0 * mu_num / (mu_den**3.0)) * cov_num_den
         )
 
-    def sensitivity_analysis(self, gamma: float = 6.0) -> Tuple[float, float]:
+    def sensitivity_analysis(self, gamma: float = 6.0) -> tuple[float, float]:
         r"""Perform a sensitivity analysis.
 
         Calculate a range of point estimates implied by the Gamma factor.
@@ -1621,16 +1602,15 @@ class RatioEstimator(WeightingEstimator):
         gamma: float = 6.0,
         alternative: Literal["two-sided", "less", "greater"] = "two-sided",
         B: int = 1_000,
-        seed: Optional[
-            Union[
-                int,
-                List[int],
-                np.random.SeedSequence,
-                np.random.BitGenerator,
-                np.random.Generator,
-            ]
-        ] = None,
-    ) -> Tuple[float, float]:
+        seed: (
+            int
+            | list[int]
+            | np.random.SeedSequence
+            | np.random.BitGenerator
+            | np.random.Generator
+            | None
+        ) = None,
+    ) -> tuple[float, float]:
         r"""Calculate an expanded confidence interval.
 
         The expanded confidence interval combines uncertainty from stochastic sampling
@@ -1786,7 +1766,7 @@ class TreatmentEffectEstimator(WeightingEstimator):
         self,
         alpha: float = 0.10,
         alternative: Literal["two-sided", "less", "greater"] = "two-sided",
-    ) -> Tuple[float, float]:
+    ) -> tuple[float, float]:
         """Calculate confidence interval on the treatment effect.
 
         Parameters
@@ -1813,7 +1793,7 @@ class TreatmentEffectEstimator(WeightingEstimator):
         """
         return super().confidence_interval(alpha=alpha, alternative=alternative)
 
-    def sensitivity_analysis(self, gamma: float = 6.0) -> Tuple[float, float]:
+    def sensitivity_analysis(self, gamma: float = 6.0) -> tuple[float, float]:
         r"""Perform a sensitivity analysis.
 
         Calculate a range of point estimates implied by the Gamma factor.
@@ -1851,16 +1831,14 @@ class TreatmentEffectEstimator(WeightingEstimator):
         gamma: float = 6.0,
         alternative: Literal["two-sided", "less", "greater"] = "two-sided",
         B: int = 1_000,
-        seed: Optional[
-            Union[
-                int,
-                List[int],
-                np.random.SeedSequence,
-                np.random.BitGenerator,
-                np.random.Generator,
-            ]
-        ] = None,
-    ) -> Tuple[float, float]:
+        seed: None | (
+            int
+            | list[int]
+            | np.random.SeedSequence
+            | np.random.BitGenerator
+            | np.random.Generator
+        ) = None,
+    ) -> tuple[float, float]:
         r"""Calculate an expanded confidence interval.
 
         The expanded confidence interval combines uncertainty from stochastic sampling
@@ -2015,12 +1993,8 @@ class SimpleDifferenceEstimator(TreatmentEffectEstimator):
 
     def __init__(
         self,
-        control_outcomes: Union[
-            List[Union[float, int]], npt.NDArray[Union[np.float64, np.int64]]
-        ],
-        treated_outcomes: Union[
-            List[Union[float, int]], npt.NDArray[Union[np.float64, np.int64]]
-        ],
+        control_outcomes: list[float | int] | npt.NDArray[np.float64 | np.int64],
+        treated_outcomes: list[float | int] | npt.NDArray[np.float64 | np.int64],
         control_sampling_propensity_scores: Optional[
             Union[List[float], npt.NDArray[np.float64]]
         ] = None,
@@ -2118,21 +2092,17 @@ class ATEEstimator(TreatmentEffectEstimator):
 
     def __init__(
         self,
-        control_propensity_scores: Union[List[float], npt.NDArray[np.float64]],
-        treated_propensity_scores: Union[List[float], npt.NDArray[np.float64]],
-        control_outcomes: Union[
-            List[Union[float, int]], npt.NDArray[Union[np.float64, np.int64]]
-        ],
-        treated_outcomes: Union[
-            List[Union[float, int]], npt.NDArray[Union[np.float64, np.int64]]
-        ],
+        control_propensity_scores: list[float] | npt.NDArray[np.float64],
+        control_outcomes: list[float | int] | npt.NDArray[np.float64 | np.int64],
+        treated_propensity_scores: list[float] | npt.NDArray[np.float64],
+        treated_outcomes: list[float | int] | npt.NDArray[np.float64 | np.int64],
         estimator_class: Literal["IPW", "AIPW", "SIPW", "SAIPW"] = "SIPW",
-        control_estimator_class: Optional[
+        control_estimator_class: None | (
             Literal["IPW", "AIPW", "SIPW", "SAIPW"]
-        ] = None,
-        treated_estimator_class: Optional[
+        ) = None,
+        treated_estimator_class: None | (
             Literal["IPW", "AIPW", "SIPW", "SAIPW"]
-        ] = None,
+        ) = None,
         control_sampling_propensity_scores: Optional[
             Union[List[float], npt.NDArray[np.float64]]
         ] = None,
@@ -2142,8 +2112,8 @@ class ATEEstimator(TreatmentEffectEstimator):
         sampling_estimand_class: Literal[
             "PopulationMean", "NonRespondentMean", "SampleMean"
         ] = "PopulationMean",
-        control_kwargs: Optional[Dict[str, Any]] = None,
-        treated_kwargs: Optional[Dict[str, Any]] = None,
+        control_kwargs: dict[str, Any] | None = None,
+        treated_kwargs: dict[str, Any] | None = None,
         **kwargs,
     ) -> None:
         control_propensity_scores = np.asarray(control_propensity_scores)
@@ -2168,14 +2138,14 @@ class ATEEstimator(TreatmentEffectEstimator):
 
         sampling_estimand_classes: Dict[
             str,
-            Union[Type[PopulationMean], Type[NonRespondentMean], Type[SampleMean]],
+            Type[Union[PopulationMean, NonRespondentMean, SampleMean]],
         ] = {
             "PopulationMean": PopulationMean,
             "NonRespondentMean": NonRespondentMean,
             "SampleMean": SampleMean,
         }
-        sampling_estimand: Union[
-            Type[PopulationMean], Type[NonRespondentMean], Type[SampleMean]
+        sampling_estimand: Type[
+            Union[PopulationMean, NonRespondentMean, SampleMean]
         ] = sampling_estimand_classes[sampling_estimand_class]
 
         if control_sampling_propensity_scores is None:
@@ -2256,20 +2226,16 @@ class ATTEstimator(TreatmentEffectEstimator):
 
     def __init__(
         self,
-        control_propensity_scores: Union[List[float], npt.NDArray[np.float64]],
-        control_outcomes: Union[
-            List[Union[float, int]], npt.NDArray[Union[np.float64, np.int64]]
-        ],
-        treated_outcomes: Union[
-            List[Union[float, int]], npt.NDArray[Union[np.float64, np.int64]]
-        ],
+        control_propensity_scores: list[float] | npt.NDArray[np.float64],
+        control_outcomes: list[float | int] | npt.NDArray[np.float64 | np.int64],
+        treated_outcomes: list[float | int] | npt.NDArray[np.float64 | np.int64],
         estimator_class: Literal["IPW", "AIPW", "SIPW", "SAIPW"] = "SIPW",
-        control_estimator_class: Optional[
+        control_estimator_class: None | (
             Literal["IPW", "AIPW", "SIPW", "SAIPW"]
-        ] = None,
-        treated_estimator_class: Optional[
+        ) = None,
+        treated_estimator_class: None | (
             Literal["IPW", "AIPW", "SIPW", "SAIPW"]
-        ] = None,
+        ) = None,
         control_sampling_propensity_scores: Optional[
             Union[List[float], npt.NDArray[np.float64]]
         ] = None,
@@ -2279,8 +2245,8 @@ class ATTEstimator(TreatmentEffectEstimator):
         sampling_estimand_class: Literal[
             "PopulationMean", "NonRespondentMean", "SampleMean"
         ] = "PopulationMean",
-        control_kwargs: Optional[Dict[str, Any]] = None,
-        treated_kwargs: Optional[Dict[str, Any]] = None,
+        control_kwargs: dict[str, Any] | None = None,
+        treated_kwargs: dict[str, Any] | None = None,
         **kwargs,
     ) -> None:
         control_propensity_scores = np.asarray(control_propensity_scores)
@@ -2304,14 +2270,14 @@ class ATTEstimator(TreatmentEffectEstimator):
 
         sampling_estimand_classes: Dict[
             str,
-            Union[Type[PopulationMean], Type[NonRespondentMean], Type[SampleMean]],
+            Type[Union[PopulationMean, NonRespondentMean, SampleMean]],
         ] = {
             "PopulationMean": PopulationMean,
             "NonRespondentMean": NonRespondentMean,
             "SampleMean": SampleMean,
         }
-        sampling_estimand: Union[
-            Type[PopulationMean], Type[NonRespondentMean], Type[SampleMean]
+        sampling_estimand: Type[
+            Union[PopulationMean, NonRespondentMean, SampleMean]
         ] = sampling_estimand_classes[sampling_estimand_class]
 
         if control_sampling_propensity_scores is None:
@@ -2394,13 +2360,9 @@ class ATCEstimator(TreatmentEffectEstimator):
 
     def __init__(
         self,
-        control_outcomes: Union[
-            List[Union[float, int]], npt.NDArray[Union[np.float64, np.int64]]
-        ],
-        treated_propensity_scores: Union[List[float], npt.NDArray[np.float64]],
-        treated_outcomes: Union[
-            List[Union[float, int]], npt.NDArray[Union[np.float64, np.int64]]
-        ],
+        control_outcomes: list[float | int] | npt.NDArray[np.float64 | np.int64],
+        treated_propensity_scores: list[float] | npt.NDArray[np.float64],
+        treated_outcomes: list[float | int] | npt.NDArray[np.float64 | np.int64],
         estimator_class: Literal["IPW", "AIPW", "SIPW", "SAIPW"] = "SIPW",
         control_estimator_class: Optional[
             Literal["IPW", "AIPW", "SIPW", "SAIPW"]
@@ -2442,14 +2404,14 @@ class ATCEstimator(TreatmentEffectEstimator):
 
         sampling_estimand_classes: Dict[
             str,
-            Union[Type[PopulationMean], Type[NonRespondentMean], Type[SampleMean]],
+            Type[Union[PopulationMean, NonRespondentMean, SampleMean]],
         ] = {
             "PopulationMean": PopulationMean,
             "NonRespondentMean": NonRespondentMean,
             "SampleMean": SampleMean,
         }
-        sampling_estimand: Union[
-            Type[PopulationMean], Type[NonRespondentMean], Type[SampleMean]
+        sampling_estimand: Type[
+            Union[PopulationMean, NonRespondentMean, SampleMean]
         ] = sampling_estimand_classes[sampling_estimand_class]
 
         if control_sampling_propensity_scores is None:
@@ -2521,12 +2483,12 @@ class TreatmentEffectRatioEstimator(WeightingEstimator):
 
     def __init__(
         self,
-        control_propensity_scores: Union[List[float], npt.NDArray[np.float64]],
-        treated_propensity_scores: Union[List[float], npt.NDArray[np.float64]],
-        numerator_control_outcomes: Union[List[float], npt.NDArray[np.float64]],
-        numerator_treated_outcomes: Union[List[float], npt.NDArray[np.float64]],
-        denominator_control_outcomes: Union[List[float], npt.NDArray[np.float64]],
-        denominator_treated_outcomes: Union[List[float], npt.NDArray[np.float64]],
+        control_propensity_scores: list[float] | npt.NDArray[np.float64],
+        treated_propensity_scores: list[float] | npt.NDArray[np.float64],
+        numerator_control_outcomes: list[float] | npt.NDArray[np.float64],
+        numerator_treated_outcomes: list[float] | npt.NDArray[np.float64],
+        denominator_control_outcomes: list[float] | npt.NDArray[np.float64],
+        denominator_treated_outcomes: list[float] | npt.NDArray[np.float64],
         mean_estimator_class: Literal["IPW", "AIPW", "SIPW", "SAIPW"] = "SIPW",
         treatment_effect_estimator_class: Literal[
             "SimpleDifference", "ATE", "ATT", "ATC"
@@ -2540,10 +2502,10 @@ class TreatmentEffectRatioEstimator(WeightingEstimator):
         sampling_estimand_class: Literal[
             "PopulationMean", "NonRespondentMean", "SampleMean"
         ] = "PopulationMean",
-        numerator_control_kwargs: Optional[Dict[str, Any]] = None,
-        numerator_treated_kwargs: Optional[Dict[str, Any]] = None,
-        denominator_control_kwargs: Optional[Dict[str, Any]] = None,
-        denominator_treated_kwargs: Optional[Dict[str, Any]] = None,
+        numerator_control_kwargs: dict[str, Any] | None = None,
+        numerator_treated_kwargs: dict[str, Any] | None = None,
+        denominator_control_kwargs: dict[str, Any] | None = None,
+        denominator_treated_kwargs: dict[str, Any] | None = None,
     ) -> None:
         # Convert inputs to arrays
         control_propensity_scores = np.asarray(control_propensity_scores)
@@ -2629,7 +2591,7 @@ class TreatmentEffectRatioEstimator(WeightingEstimator):
             - (2.0 * mu_num / (mu_den**3.0)) * cov_num_den
         )
 
-    def sensitivity_analysis(self, gamma: float = 6.0) -> Tuple[float, float]:
+    def sensitivity_analysis(self, gamma: float = 6.0) -> tuple[float, float]:
         """Not implemented."""
         raise NotImplementedError(
             "Sensitivity analysis is not implemented for TreatmentEffectRatioEstimator."
@@ -2641,16 +2603,15 @@ class TreatmentEffectRatioEstimator(WeightingEstimator):
         gamma: float = 6.0,
         alternative: Literal["two-sided", "less", "greater"] = "two-sided",
         B: int = 1_000,
-        seed: Optional[
-            Union[
-                int,
-                List[int],
-                np.random.SeedSequence,
-                np.random.BitGenerator,
-                np.random.Generator,
-            ]
-        ] = None,
-    ) -> Tuple[float, float]:
+        seed: (
+            int
+            | list[int]
+            | np.random.SeedSequence
+            | np.random.BitGenerator
+            | np.random.Generator
+            | None
+        ) = None,
+    ) -> tuple[float, float]:
         """Not implemented."""
         raise NotImplementedError(
             "Expanded confidence interval is not implemented for TreatmentEffectRatioEstimator."

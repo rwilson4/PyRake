@@ -1,6 +1,6 @@
 """Numerical linear algebra routines."""
 
-from typing import Callable, Tuple
+from collections.abc import Callable
 
 import numpy as np
 import numpy.typing as npt
@@ -402,7 +402,7 @@ def solve_kkt_system(
     g: npt.NDArray[np.float64],
     hessian_solve: Callable[..., npt.NDArray[np.float64]],
     **kwargs,
-) -> Tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
+) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
     """Solve a KKT system of equations.
 
     Parameters

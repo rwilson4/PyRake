@@ -1,7 +1,7 @@
 """Visualizations."""
 
 from collections import namedtuple
-from typing import Dict, List, Literal, Optional, Tuple, Union
+from typing import Literal
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -14,13 +14,14 @@ from matplotlib.axes import Axes
 
 from .estimators import WeightingEstimator
 
+
 WilcoxonResult = namedtuple(
     "WilcoxonResult", ["statistic", "zstatistic", "pvalue", "log_pvalue"]
 )
 
 
 def wilcoxon_signed_rank(
-    d: npt.NDArray[np.float64], w: Optional[npt.NDArray[np.float64]] = None
+    d: npt.NDArray[np.float64], w: npt.NDArray[np.float64] | None = None
 ) -> WilcoxonResult:
     """Perform Wilcoxon's signed rank test.
 
@@ -95,19 +96,17 @@ def wilcoxon_signed_rank(
 def plot_balance(
     X: npt.NDArray[np.float64],
     mu: npt.NDArray[np.float64],
-    covariates: List[str],
-    weights: Dict[str, npt.NDArray[np.float64]],
-    test: Optional[
-        Union[Literal["z", "wilcoxon"], List[Literal["z", "wilcoxon"]]]
-    ] = None,
-    sigma: Optional[npt.NDArray[np.float64]] = None,
+    covariates: list[str],
+    weights: dict[str, npt.NDArray[np.float64]],
+    test: None | (Literal["z", "wilcoxon"] | list[Literal["z", "wilcoxon"]]) = None,
+    sigma: npt.NDArray[np.float64] | None = None,
     signed: bool = True,
-    title: Optional[str] = None,
+    title: str | None = None,
     quantify_imbalance: bool = True,
     imbalance_pval_threshold: float = 0.2,
     legend_placement: str = "lower right",
-    ax: Optional[Axes] = None,
-) -> Tuple[pd.DataFrame, Axes]:
+    ax: Axes | None = None,
+) -> tuple[pd.DataFrame, Axes]:
     r"""Plot one-sample z-statistics for covariates.
 
     The one-sample z-statistic tests a null hypothesis regarding the mean or center of
@@ -186,7 +185,7 @@ def plot_balance(
         )
 
     if test is None:
-        test_nn: List[str] = ["z"] * p
+        test_nn: list[str] = ["z"] * p
     elif isinstance(test, list):
         if len(test) != p:
             raise ValueError("`test` must be scalar or same length as `mu`")
@@ -284,16 +283,16 @@ def plot_balance(
 def plot_balance_2_sample(
     X1: npt.NDArray,
     X2: npt.NDArray,
-    covariates: List[str],
-    weights1: Dict[str, npt.NDArray],
-    weights2: Dict[str, npt.NDArray],
+    covariates: list[str],
+    weights1: dict[str, npt.NDArray],
+    weights2: dict[str, npt.NDArray],
     signed: bool = True,
-    title: Optional[str] = None,
+    title: str | None = None,
     quantify_imbalance: bool = True,
     imbalance_pval_threshold: float = 0.2,
     legend_placement: str = "lower right",
-    ax: Optional[Axes] = None,
-) -> Tuple[pd.DataFrame, Axes]:
+    ax: Axes | None = None,
+) -> tuple[pd.DataFrame, Axes]:
     r"""Plot z-statistics for covariates.
 
     If we were testing the null hypothesis that the sample average equals the (known)
@@ -428,20 +427,20 @@ def plot_balance_2_sample(
 
 
 def meta_analysis(
-    estimators: Dict[str, WeightingEstimator],
+    estimators: dict[str, WeightingEstimator],
     null_min: float,
     null_max: float,
     num_points: int = 1_000,
     alpha: float = 0.10,
-    title: Optional[str] = None,
-    xlabel: Optional[str] = None,
+    title: str | None = None,
+    xlabel: str | None = None,
     xtick_format: str = ".0%",
-    axis_label_size: Optional[int] = None,
-    tick_label_size: Optional[int] = None,
-    legend_label_size: Optional[int] = None,
-    legend_placement: Optional[str] = None,
-    ax: Optional[Axes] = None,
-) -> Tuple[float, Tuple[float, float], Axes]:
+    axis_label_size: int | None = None,
+    tick_label_size: int | None = None,
+    legend_label_size: int | None = None,
+    legend_placement: str | None = None,
+    ax: Axes | None = None,
+) -> tuple[float, tuple[float, float], Axes]:
     """Combine estimates from multiple platforms.
 
     Parameters
@@ -481,26 +480,29 @@ def meta_analysis(
     """
     null_values = np.linspace(null_min, null_max, num_points)
     pvals = {
-        f"{platform} ({side})": np.array(
+        f"{platform} ({alternative})": np.array(
             [
-                estimator.pvalue(null_value=null_value, side=side)
+                estimator.pvalue(
+                    null_value=null_value,
+                    alternative=alternative,
+                )
                 for null_value in null_values
             ]
         )
         for platform, estimator in estimators.items()
-        for side in ["lesser", "greater"]
+        for alternative in ["less", "greater"]
     }
     pvals["Null Hypothesis"] = null_values
     df_meta = pd.DataFrame(pvals)
 
-    def fisher(pvals: List[float]) -> float:
+    def fisher(pvals: list[float]) -> float:
         return stats.chi2.sf(-2 * np.log(np.asarray(pvals)).sum(), 2 * len(pvals))
 
     # Combine pvals across all platforms using Fisher's method of meta-analysis.
-    for side in ["lesser", "greater"]:
-        df_meta[f"Combined ({side})"] = df_meta.apply(
-            lambda row, side=side: fisher(
-                [row[f"{platform} ({side})"] for platform in estimators.keys()]
+    for alternative in ["less", "greater"]:
+        df_meta[f"Combined ({alternative})"] = df_meta.apply(
+            lambda row, alternative=alternative: fisher(
+                [row[f"{platform} ({alternative})"] for platform in estimators.keys()]
             ),
             axis=1,
         )
@@ -509,7 +511,7 @@ def meta_analysis(
     for platform in list(estimators.keys()) + ["Combined"]:
         df_meta[platform] = df_meta.apply(
             lambda row, platform=platform: min(
-                1.0, 2 * min(row[f"{platform} (lesser)"], row[f"{platform} (greater)"])
+                1.0, 2 * min(row[f"{platform} (less)"], row[f"{platform} (greater)"])
             ),
             axis=1,
         )

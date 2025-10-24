@@ -3,7 +3,7 @@
 import time
 from abc import ABC, abstractmethod, abstractproperty
 from dataclasses import dataclass
-from typing import List, Literal, Optional, Tuple, Union
+from typing import Literal, Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -125,12 +125,12 @@ class NewtonResult(OptimizationResult):
     dual_value: float
     equality_multipliers: npt.NDArray[np.float64]
     inequality_multipliers: npt.NDArray[np.float64]
-    suboptimalities: List[float]
+    suboptimalities: list[float]
     nits: int
     status: Literal[0, 1, 2]
     message: str
 
-    def plot_convergence(self, ax: Optional[Axes] = None) -> Axes:
+    def plot_convergence(self, ax: Axes | None = None) -> Axes:
         """Plot convergence."""
         if ax is None:
             _, ax = plt.subplots()
@@ -179,14 +179,14 @@ class InteriorPointMethodResult(OptimizationResult):
     equality_multipliers: npt.NDArray[np.float64]
     inequality_multipliers: npt.NDArray[np.float64]
     suboptimality: float
-    duality_gaps: List[float]
+    duality_gaps: list[float]
     nits: int
-    inner_nits: List[int]
-    inner_suboptimalities: List[List[float]]
+    inner_nits: list[int]
+    inner_suboptimalities: list[list[float]]
     status: Literal[0, 1, 2]
     message: str
 
-    def plot_convergence(self, ax: Optional[Axes] = None) -> Axes:
+    def plot_convergence(self, ax: Axes | None = None) -> Axes:
         """Plot convergence."""
         if ax is None:
             _, ax = plt.subplots()
@@ -201,7 +201,7 @@ class InteriorPointMethodResult(OptimizationResult):
         ax.set_ylabel("Duality Gap")
         return ax
 
-    def plot_newton_convergence(self, it: int, ax: Optional[Axes] = None) -> Axes:
+    def plot_newton_convergence(self, it: int, ax: Axes | None = None) -> Axes:
         """Plot convergence."""
         if ax is None:
             _, ax = plt.subplots()
@@ -251,7 +251,7 @@ class Optimizer(ABC):
     def __init__(
         self,
         phase1_solver: Optional["PhaseISolver"] = None,
-        settings: Optional[OptimizationSettings] = None,
+        settings: OptimizationSettings | None = None,
         **kwargs,
     ) -> None:
         """Initialize optimizer."""
@@ -272,7 +272,7 @@ class Optimizer(ABC):
     @abstractmethod
     def solve(
         self,
-        x0: Optional[npt.NDArray[np.float64]] = None,
+        x0: npt.NDArray[np.float64] | None = None,
         **kwargs,
     ) -> OptimizationResult:
         """Solve optimization problem.
@@ -296,7 +296,7 @@ class PhaseISolver(Optimizer):
     @abstractmethod
     def solve(
         self,
-        x0: Optional[npt.NDArray[np.float64]] = None,
+        x0: npt.NDArray[np.float64] | None = None,
         fully_optimize: bool = False,
         **kwargs,
     ) -> OptimizationResult:
@@ -324,7 +324,7 @@ class BaseInteriorPointMethodSolver(Optimizer):
     def __init__(
         self,
         phase1_solver: Optional["PhaseISolver"] = None,
-        settings: Optional[OptimizationSettings] = None,
+        settings: OptimizationSettings | None = None,
         **kwargs,
     ) -> None:
         """Initialize optimizer."""
@@ -336,7 +336,7 @@ class BaseInteriorPointMethodSolver(Optimizer):
 
     def solve(
         self,
-        x0: Optional[npt.NDArray[np.float64]] = None,
+        x0: npt.NDArray[np.float64] | None = None,
         fully_optimize: bool = False,
         **kwargs,
     ) -> OptimizationResult:
@@ -826,7 +826,7 @@ class BaseInteriorPointMethodSolver(Optimizer):
            grad_ft * H^{-1} * grad_ft.
 
         """
-        return np.dot(delta_x, self.hessian_multiply(x, t, delta_x))
+        return max(0.0, np.dot(delta_x, self.hessian_multiply(x, t, delta_x)))
 
     def inequality_multipliers(
         self,
@@ -848,7 +848,7 @@ class BaseInteriorPointMethodSolver(Optimizer):
         self,
         x: npt.NDArray[np.float64],
         t: float,
-    ) -> Tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
+    ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
         r"""Calculate Newton step.
 
         Calculates Newton step for the "inner" problem:
@@ -1011,7 +1011,7 @@ class InteriorPointMethodSolver(BaseInteriorPointMethodSolver):
 
     def solve(
         self,
-        x0: Optional[npt.NDArray[np.float64]] = None,
+        x0: npt.NDArray[np.float64] | None = None,
         fully_optimize: bool = False,
         **kwargs,
     ) -> InteriorPointMethodResult:
@@ -1057,7 +1057,7 @@ class PhaseIInteriorPointSolver(BaseInteriorPointMethodSolver, PhaseISolver):
     def __init__(
         self,
         phase1_solver: Optional["PhaseISolver"] = None,
-        settings: Optional[OptimizationSettings] = None,
+        settings: OptimizationSettings | None = None,
         **kwargs,
     ) -> None:
         """Initialize optimizer."""
@@ -1065,7 +1065,7 @@ class PhaseIInteriorPointSolver(BaseInteriorPointMethodSolver, PhaseISolver):
 
     def solve(
         self,
-        x0: Optional[npt.NDArray[np.float64]] = None,
+        x0: npt.NDArray[np.float64] | None = None,
         fully_optimize: bool = False,
         **kwargs,
     ) -> OptimizationResult:
@@ -1129,10 +1129,10 @@ class EqualityConstrainedInteriorPointMethodSolver(BaseInteriorPointMethodSolver
 
     def svd_A(
         self,
-    ) -> Tuple[
-        npt.NDArray[Union[np.float32, np.float64]],
-        npt.NDArray[Union[np.float32, np.float64]],
-        npt.NDArray[Union[np.float32, np.float64]],
+    ) -> tuple[
+        npt.NDArray[np.float32 | np.float64],
+        npt.NDArray[np.float32 | np.float64],
+        npt.NDArray[np.float32 | np.float64],
     ]:
         """Calculate and cache SVD of A."""
         return linalg.svd(self.A, full_matrices=False)

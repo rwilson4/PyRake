@@ -214,26 +214,28 @@ class TestEqualityWithBoundsSolver:
         assert np.sum(A.T @ nu) > 1
 
         # Construct feasible w
-        w = 0.1 + np.random.rand(M)
+        lb = 0.05
+        w = 2 * lb + np.random.rand(M)
         b = A @ w
 
         solver = EqualityWithBoundsSolver(
             phase1_solver=EqualitySolver(
                 A=A, b=b, settings=OptimizationSettings(verbose=True)
             ),
+            lb=lb,
             settings=OptimizationSettings(verbose=True),
         )
 
         # Verify we find a feasible point
         res = solver.solve()
         np.testing.assert_allclose(A @ res.solution, b)
-        assert np.all(res.solution > 0)
+        assert np.all(res.solution > 0.0)
 
         # Since augmented problem is bounded below, verify we can fully solve it (if for
         # whatever reason we wanted to).
         res = solver.solve(fully_optimize=True)
         np.testing.assert_allclose(A @ res.solution, b, atol=atol)
-        assert np.all(res.solution > 0)
+        assert np.all(res.solution > 0.0)
 
     @pytest.mark.parametrize(
         "seed,M,p",
@@ -542,11 +544,13 @@ class TestEqualityWithBoundsAndNormConstraintSolver:
         np.random.seed(seed)
         phi = 1.0
 
-        w = np.random.rand(M)
+        w = np.random.rand(M) + 0.5
         # Constrain to norm < phi
         w /= np.sqrt(np.dot(w, w))
         w /= 1.1 * phi
         assert np.dot(w, w) < phi
+        lb = 0.01
+        assert np.all(w > lb)
 
         A = np.random.randn(p, M)
         b = A @ w
@@ -556,6 +560,7 @@ class TestEqualityWithBoundsAndNormConstraintSolver:
                 phase1_solver=EqualitySolver(
                     A=A, b=b, settings=OptimizationSettings(verbose=True)
                 ),
+                lb=lb,
                 settings=OptimizationSettings(verbose=True),
             ),
             phi=phi,
@@ -565,13 +570,13 @@ class TestEqualityWithBoundsAndNormConstraintSolver:
         # Verify we find a feasible point
         res = solver.solve()
         np.testing.assert_allclose(A @ res.solution, b)
-        assert np.all(res.solution > 0)
+        assert np.all(res.solution > lb)
         assert np.dot(res.solution, res.solution) < phi
 
         # Verify we can fully optimize
         res = solver.solve(fully_optimize=True)
         np.testing.assert_allclose(A @ res.solution, b)
-        assert np.all(res.solution > 0)
+        assert np.all(res.solution > lb)
         assert np.dot(res.solution, res.solution) < phi
 
     @pytest.mark.parametrize(

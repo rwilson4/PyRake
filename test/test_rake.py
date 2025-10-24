@@ -47,6 +47,8 @@ def test_rake_solve_kl_divergence(seed: int, M: int, p: int, phi: float) -> None
     # Ideal weights are (M/N) / true_propensity, but to make it simple, do:
     w = 1.0 / true_propensity
     w /= np.mean(w)
+    min_weight = 0.01
+    assert np.all(w > min_weight)
 
     # Compute population mean
     mu = (1 / M) * (X.T @ w)
@@ -59,6 +61,7 @@ def test_rake_solve_kl_divergence(seed: int, M: int, p: int, phi: float) -> None
         X=X,
         mu=mu,
         phi=phi,
+        min_weight=min_weight,
         settings=OptimizationSettings(verbose=True),
     )
     res = rake.solve()
@@ -67,7 +70,7 @@ def test_rake_solve_kl_divergence(seed: int, M: int, p: int, phi: float) -> None
 
     # Verify solution is feasible
     np.testing.assert_allclose((1 / M) * X.T @ res.solution, mu)
-    assert np.all(res.solution > 0)
+    assert np.all(res.solution > min_weight)
     if phi is not None:
         assert np.dot(res.solution, res.solution) < M * phi
 
@@ -83,6 +86,7 @@ def test_rake_solve_kl_divergence(seed: int, M: int, p: int, phi: float) -> None
         X=X,
         mu=mu,
         phi=phi,
+        min_weight=min_weight,
         settings=OptimizationSettings(verbose=True),
     )
     # Use v as the initial guess
@@ -92,7 +96,7 @@ def test_rake_solve_kl_divergence(seed: int, M: int, p: int, phi: float) -> None
 
     # Verify solution is feasible
     np.testing.assert_allclose((1 / M) * X.T @ res.solution, mu)
-    assert np.all(res.solution > 0)
+    assert np.all(res.solution > min_weight)
     if phi is not None:
         assert np.dot(res.solution, res.solution) < M * phi
 

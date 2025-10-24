@@ -2,7 +2,6 @@
 
 import math
 import time
-from typing import Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -32,7 +31,7 @@ class TestIPWEstimator:
     @staticmethod
     def get_data(
         binary: bool = True,
-    ) -> Tuple[int, npt.NDArray[np.float64], npt.NDArray[np.float64]]:
+    ) -> tuple[int, npt.NDArray[np.float64], npt.NDArray[np.float64]]:
         rng = np.random.default_rng(42)
         population_size = 1_000_000
         sample_size = 1_000
@@ -334,7 +333,7 @@ class TestAIPWEstimator:
     @staticmethod
     def get_data(
         binary: bool = True,
-    ) -> Tuple[
+    ) -> tuple[
         int,
         npt.NDArray[np.float64],
         npt.NDArray[np.float64],
@@ -653,7 +652,7 @@ class TestSIPWEstimator:
     @staticmethod
     def get_data(
         binary: bool = True,
-    ) -> Tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
+    ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
         population_size, propensities, outcomes = TestIPWEstimator.get_data(
             binary=binary
         )
@@ -899,7 +898,7 @@ class TestSAIPWEstimator:
     @staticmethod
     def get_data(
         binary: bool = True,
-    ) -> Tuple[
+    ) -> tuple[
         npt.NDArray[np.float64],
         npt.NDArray[np.float64],
         npt.NDArray[np.float64],
@@ -1244,7 +1243,7 @@ class TestRatioEstimator:
     @staticmethod
     def generate_data_binary(
         n: int = 100, seed: int = 42
-    ) -> Tuple[npt.NDArray[np.float64], npt.NDArray[np.int64], npt.NDArray[np.int64]]:
+    ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.int64], npt.NDArray[np.int64]]:
         """Generate synthetic data for binary numerator/denominator outcomes."""
         rng = np.random.default_rng(seed)
         propensity_scores = rng.uniform(0.2, 0.8, size=n)
@@ -1253,7 +1252,7 @@ class TestRatioEstimator:
         return propensity_scores, numerator_outcomes, denominator_outcomes
 
     @staticmethod
-    def generate_data_continuous(n: int = 100, seed: int = 24) -> Tuple[
+    def generate_data_continuous(n: int = 100, seed: int = 24) -> tuple[
         npt.NDArray[np.float64],
         npt.NDArray[np.float64],
         npt.NDArray[np.float64],
@@ -1427,7 +1426,7 @@ class TestSimpleDifferenceEstimator:
     @staticmethod
     def get_data(
         binary: bool = True,
-    ) -> Tuple[
+    ) -> tuple[
         npt.NDArray[np.float64],
         npt.NDArray[np.float64],
         npt.NDArray[np.float64],
@@ -1508,8 +1507,8 @@ class TestSimpleDifferenceEstimator:
             treated_outcomes=treated_outcomes,
         )
 
-        mu_t = np.mean(treated_outcomes)
-        mu_c = np.mean(control_outcomes)
+        mu_t = float(np.mean(treated_outcomes))
+        mu_c = float(np.mean(control_outcomes))
 
         expected = float(
             mu_t * (1 - mu_t) / len(treated_outcomes)
@@ -1555,8 +1554,8 @@ class TestSimpleDifferenceEstimator:
             treated_outcomes=treated_outcomes,
         )
 
-        mu_t = np.mean(treated_outcomes)
-        mu_c = np.mean(control_outcomes)
+        mu_t = float(np.mean(treated_outcomes))
+        mu_c = float(np.mean(control_outcomes))
 
         var_tc = float(
             mu_t * (1 - mu_t) / len(treated_outcomes)
@@ -1605,8 +1604,8 @@ class TestSimpleDifferenceEstimator:
             treated_outcomes=treated_outcomes,
         )
 
-        mu_t = np.mean(treated_outcomes)
-        mu_c = np.mean(control_outcomes)
+        mu_t = float(np.mean(treated_outcomes))
+        mu_c = float(np.mean(control_outcomes))
 
         var_tc = float(
             mu_t * (1 - mu_t) / len(treated_outcomes)
@@ -1705,8 +1704,8 @@ class TestSimpleDifferenceEstimator:
             treated_outcomes=treated_outcomes,
         )
 
-        mu_t = np.mean(treated_outcomes)
-        mu_c = np.mean(control_outcomes)
+        mu_t = float(np.mean(treated_outcomes))
+        mu_c = float(np.mean(control_outcomes))
 
         var_tc = float(
             mu_t * (1 - mu_t) / len(treated_outcomes)
@@ -1753,7 +1752,7 @@ class TestSimpleDifferenceEstimator:
 
 class TestATEEstimator:
     @staticmethod
-    def get_data() -> Tuple[
+    def get_data() -> tuple[
         npt.NDArray[np.float64],
         npt.NDArray[np.float64],
         npt.NDArray[np.float64],
@@ -2690,7 +2689,7 @@ class TestATCEstimator:
 
 class TestTreatmentEffectRatioEstimator:
     @staticmethod
-    def get_data() -> Tuple[
+    def get_data() -> tuple[
         npt.NDArray[np.float64],
         npt.NDArray[np.float64],
         npt.NDArray[np.float64],

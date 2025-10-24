@@ -1,7 +1,6 @@
 """Distance metrics."""
 
 from abc import ABC, abstractmethod
-from typing import Optional
 
 import numpy as np
 import numpy.typing as npt
@@ -24,7 +23,7 @@ class Distance(ABC):
 
     """
 
-    def __init__(self, v: Optional[npt.NDArray[np.float64]] = None) -> None:
+    def __init__(self, v: npt.NDArray[np.float64] | None = None) -> None:
         self.v = v
 
     @abstractmethod
@@ -119,7 +118,7 @@ class Huber(Distance):
     """
 
     def __init__(
-        self, v: Optional[npt.NDArray[np.float64]] = None, delta: float = 0.1
+        self, v: npt.NDArray[np.float64] | None = None, delta: float = 0.1
     ) -> None:
         super().__init__(v=v)
         self.delta = delta

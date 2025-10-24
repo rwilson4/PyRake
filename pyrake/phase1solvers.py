@@ -2,7 +2,7 @@
 
 import time
 from functools import cache
-from typing import Optional, Tuple, Union
+from typing import Optional
 
 import numpy as np
 import numpy.typing as npt
@@ -33,7 +33,7 @@ class EqualitySolver(PhaseISolver):
         A: npt.NDArray[np.float64],
         b: npt.NDArray[np.float64],
         phase1_solver: Optional["PhaseISolver"] = None,
-        settings: Optional[OptimizationSettings] = None,
+        settings: OptimizationSettings | None = None,
     ) -> None:
         super().__init__(phase1_solver=phase1_solver, settings=settings)
         p, _ = A.shape
@@ -54,7 +54,7 @@ class EqualitySolver(PhaseISolver):
 
     def solve(
         self,
-        x0: Optional[npt.NDArray[np.float64]] = None,
+        x0: npt.NDArray[np.float64] | None = None,
         fully_optimize: bool = False,
         **kwargs,
     ) -> OptimizationResult:
@@ -151,10 +151,10 @@ class EqualitySolver(PhaseISolver):
     @cache
     def svd_A(
         self,
-    ) -> Tuple[
-        npt.NDArray[Union[np.float32, np.float64]],
-        npt.NDArray[Union[np.float32, np.float64]],
-        npt.NDArray[Union[np.float32, np.float64]],
+    ) -> tuple[
+        npt.NDArray[np.float32 | np.float64],
+        npt.NDArray[np.float32 | np.float64],
+        npt.NDArray[np.float32 | np.float64],
     ]:
         """Calculate and cache SVD of A.
 
@@ -184,36 +184,48 @@ class EqualitySolver(PhaseISolver):
 
 
 class EqualityWithBoundsSolver(PhaseIInteriorPointSolver):
-    r"""Find x satisfying A * x = b and x > 0.
+    r"""Find x satisfying A * x = b and x > lb.
 
     We do this by solving:
       minimize   s
       subject to A * x = b
-                 -x_i <= s
+                 lb - x_i <= s
                  s <= s0 + eps,
 
     equivalent to the standard form:
       minimize   s
       subject to A * x = b
-                 -x_i - s <= 0
+                 -x_i - (s - lb) <= 0
                  s - (s0 + eps) <= 0.
 
-    We initialize s as s0 := -x.min() + eps, guaranteeing the starting point is
-    strictly feasible. The last constraint is needed to make the Hessian of the
-    inner problem strictly positive definite. If the resulting s^\star is > 0, the
-    original problem is infeasible.
+    We initialize s as s0 := -x.min() + lb + eps, guaranteeing the starting point is
+    strictly feasible. The last constraint is needed to make the Hessian of the inner
+    problem strictly positive definite. If the resulting s^\star is > 0, the original
+    problem is infeasible.
+
+    Parameters
+    ----------
+     lb : float, optional
+        Lower bound on elements of x. Defaults to 0.
+     phase1_solver : EqualitySolver
+        A solver for A * x = b.
+     settings : OptimizationSettings
+        Optimization settings.
 
     """
 
     def __init__(
         self,
-        phase1_solver: Optional[EqualitySolver] = None,
-        settings: Optional[OptimizationSettings] = None,
+        lb: float = 0.0,
+        phase1_solver: EqualitySolver | None = None,
+        settings: OptimizationSettings | None = None,
     ) -> None:
         if phase1_solver is None:
             raise ValueError("phase1_solver is required.")
 
         super().__init__(phase1_solver=phase1_solver, settings=settings)
+
+        self.lb = lb
         self.s0_plus_eps = 0.0
 
     @property
@@ -255,10 +267,10 @@ class EqualityWithBoundsSolver(PhaseIInteriorPointSolver):
 
     def svd_A(
         self,
-    ) -> Tuple[
-        npt.NDArray[Union[np.float32, np.float64]],
-        npt.NDArray[Union[np.float32, np.float64]],
-        npt.NDArray[Union[np.float32, np.float64]],
+    ) -> tuple[
+        npt.NDArray[np.float32 | np.float64],
+        npt.NDArray[np.float32 | np.float64],
+        npt.NDArray[np.float32 | np.float64],
     ]:
         """Calculate and cache SVD of A."""
         if self.phase1_solver is None:
@@ -271,7 +283,7 @@ class EqualityWithBoundsSolver(PhaseIInteriorPointSolver):
 
     def is_feasible(self, x: npt.NDArray[np.float64]) -> bool:
         """Determine whether a feasible point has been found."""
-        if np.all(x[0 : self.dimension] > 0):
+        if np.all(x[0 : self.dimension] > self.lb):
             return True
         return False
 
@@ -295,7 +307,7 @@ class EqualityWithBoundsSolver(PhaseIInteriorPointSolver):
         x = np.zeros((len(phase1_res.solution) + 1,))
         x[0 : self.dimension] = phase1_res.solution
         eps = 1.0
-        x[self.dimension] = -phase1_res.solution.min() + eps
+        x[self.dimension] = -phase1_res.solution.min() + self.lb + eps
         self.s0_plus_eps = x[self.dimension] + eps
         return x
 
@@ -319,14 +331,14 @@ class EqualityWithBoundsSolver(PhaseIInteriorPointSolver):
         """
         M = self.dimension
         t1 = self.num_ineq_constraints / max(self.settings.outer_tolerance, x0[M])
-        t2 = np.sum(1.0 / (x0[0:M] + x0[M])) - M / 1.0
+        t2 = np.sum(1.0 / (x0[0:M] + x0[M] - self.lb)) - M / 1.0
         return max(1.0, t1, t2)
 
     def calculate_newton_step(
         self,
         x: npt.NDArray[np.float64],
         t: float,
-    ) -> Tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
+    ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
         r"""Calculate Newton step.
 
         Calculates Newton step for the "inner" problem:
@@ -374,15 +386,15 @@ class EqualityWithBoundsSolver(PhaseIInteriorPointSolver):
         """Make sure x + btls_s * delta_x stays strictly feasible.
 
         In our case, we want a btls_s such that
-           -(w + btls_s * delta_w) < s + btls_s * delta_s, and
+           -(w + btls_s * delta_w) < s + btls_s * delta_s - lb, and
            s + btls_s * delta_s < s0 + eps.
 
         The first criterion is equivalent to:
-            (w + s) + btls_s * (delta_w + delta_s) > 0,
+            (w + s) + btls_s * (delta_w + delta_s) > lb,
         which is automatically satisfied whenever delta_w + delta_s >= 0, since w and s
-        are feasible (so w + s > 0). So we're only concerned with entries i having
+        are feasible (so w + s > lb). So we're only concerned with entries i having
         delta_w[i] + delta_s < 0, in which case we need
-            btls_s < (w[i] + s) / -(delta_w[i] + delta_s),
+            btls_s < (w[i] + s - lb) / -(delta_w[i] + delta_s),
         so we set btls_s as the minimum of these quantities. If all entries satisfy
         delta_w + delta_s >= 0, this constraint is not active.
 
@@ -398,16 +410,13 @@ class EqualityWithBoundsSolver(PhaseIInteriorPointSolver):
 
         # Calculate an initial step size btls_s satisfying:
         #   btls_s <= 1
-        #   w + btls_s * delta_w > -s - btls_s * delta_s
+        #   w + btls_s * delta_w > -s - btls_s * delta_s + lb
         #   s + btls_s * delta_s < s0 + eps
+        mask = (delta_w + delta_s) < 0
+        feasibility = np.full_like(delta_w, np.inf, dtype=np.float64)
+        feasibility[mask] = (w[mask] + s - self.lb) / -(delta_w[mask] + delta_s)
         btls_s = min(
-            np.min(
-                np.where(
-                    delta_w + delta_s < 0,
-                    (w + s) / -(delta_w + delta_s),
-                    np.inf,
-                )
-            ),
+            np.min(feasibility),
             (self.s0_plus_eps - s) / delta_s if delta_s > 0 else np.inf,
         )
 
@@ -421,7 +430,7 @@ class EqualityWithBoundsSolver(PhaseIInteriorPointSolver):
         r"""Calculate ft at x.
 
         Our barrier objective is:
-           ft(x, s) = t * s - \sum_i log(x_i + s) - M * log(s0 + eps - s).
+           ft(x, s) = t * s - \sum_i log(x_i + s - lb) - M * log(s0 + eps - s).
 
         This differs from the nominal barrier objective in that we give additional
         weight to the last constraint to help it compete with the others. Otherwise,
@@ -431,6 +440,9 @@ class EqualityWithBoundsSolver(PhaseIInteriorPointSolver):
         """
         c = self.constraints(x)
         M = self.dimension
+        if np.any(c >= 0):
+            return np.inf
+
         return t * x[M] - np.sum(np.log(-c[0:M])) - M * np.log(-c[M])
 
     def gradient(self, x: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
@@ -450,18 +462,18 @@ class EqualityWithBoundsSolver(PhaseIInteriorPointSolver):
         r"""Calculate gradient of ft at x.
 
         Our barrier objective is:
-           ft(x, s) = t * s - \sum_i log(x_i + s) - M * log(s0 + eps - s),
+           ft(x, s) = t * s - \sum_i log(x_i + s - lb) - M * log(s0 + eps - s),
         so:
-           \partial ft / \partial x_i = -1 / (x_i + s), and
-           \partial ft / \partial  s  = t - \sum_i (1 / (x_i + s)) + M / (s0 + eps - s)
+           \partial ft / \partial x_i = -1 / (x_i + s - lb), and
+           \partial ft / \partial  s  = t - \sum_i (1 / (x_i + s - lb)) + M / (s0 + eps - s)
 
         """
         M = self.dimension
         g = np.zeros((M + 1,))
         w = x[0:M]
         s = x[M]
-        g[0:M] = -1.0 / (w + s)
-        g[M] = t - np.sum(1.0 / (w + s)) + M / (self.s0_plus_eps - s)
+        g[0:M] = -1.0 / (w + s - self.lb)
+        g[M] = t - np.sum(1.0 / (w + s - self.lb)) + M / (self.s0_plus_eps - s)
         return g
 
     def hessian_multiply(
@@ -494,23 +506,23 @@ class EqualityWithBoundsSolver(PhaseIInteriorPointSolver):
         r"""Calculate diagonal component of Hessian of ft at x.
 
         Our barrier objective is:
-           ft(x, s) = t * s - \sum_i log(x_i + s) - M * log(s0 + eps - s),
+           ft(x, s) = t * s - \sum_i log(x_i + s - lb) - M * log(s0 + eps - s),
         so:
-          \partial ft / \partial x_i = -1 / (x_i + s), and
-          \partial ft / \partial  s  = t - \sum_i (1 / (x_i + s)) + M / (s0 + eps - s),
+          \partial ft / \partial x_i = -1 / (x_i + s - lb), and
+          \partial ft / \partial  s  = t - \sum_i (1 / (x_i + s - lb)) + M / (s0 + eps - s),
         and:
           eta[i]  := \partial^2 ft / \partial x_i^2
-                   = 1 / (x_i + s)^2,
+                   = 1 / (x_i + s - lb)^2,
           zeta[i] := \partial^2 ft / \partial s \partial x_i
-                   = 1 / (x_i + s)^2,
+                   = 1 / (x_i + s - lb)^2,
           theta   := \partial^2 ft / \partial s^2
-                   = \sum_i 1 / (x_i + s)^2 + M / (s0 + eps - s)^2.
+                   = \sum_i 1 / (x_i + s - lb)^2 + M / (s0 + eps - s)^2.
 
         """
         M = self.dimension
         w = x[0:M]
         s = x[M]
-        return np.square(1.0 / (w + np.full_like(w, s)))
+        return np.square(1.0 / (w + np.full_like(w, s - self.lb)))
 
     def _hessian_ft_diagonal_inverse(
         self, x: npt.NDArray[np.float64], t: float
@@ -519,14 +531,14 @@ class EqualityWithBoundsSolver(PhaseIInteriorPointSolver):
         M = self.dimension
         w = x[0:M]
         s = x[M]
-        return np.square(w + np.full_like(w, s))
+        return np.square(w + np.full_like(w, s - self.lb))
 
     def _hessian_ft_edge(self, x: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
         """Calculate last row/column of Hessian of ft at x."""
         M = self.dimension
         w = x[0:M]
         s = x[M]
-        return np.square(1.0 / (w + np.full_like(w, s)))
+        return np.square(1.0 / (w + np.full_like(w, s - self.lb)))
 
     def _hessian_ft_corner(self, x: npt.NDArray[np.float64]) -> float:
         """Calculate bottom right corner of Hessian of ft at x."""
@@ -534,7 +546,7 @@ class EqualityWithBoundsSolver(PhaseIInteriorPointSolver):
         w = x[0:M]
         s = x[M]
         return (M * ((1.0 / (self.s0_plus_eps - s)) ** 2)) + np.sum(
-            np.square(1.0 / (w + np.full_like(w, s)))
+            np.square(1.0 / (w + np.full_like(w, s - self.lb)))
         )
 
     def _hessian_one_over_psi_squared(self, x: npt.NDArray[np.float64]) -> float:
@@ -546,16 +558,16 @@ class EqualityWithBoundsSolver(PhaseIInteriorPointSolver):
         """Calculate the vector of constraints, fi(x) <= 0.
 
         Our constraints are:
-            -x_i <= s,
+            -x_i <= s - lb,
               s  <= s0 + eps,
         or:
-           -x_i - s              <= 0,
+           -x_i - s + lb        <= 0,
                   s - (s0 + eps) <= 0
 
         """
         M = self.dimension
         c = np.zeros((M + 1,))
-        c[0:M] = -(x[0:M] + x[M])
+        c[0:M] = -(x[0:M] + x[M]) + self.lb
         c[M] = x[M] - self.s0_plus_eps
         return c
 
@@ -615,18 +627,19 @@ class EqualityWithBoundsSolver(PhaseIInteriorPointSolver):
         Notes
         -----
         The Lagrangian is:
-           s - lambda_1^T (x + s*1) + lambda_2 * (s - (s0 + eps)) + nu^T (A*x - b)
-          = -b^T nu - (s0 + eps) * lambda_2 +  x^T (A^T nu - lambda_1)
+           s - lambda_1^T (x + (s - lb) * 1) + lambda_2 * (s - (s0 + eps)) + nu^T (A*x - b)
+          = -b^T nu + lb * 1^T lambda_1 - (s0 + eps) * lambda_2
+            +  x^T (A^T nu - lambda_1)
             + s * (1 + lambda_2 - 1^T lambda_1).
         The Lagrangian dual function is:
-          g(lambda_1, lambda_2, nu) = -b^T nu - (s0 + eps) * lambda_2
+          g(lambda_1, lambda_2, nu) = -b^T nu + lb * 1^T lambda_1 - (s0 + eps) * lambda_2
                                       + inf_x { x^T (A^T nu - lambda_1) }
                                       + inf_s { s * (1 + lambda_2 - 1^T lambda_1) },
         which is unbounded below unless:
              lambda_1 = A^T nu, and
              lambda_2 = 1^T lambda_1 - 1.
-        So the dual function equals -b^T nu - (s0 + eps) * lambda_2 in that case, and is
-        -infinity otherwise.
+        So the dual function equals -b^T nu + lb * 1^T lambda_1 - (s0 + eps) * lambda_2
+        in that case, and is -infinity otherwise.
 
         """
         M = self.dimension
@@ -636,40 +649,49 @@ class EqualityWithBoundsSolver(PhaseIInteriorPointSolver):
         if abs(M * lmbda[M] - (np.sum(lmbda[0:M]) - 1)) > 1e-3:
             return -np.inf
 
-        return -np.dot(self.b, nu) - M * lmbda[M] * self.s0_plus_eps
+        return (
+            -np.dot(self.b, nu)
+            + self.lb * np.sum(lmbda[0:M])
+            - M * lmbda[M] * self.s0_plus_eps
+        )
 
 
 class EqualityWithBoundsAndNormConstraintSolver(
     EqualityConstrainedInteriorPointMethodSolver, PhaseIInteriorPointSolver
 ):
-    r"""Find x satisfying A * x = b, x > 0, and \| x \|_2^2 < phi.
+    r"""Find x satisfying A * x = b, x > lb, and \| x \|_2^2 < phi.
 
     We do this by solving:
       minimize   \| x \|_2^2
       subject to A * x = b
-                 x \succeq 0.
+                 x \succeq lb.
 
     If the resulting x^\star has \| x^\star \|_2^2 > phi, the original problem is
     infeasible.
 
     Parameters
     ----------
-     x0 : vector, optional
-        Initial guess for x. If A * x0 = b, x0 > 0, and \| x0 \|_2^2 < phi, we
-        simply return it. If A * x0 = b and x0 > 0, we use it as a starting point.
+     phi : float
+        Constraint on norm of x.
 
     Returns
     -------
      res : OptimizationResult
         The solution.
+     phase1_solver : EqualityWithBoundsSolver
+        Phase I solver, to return a point satisfying A * x = b, x > lb. Note: lb is
+        specified when constructing `phase1_solver` and does not need to be specified in
+        this constructor.
+     settings : OptimizationSettings
+        Optimization settings.
 
     """
 
     def __init__(
         self,
         phi: float,
-        phase1_solver: Optional[EqualityWithBoundsSolver] = None,
-        settings: Optional[OptimizationSettings] = None,
+        phase1_solver: EqualityWithBoundsSolver | None = None,
+        settings: OptimizationSettings | None = None,
     ) -> None:
         if phase1_solver is None:
             raise ValueError("phase1_solver is required.")
@@ -716,10 +738,10 @@ class EqualityWithBoundsAndNormConstraintSolver(
 
     def svd_A(
         self,
-    ) -> Tuple[
-        npt.NDArray[Union[np.float32, np.float64]],
-        npt.NDArray[Union[np.float32, np.float64]],
-        npt.NDArray[Union[np.float32, np.float64]],
+    ) -> tuple[
+        npt.NDArray[np.float32 | np.float64],
+        npt.NDArray[np.float32 | np.float64],
+        npt.NDArray[np.float32 | np.float64],
     ]:
         """Calculate and cache SVD of A."""
         if self.phase1_solver is None:
@@ -729,6 +751,17 @@ class EqualityWithBoundsAndNormConstraintSolver(
             raise ValueError("phase1_solver must be an EqualityWithBoundsSolver")
 
         return self.phase1_solver.svd_A()
+
+    @property
+    def lb(self) -> float:
+        """Wrap lb."""
+        if self.phase1_solver is None:
+            raise ValueError("PhaseISolver not specified.")
+
+        if not isinstance(self.phase1_solver, EqualityWithBoundsSolver):
+            raise ValueError("PhaseISolver must be an EqualityWithBoundsSolver.")
+
+        return self.phase1_solver.lb
 
     def is_feasible(self, x: npt.NDArray[np.float64]) -> bool:
         """Determine whether a feasible point has been found."""
@@ -769,11 +802,11 @@ class EqualityWithBoundsAndNormConstraintSolver(
         self,
         x: npt.NDArray[np.float64],
         t: float,
-    ) -> Tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
+    ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
         r"""Calculate Newton step.
 
         Calculates Newton step for the "inner" problem:
-          minimize   ft(w) := t * \| w \|_2^2 - \sum_i log(w_i)
+          minimize   ft(w) := t * \| w \|_2^2 - \sum_i log(w_i - lb)
           subject to A * w = b.
 
         Parameters
@@ -816,16 +849,19 @@ class EqualityWithBoundsAndNormConstraintSolver(
         """Make sure x + btls_s * delta_x stays strictly feasible.
 
         In our case, we want a btls_s such that:
-           x + btls_s * delta_x > 0.
+           x + btls_s * delta_x > lb.
         Since x is strictly feasible, and since btls_s > 0, this is only a concern for
         entries having delta_x[i] < 0, for which we want:
-           btls_s < x[i] / -delta_x[i].
+           btls_s < (x[i] - lb) / -delta_x[i].
         We want this for all i having delta_x[i] < 0, so we set btls_s as the minimum of
         these quantities.
 
 
         """
-        return np.min(np.where(delta_x < 0, x / -delta_x, np.inf))
+        mask = delta_x < 0
+        feasibility = np.full_like(delta_x, np.inf, dtype=np.float64)
+        feasibility[mask] = (x[mask] - self.lb) / -delta_x[mask]
+        return float(np.min(feasibility))
 
     def evaluate_objective(self, x: npt.NDArray[np.float64]) -> float:
         """Calculate f0 at x."""
@@ -839,7 +875,7 @@ class EqualityWithBoundsAndNormConstraintSolver(
         self, x: npt.NDArray[np.float64], t: float
     ) -> npt.NDArray[np.float64]:
         """Calculate gradient of ft at x."""
-        return (2.0 * t) * x - 1.0 / x
+        return (2.0 * t) * x - 1.0 / (x - self.lb)
 
     def hessian_multiply(
         self, x: npt.NDArray, t: float, y: npt.NDArray
@@ -856,33 +892,34 @@ class EqualityWithBoundsAndNormConstraintSolver(
         self, x: npt.NDArray[np.float64], t: float
     ) -> npt.NDArray[np.float64]:
         """Calculate diagonal component of Hessian of ft at x."""
-        return 2.0 * t + np.square(1.0 / x)
+        return 2.0 * t + np.square(1.0 / (x - self.lb))
 
     def _hessian_ft_diagonal_inverse(
         self, x: npt.NDArray[np.float64], t: float
     ) -> npt.NDArray[np.float64]:
         """Calculate diagonal component of Hessian of ft at x."""
-        # eta[i]^{-1} = x[i]^2 / (2 * t * x[i]^2 + 1)
+        # eta[i]^{-1} = (x[i] - lb)^2 / (2 * t * (x[i] - lb)^2 + 1)
         #
-        # We have numerical stability issues when t is large and x is close to 0. In
-        # this case, calculating t * x^2 as (sqrt(t) * x)^2 involves multiplying a big
-        # number times a small number, giving a reasonable number, then squaring that.
+        # We have numerical stability issues when t is large and x is close to lb. In
+        # this case, calculating t * (x - lb)^2 as (sqrt(t) * (x - lb))^2 involves
+        # multiplying a big number times a small number, giving a reasonable number,
+        # then squaring that.
         #
-        # Calculating den = (2 * t * x[i]^2 + 1) = 2 * tx2[i] + 1 offers no further
-        # challenges.
+        # Calculating den = (2 * t * (x[i] - lb)^2 + 1) = 2 * tx2[i] + 1 offers no
+        # further challenges.
         #
-        # Calculating x[i]^2 / den may underflow, but calculating x[i] / sqrt(den), and
+        # Calculating (x[i] - lb)^2 / den may underflow, but calculating (x[i] - lb) / sqrt(den), and
         # then squaring that, may improve stability.
-        tx2 = np.square(np.sqrt(t) * x)
-        return np.square(x / np.sqrt(2.0 * tx2 + 1.0))
+        tx2 = np.square(np.sqrt(t) * (x - self.lb))
+        return np.square((x - self.lb) / np.sqrt(2.0 * tx2 + 1.0))
 
     def constraints(self, x: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
         """Calculate the vector of constraints, fi(x) <= 0.
 
-        Our constraints are x >= 0, or -x <= 0
+        Our constraints are x >= lb, or -x + lb <= 0
 
         """
-        return -x
+        return -x + self.lb
 
     def grad_constraints(self, x: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
         """Calculate the gradients of constraints, fi(x) <= 0."""
@@ -927,4 +964,8 @@ class EqualityWithBoundsAndNormConstraintSolver(
 
         """
         lmbda_minus_AT_nu = lmbda - self.A.T @ nu
-        return -np.dot(self.b, nu) - 0.25 * np.dot(lmbda_minus_AT_nu, lmbda_minus_AT_nu)
+        return (
+            -0.25 * np.dot(lmbda_minus_AT_nu, lmbda_minus_AT_nu)
+            - np.dot(self.b, nu)
+            + self.lb * np.sum(lmbda)
+        )

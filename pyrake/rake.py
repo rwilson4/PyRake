@@ -1,7 +1,5 @@
 """Solve optimization problem."""
 
-from typing import Optional, Tuple, Union
-
 import numpy as np
 import numpy.typing as npt
 
@@ -31,7 +29,7 @@ class Rake(EqualityConstrainedInteriorPointMethodSolver, InteriorPointMethodSolv
            minimize    D(w, v)
            subject to  (1/M) * X^T * w = \mu
                        (1/M) * \| w \|_2^2 <= \phi
-                        w >= 0,
+                        w >= min_weight,
     with an optional constraint on the mean of weights.
 
     Parameters
@@ -44,12 +42,16 @@ class Rake(EqualityConstrainedInteriorPointMethodSolver, InteriorPointMethodSolv
          Vector of mean covariate values in the target population.
      phi : float
          Constraint on mean squared weight.
+     min_weight : float, optional
+         Lower bound on weights. Defaults to 0.
      constrain_mean_weight_to : float or None, default=1
          If not None, add a constraint that the average weight must equal
          `constrain_mean_weight_to`, which must be strictly positive. The default is an
          average weight of 1. Another common option is for the average weight to equal
          the average baseline weight. If no such constraint is desired, manually specify
          `constrain_mean_weight_to=None`.
+     settings : OptimizationSettings
+        Optimization settings.
 
     """
 
@@ -58,9 +60,10 @@ class Rake(EqualityConstrainedInteriorPointMethodSolver, InteriorPointMethodSolv
         distance: Distance,
         X: npt.NDArray[np.float64],
         mu: npt.NDArray[np.float64],
-        phi: Optional[float] = None,
-        constrain_mean_weight_to: Optional[float] = 1.0,
-        settings: Optional[OptimizationSettings] = None,
+        phi: float | None = None,
+        min_weight: float = 0.0,
+        constrain_mean_weight_to: float | None = 1.0,
+        settings: OptimizationSettings | None = None,
     ) -> None:
         """Create a Rake object."""
         M, p = X.shape
@@ -83,6 +86,7 @@ class Rake(EqualityConstrainedInteriorPointMethodSolver, InteriorPointMethodSolv
         self.distance = distance
         self.dimension: int = M
         self.phi = phi
+        self.min_weight = min_weight
         if settings is None:
             self.settings: OptimizationSettings = OptimizationSettings()
         else:
@@ -94,6 +98,7 @@ class Rake(EqualityConstrainedInteriorPointMethodSolver, InteriorPointMethodSolv
                 settings=self.settings,
                 phase1_solver=EqualityWithBoundsSolver(
                     settings=self.settings,
+                    lb=min_weight,
                     phase1_solver=EqualitySolver(
                         A=(1 / M) * self.X.T,
                         b=self.mu,
@@ -104,6 +109,7 @@ class Rake(EqualityConstrainedInteriorPointMethodSolver, InteriorPointMethodSolv
         else:
             self.phase1_solver: PhaseISolver = EqualityWithBoundsSolver(
                 settings=self.settings,
+                lb=min_weight,
                 phase1_solver=EqualitySolver(
                     A=(1 / M) * self.X.T,
                     b=self.mu,
@@ -123,10 +129,10 @@ class Rake(EqualityConstrainedInteriorPointMethodSolver, InteriorPointMethodSolv
 
     def svd_A(
         self,
-    ) -> Tuple[
-        npt.NDArray[Union[np.float32, np.float64]],
-        npt.NDArray[Union[np.float32, np.float64]],
-        npt.NDArray[Union[np.float32, np.float64]],
+    ) -> tuple[
+        npt.NDArray[np.float32 | np.float64],
+        npt.NDArray[np.float32 | np.float64],
+        npt.NDArray[np.float32 | np.float64],
     ]:
         """Calculate and cache SVD of A."""
         if self.phase1_solver is None:
@@ -144,7 +150,7 @@ class Rake(EqualityConstrainedInteriorPointMethodSolver, InteriorPointMethodSolv
 
         return self.phase1_solver.svd_A()
 
-    def update_phi(self, phi: Optional[float] = None) -> None:
+    def update_phi(self, phi: float | None = None) -> None:
         """Update phi, mostly for EfficientFrontier."""
         self.phi = phi
         if phi is not None:
@@ -153,6 +159,7 @@ class Rake(EqualityConstrainedInteriorPointMethodSolver, InteriorPointMethodSolv
                 settings=self.settings,
                 phase1_solver=EqualityWithBoundsSolver(
                     settings=self.settings,
+                    lb=self.min_weight,
                     phase1_solver=EqualitySolver(
                         A=(1 / self.dimension) * self.X.T,
                         b=self.mu,
@@ -163,6 +170,7 @@ class Rake(EqualityConstrainedInteriorPointMethodSolver, InteriorPointMethodSolv
         else:
             self.phase1_solver = EqualityWithBoundsSolver(
                 settings=self.settings,
+                lb=self.min_weight,
                 phase1_solver=EqualitySolver(
                     A=(1 / self.dimension) * self.X.T,
                     b=self.mu,
@@ -196,7 +204,7 @@ class Rake(EqualityConstrainedInteriorPointMethodSolver, InteriorPointMethodSolv
 
     def calculate_newton_step(
         self, x: npt.NDArray[np.float64], t: float
-    ) -> Tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
+    ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
         r"""Calculate Newton step.
 
         Calculates Newton step for the "inner" problem:
@@ -254,12 +262,12 @@ class Rake(EqualityConstrainedInteriorPointMethodSolver, InteriorPointMethodSolv
         r"""Make sure x + btls_s * delta_x stays strictly feasible.
 
         In our case, we want a btls_s such that:
-            x + btls_s * delta_x > 0, and
+            x + btls_s * delta_x > min_weight, and
             \| x + btls_s * delta_x \|_2^2 <= M * phi
 
         For the first constraint, since x is strictly feasible, and since btls_s > 0,
         this is only a concern for entries having delta_x[i] < 0, for which we want:
-            btls_s < x[i] / -delta_x[i].
+            btls_s < (x[i] - min_weight) / -delta_x[i].
         We want this for all i having delta_x[i] < 0, so we set btls_s as the minimum of
         these quantities. If this minimum > 1, we just set btls_s = 1.0 If all entries
         of delta_x > 0, we just set btls_s = 1.
@@ -273,7 +281,10 @@ class Rake(EqualityConstrainedInteriorPointMethodSolver, InteriorPointMethodSolv
         """
         M = self.dimension
 
-        btls_s = -np.max(np.where(delta_x < 0, x / delta_x, -np.inf))
+        mask = delta_x < 0
+        feasibility = np.full_like(delta_x, -np.inf, dtype=np.float64)
+        feasibility[mask] = (x[mask] - self.min_weight) / delta_x[mask]
+        btls_s = -float(np.max(feasibility))
         if self.phi is None:
             return btls_s
 
@@ -298,7 +309,7 @@ class Rake(EqualityConstrainedInteriorPointMethodSolver, InteriorPointMethodSolv
         self, x: npt.NDArray[np.float64], t: float
     ) -> npt.NDArray[np.float64]:
         """Calculate gradient of ft at x."""
-        grad = t * self.distance.gradient(x) - 1.0 / x
+        grad = t * self.distance.gradient(x) - 1.0 / (x - self.min_weight)
         if self.phi is not None:
             grad += (2.0 / (self.dimension * self.phi - np.dot(x, x))) * x
 
@@ -321,7 +332,9 @@ class Rake(EqualityConstrainedInteriorPointMethodSolver, InteriorPointMethodSolv
         self, x: npt.NDArray[np.float64], t: float
     ) -> npt.NDArray[np.float64]:
         """Calculate diagonal component of Hessian of ft at w."""
-        d = t * self.distance.hessian_diagonal(x) + np.square(1.0 / x)
+        d = t * self.distance.hessian_diagonal(x) + np.square(
+            1.0 / (x - self.min_weight)
+        )
         if self.phi is None:
             return d
 
@@ -333,14 +346,17 @@ class Rake(EqualityConstrainedInteriorPointMethodSolver, InteriorPointMethodSolv
     ) -> npt.NDArray[np.float64]:
         """Calculate diagonal component of Hessian of ft at w."""
         if self.phi is None:
-            tx2 = self.distance.hessian_diagonal(x) * np.square(np.sqrt(t) * x)
+            tx2 = self.distance.hessian_diagonal(x) * np.square(
+                np.sqrt(t) * (x - self.min_weight)
+            )
         else:
             M_phi_den = self.dimension * self.phi - np.dot(x, x)
             tx2 = np.square(
-                np.sqrt(t * self.distance.hessian_diagonal(x) + 2.0 / M_phi_den) * x
+                np.sqrt(t * self.distance.hessian_diagonal(x) + 2.0 / M_phi_den)
+                * (x - self.min_weight)
             )
 
-        return np.square(x / np.sqrt(1.0 + tx2))
+        return np.square((x - self.min_weight) / np.sqrt(1.0 + tx2))
 
     def _hessian_ft_rank_one(
         self, x: npt.NDArray[np.float64]
@@ -355,16 +371,16 @@ class Rake(EqualityConstrainedInteriorPointMethodSolver, InteriorPointMethodSolv
     def constraints(self, x: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
         r"""Calculate the vector of (inequality) constraints, fi(x) <= 0.
 
-        Our constraints are x >= 0 and 1 - (1 / M*\phi) * \| x \|_2^2 >= 0, or
-           -x <= 0
+        Our constraints are x >= min_weight and 1 - (1 / M*\phi) * \| x \|_2^2 >= 0, or
+           -x + min_weight <= 0
            -1 + (1 / M*\phi) * \| x \|_2^2 <= 0
 
         """
         if self.phi is None:
-            return -x
+            return -x + self.min_weight
 
         c = np.zeros((self.dimension + 1,))
-        c[0:-1] = -x
+        c[0:-1] = -x + self.min_weight
         c[-1] = -1.0 + (1.0 / (self.dimension * self.phi)) * np.dot(x, x)
         return c
 

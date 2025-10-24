@@ -1,7 +1,5 @@
 """Bias/Variance Tradeoff."""
 
-from typing import List, Optional
-
 import matplotlib.pyplot as plt
 import numpy as np
 import numpy.typing as npt
@@ -20,11 +18,11 @@ class EfficientFrontierResults:
 
     def __init__(
         self,
-        weights: List[npt.NDArray[np.float64]],
-        distances: List[float],
-        variances: List[float],
-        lagrange_multipliers: List[float],
-        ipm_results: List[InteriorPointMethodResult],
+        weights: list[npt.NDArray[np.float64]],
+        distances: list[float],
+        variances: list[float],
+        lagrange_multipliers: list[float],
+        ipm_results: list[InteriorPointMethodResult],
     ) -> None:
         self.weights = weights
         self.distances = distances
@@ -35,8 +33,8 @@ class EfficientFrontierResults:
     def plot(
         self,
         annotate_knee: bool = True,
-        annotate_index: Optional[int] = None,
-        ax: Optional[Axes] = None,
+        annotate_index: int | None = None,
+        ax: Axes | None = None,
     ) -> Axes:
         """Plot bias/variance tradeoff.
 
@@ -171,7 +169,7 @@ class EfficientFrontier:
         self.rake = rake
 
     def trace(
-        self, phi_max: Optional[float] = None, num_points: int = 50
+        self, phi_max: float | None = None, num_points: int = 50
     ) -> EfficientFrontierResults:
         """Trace bias/variance tradeoff."""
         if self.rake.phase1_solver is None:
@@ -202,7 +200,7 @@ class EfficientFrontier:
         # construction, it always will.
         assert isinstance(res_min, InteriorPointMethodResult)
 
-        ipm_results: List[InteriorPointMethodResult] = [res_min]
+        ipm_results: list[InteriorPointMethodResult] = [res_min]
 
         # Find the feasible weights that most closely match baseline, regardless of
         # variance.
