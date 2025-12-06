@@ -62,6 +62,7 @@ $`
 \begin{array}{ll}
 \textrm{minimize}    & D(w, v) \\
 \textrm{subject to}  & (1/M) X^T w = \mu \\
+           & \| (1/M) Z^T w - \nu \|_\infty \leq \psi \\
            &  (1/M) \| w \|_2^2 \leq \phi \\
            & w \succeq 0,
 \end{array}
@@ -73,6 +74,11 @@ Divergence, and a Huber penalty. If the user does not have estimated
 propensity scores, the code defaults to v=1. This will give you
 weights that exactly balance the specified covariates with a
 constraint on variance, but no connection to propensity scores.
+
+The constraint on the $` l_\infty `$ norm is a loosening of the exact
+covariate balance imposed by the equality constraints. In this case,
+we don't require exact covariate balance, but we insist that no
+covariate is imbalanced worse than the amount implied by $` \psi. `$
 
 PyRake can also be used to solve a sequence of these problems, with
 varying $` \phi `$. This allows the user to visualize the bias/variance

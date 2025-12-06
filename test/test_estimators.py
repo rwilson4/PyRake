@@ -2221,8 +2221,8 @@ class TestATEEstimator:
             treated_propensity_scores=treated_propensities,
             treated_outcomes=treated_outcomes,
         )
-        lb_expected = -0.6759802011428533
-        ub_expected = 0.8946142786817071
+        lb_expected = -0.6784724957263869
+        ub_expected = 0.8917726898653108
 
         start_time = time.time()
         lb_actual, ub_actual = estimator.expanded_confidence_interval(
@@ -2282,8 +2282,8 @@ class TestATEEstimator:
             treated_sampling_propensity_scores=treated_sampling_propensities,
             sampling_estimand_class="PopulationMean",
         )
-        lb_expected = -2.0669737901863128
-        ub_expected = 2.289373283308802
+        lb_expected = -2.0721958774613065
+        ub_expected = 2.2940124004956144
 
         lb_actual, ub_actual = estimator.expanded_confidence_interval(
             alpha=0.1, gamma=6.0, seed=42
@@ -2307,8 +2307,8 @@ class TestATEEstimator:
                 "mean_predicted_outcome": treated_mean_predicted_outcome,
             },
         )
-        lb_expected = 0.04227034127703664
-        ub_expected = 0.05809193800563194
+        lb_expected = 0.04230439882983481
+        ub_expected = 0.05807741535242331
 
         start_time = time.time()
         lb_actual, ub_actual = estimator.expanded_confidence_interval(

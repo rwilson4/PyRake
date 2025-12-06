@@ -60,10 +60,11 @@ class SquaredL2(Distance):
     def gradient(self, w: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
         """Calculate gradient of D(w, v)."""
         M = len(w)
-        if self.v is None:
+        v = self.v
+        if v is None:
             return (2.0 / M) * (w - 1.0)
         else:
-            return (2.0 / M) * (w - self.v)
+            return (2.0 / M) * (w - v)
 
     def hessian_diagonal(self, w: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
         """Calculate diagonal component of Hessian of D(w, v)."""
@@ -82,18 +83,20 @@ class KLDivergence(Distance):
     def evaluate(self, w: npt.NDArray[np.float64]) -> float:
         """Evaluate distance metric."""
         M = len(w)
-        if self.v is None:
+        v = self.v
+        if v is None:
             return (1.0 / M) * np.sum(w * np.log(w) - w + np.ones_like(w))
         else:
-            return (1.0 / M) * np.sum(w * (np.log(w) - np.log(self.v)) - w + self.v)
+            return (1.0 / M) * np.sum(w * (np.log(w) - np.log(v)) - w + v)
 
     def gradient(self, w: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
         """Calculate gradient of ft."""
         M = len(w)
-        if self.v is None:
+        v = self.v
+        if v is None:
             return (1.0 / M) * np.log(w)
         else:
-            return (1.0 / M) * (np.log(w) - np.log(self.v))
+            return (1.0 / M) * (np.log(w) - np.log(v))
 
     def hessian_diagonal(self, w: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
         """Calculate diagonal component of Hessian of D(w, v)."""

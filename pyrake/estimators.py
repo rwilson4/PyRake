@@ -2,7 +2,8 @@
 
 import math
 from abc import ABC, abstractmethod, abstractproperty
-from typing import Any, Dict, List, Literal, Optional, Tuple, Type, Union
+from collections.abc import Generator
+from typing import Any, Literal, Type
 
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
@@ -151,7 +152,7 @@ class DoubleSamplingEstimand(Estimand):
     def sensitivity_region(
         self,
         gamma: float,
-    ) -> Tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
+    ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
         """Calculate a sensitivity region around baseline weights."""
         wl1, wu1 = self.estimand1.sensitivity_region(gamma)
         wl2, wu2 = self.estimand2.sensitivity_region(gamma)
@@ -681,8 +682,8 @@ class MeanEstimator(WeightingEstimator):
         propensity_scores: list[float] | npt.NDArray[np.float64],
         outcomes: list[float | int] | npt.NDArray[np.float64 | np.int64],
         estimand: Estimand | None = None,
-        estimand_class: Optional[Type[SimpleEstimand]] = None,
-        **kwargs,
+        estimand_class: Type[SimpleEstimand] | None = None,
+        **kwargs: Any,
     ) -> None:
         if len(propensity_scores) != len(outcomes):
             raise ValueError(
@@ -766,6 +767,50 @@ class MeanEstimator(WeightingEstimator):
         """
         return super().confidence_interval(alpha=alpha, alternative=alternative)
 
+    def resample(
+        self,
+        B: int,
+        seed: None | (
+            int
+            | list[int]
+            | np.random.SeedSequence
+            | np.random.BitGenerator
+            | np.random.Generator
+        ) = None,
+    ) -> Generator[Self, None, None]:
+        """Yield a sequence of resampled estimators.
+
+        Parameters
+        ----------
+         B : int
+            Number of bootstrap replications to run.
+         seed : int, list_like, etc
+            A seed for numpy.random.default_rng. See that documentation for details.
+
+        """
+        rng = np.random.default_rng(seed)
+        for _ in range(B):
+            # Resample with replacement
+            bootstrap_indices = rng.choice(
+                range(len(self.weights)),
+                size=len(self.weights),
+                replace=True,
+            )
+            bootstrap_propensities = self.propensity_scores[bootstrap_indices]
+            bootstrap_outcomes = self.outcomes[bootstrap_indices]
+            # Implementation note for AIPW and SAIPW estimators: `self.outcomes` is
+            # actually the adjusted outcomes, outcome minus prediction, and
+            # `self.extra_args["predicted_outcomes"]` is actually just a vector of all
+            # zeros to make the constructor happy. So there is no need to resample those
+            # predicted outcomes.
+
+            yield self.__class__(
+                propensity_scores=bootstrap_propensities,
+                outcomes=bootstrap_outcomes,
+                estimand=self.estimand.resample(bootstrap_indices),
+                **self.extra_args,
+            )
+
     def expanded_confidence_interval(
         self,
         alpha: float = 0.10,
@@ -823,32 +868,11 @@ class MeanEstimator(WeightingEstimator):
 
         lb_bootstrap = np.zeros(B)
         ub_bootstrap = np.zeros(B)
-        rng = np.random.default_rng(seed)
-        for b in range(B):
-            # Resample with replacement
-            bootstrap_indices = rng.choice(
-                range(len(self.weights)),
-                size=len(self.weights),
-                replace=True,
-            )
-            bootstrap_propensities = self.propensity_scores[bootstrap_indices]
-            bootstrap_outcomes = self.outcomes[bootstrap_indices]
-            # Implementation note for AIPW and SAIPW estimators: `self.outcomes` is
-            # actually the adjusted outcomes, outcome minus prediction, and
-            # `self.extra_args["predicted_outcomes"]` is actually just a vector of all
-            # zeros to make the constructor happy. So there is no need to resample those
-            # predicted outcomes.
-
-            # Calculate sensitivity interval for this bootstrap sample
+        for b, est in enumerate(self.resample(B, seed)):
             (
                 lb_bootstrap[b],
                 ub_bootstrap[b],
-            ) = self.__class__(
-                propensity_scores=bootstrap_propensities,
-                outcomes=bootstrap_outcomes,
-                estimand=self.estimand.resample(bootstrap_indices),
-                **self.extra_args,
-            ).sensitivity_analysis(gamma=gamma)
+            ) = est.sensitivity_analysis(gamma=gamma)
 
         # Calculate the expanded confidence interval as percentiles of the bootstrap estimates
         if alternative == "two-sided":
@@ -904,8 +928,8 @@ class IPWEstimator(MeanEstimator):
         outcomes: list[float | int] | npt.NDArray[np.float64 | np.int64],
         population_size: int,
         estimand: Estimand | None = None,
-        estimand_class: Optional[Type[SimpleEstimand]] = None,
-        **kwargs,
+        estimand_class: Type[SimpleEstimand] | None = None,
+        **kwargs: Any,
     ) -> None:
         if estimand is not None and not isinstance(estimand, PopulationMean):
             # When estimating something other than the PopulationMean, the weights are
@@ -1050,8 +1074,8 @@ class AIPWEstimator(IPWEstimator):
         mean_predicted_outcome: float,
         population_size: int,
         estimand: Estimand | None = None,
-        estimand_class: Optional[Type[SimpleEstimand]] = None,
-        **kwargs,
+        estimand_class: Type[SimpleEstimand] | None = None,
+        **kwargs: Any,
     ) -> None:
         if len(propensity_scores) != len(predicted_outcomes):
             raise ValueError(
@@ -1188,9 +1212,9 @@ class SIPWEstimator(MeanEstimator):
         propensity_scores: list[float] | npt.NDArray[np.float64],
         outcomes: list[float | int] | npt.NDArray[np.float64 | np.int64],
         estimand: Estimand | None = None,
-        estimand_class: Optional[Type[SimpleEstimand]] = None,
+        estimand_class: Type[SimpleEstimand] | None = None,
         binary_outcomes: bool = True,
-        **kwargs,
+        **kwargs: Any,
     ) -> None:
         super().__init__(
             propensity_scores=propensity_scores,
@@ -1348,9 +1372,9 @@ class SAIPWEstimator(SIPWEstimator):
         predicted_outcomes: list[float | int] | npt.NDArray[np.float64 | np.int64],
         mean_predicted_outcome: float,
         estimand: Estimand | None = None,
-        estimand_class: Optional[Type[SimpleEstimand]] = None,
+        estimand_class: Type[SimpleEstimand] | None = None,
         binary_outcomes: bool = True,
-        **kwargs,
+        **kwargs: Any,
     ) -> None:
         if len(propensity_scores) != len(predicted_outcomes):
             raise ValueError(
@@ -1439,13 +1463,12 @@ class RatioEstimator(WeightingEstimator):
         PopulationMean.
      estimator_class : ["IPW", "AIPW", "SIPW", "SAIPW"], optional
         What kind of estimator to use. Defaults to "SIPW". Currently only "SIPW" is supported.
-     control_estimator_class, treated_estimator_class: ["IPW", "AIPW", "SIPW", "SAIPW"], optional
-        If you really want to use different estimator classes for treatment vs control,
-        you can. Defaults to `estimator_class`. Currently only "SIPW" is supported.
-     control_kwargs, treated_kwargs, kwargs : dict_like
-        Extra kwargs to pass to the estimators. `kwargs` are passed to both estimators,
-        while `control_kwargs` is only passed to the control estimator and
-        `treated_kwargs` is only passed to the treated estimator.
+     numerator_estimator_class, denominator_estimator_class: ["IPW", "AIPW", "SIPW", "SAIPW"], optional
+        If you really want to use different estimator classes for numerator vs
+        denominator, you can. Defaults to `estimator_class`. Currently only "SIPW" is
+        supported.
+     numerator_kwargs, denominator_kwargs, kwargs : dict_like
+        Extra kwargs to pass to the estimators.
 
     """
 
@@ -1455,7 +1478,7 @@ class RatioEstimator(WeightingEstimator):
         numerator_outcomes: list[float | int] | npt.NDArray[np.float64 | np.int64],
         denominator_outcomes: list[float | int] | npt.NDArray[np.float64 | np.int64],
         estimand: Estimand | None = None,
-        estimand_class: Optional[Type[SimpleEstimand]] = None,
+        estimand_class: Type[SimpleEstimand] | None = None,
         estimator_class: Literal["IPW", "AIPW", "SIPW", "SAIPW"] = "SIPW",
         numerator_estimator_class: (
             Literal["IPW", "AIPW", "SIPW", "SAIPW"] | None
@@ -1465,7 +1488,7 @@ class RatioEstimator(WeightingEstimator):
         ) = None,
         numerator_kwargs: dict[str, Any] | None = None,
         denominator_kwargs: dict[str, Any] | None = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> None:
         propensity_scores = np.asarray(propensity_scores)
         numerator_outcomes = np.asarray(numerator_outcomes)
@@ -1506,6 +1529,16 @@ class RatioEstimator(WeightingEstimator):
             **denominator_kwargs_nn,
         )
 
+    @property
+    def weights(self) -> npt.NDArray[np.float64]:
+        """Wrapper for weights."""
+        return self.numerator_estimator.weights
+
+    @property
+    def propensity_scores(self) -> npt.NDArray[np.float64]:
+        """Wrapper for propensity scores."""
+        return self.numerator_estimator.propensity_scores
+
     def point_estimate(self) -> float:
         """Calculate a point estimate."""
         return (
@@ -1524,7 +1557,7 @@ class RatioEstimator(WeightingEstimator):
         mu_den = self.denominator_estimator.point_estimate()
         var_den = self.denominator_estimator.variance()
 
-        w = self.numerator_estimator.weights
+        w = self.weights
         x = self.numerator_estimator.outcomes
         y = self.denominator_estimator.outcomes
         cov_num_den = np.sum(np.square(w) * (x - mu_num) * (y - mu_den)) / (
@@ -1572,7 +1605,7 @@ class RatioEstimator(WeightingEstimator):
            University Press, 2004.
 
         """
-        weights = self.numerator_estimator.weights
+        weights = self.weights
         wl = weights / math.sqrt(gamma) + (1.0 - 1.0 / math.sqrt(gamma))
         wu = weights * math.sqrt(gamma) - (math.sqrt(gamma) - 1.0)
         G = np.vstack([-np.eye(len(weights)), np.eye(len(weights))])
@@ -1595,6 +1628,58 @@ class RatioEstimator(WeightingEstimator):
         )
 
         return lb_res.fun, -ub_res.fun
+
+    def resample(
+        self,
+        B: int,
+        seed: None | (
+            int
+            | list[int]
+            | np.random.SeedSequence
+            | np.random.BitGenerator
+            | np.random.Generator
+        ) = None,
+    ) -> Generator[Self, None, None]:
+        """Yield a sequence of resampled estimators.
+
+        Parameters
+        ----------
+         B : int
+            Number of bootstrap replications to run.
+         seed : int, list_like, etc
+            A seed for numpy.random.default_rng. See that documentation for details.
+
+        """
+        rng = np.random.default_rng(seed)
+        for _ in range(B):
+            # Resample with replacement
+            bootstrap_indices = rng.choice(
+                range(len(self.weights)),
+                size=len(self.weights),
+                replace=True,
+            )
+            bootstrap_propensities = self.propensity_scores[bootstrap_indices]
+            bootstrap_numerator_outcomes = self.numerator_estimator.outcomes[
+                bootstrap_indices
+            ]
+            bootstrap_denominator_outcomes = self.denominator_estimator.outcomes[
+                bootstrap_indices
+            ]
+            # Implementation note for AIPW and SAIPW estimators: `self.outcomes` is
+            # actually the adjusted outcomes, outcome minus prediction, and
+            # `self.extra_args["predicted_outcomes"]` is actually just a vector of all
+            # zeros to make the constructor happy. So there is no need to resample those
+            # predicted outcomes.
+
+            # Calculate sensitivity interval for this bootstrap sample
+            yield self.__class__(
+                propensity_scores=bootstrap_propensities,
+                numerator_outcomes=bootstrap_numerator_outcomes,
+                denominator_outcomes=bootstrap_denominator_outcomes,
+                estimand=self.numerator_estimator.estimand.resample(bootstrap_indices),
+                numerator_kwargs=self.numerator_estimator.extra_args,
+                denominator_kwargs=self.denominator_estimator.extra_args,
+            )
 
     def expanded_confidence_interval(
         self,
@@ -1654,41 +1739,11 @@ class RatioEstimator(WeightingEstimator):
 
         lb_bootstrap = np.zeros(B)
         ub_bootstrap = np.zeros(B)
-        rng = np.random.default_rng(seed)
-        for b in range(B):
-            # Resample with replacement
-            bootstrap_indices = rng.choice(
-                range(len(self.numerator_estimator.weights)),
-                size=len(self.numerator_estimator.weights),
-                replace=True,
-            )
-            bootstrap_propensities = self.numerator_estimator.propensity_scores[
-                bootstrap_indices
-            ]
-            bootstrap_numerator_outcomes = self.numerator_estimator.outcomes[
-                bootstrap_indices
-            ]
-            bootstrap_denominator_outcomes = self.denominator_estimator.outcomes[
-                bootstrap_indices
-            ]
-            # Implementation note for AIPW and SAIPW estimators: `self.outcomes` is
-            # actually the adjusted outcomes, outcome minus prediction, and
-            # `self.extra_args["predicted_outcomes"]` is actually just a vector of all
-            # zeros to make the constructor happy. So there is no need to resample those
-            # predicted outcomes.
-
-            # Calculate sensitivity interval for this bootstrap sample
+        for b, est in enumerate(self.resample(B, seed)):
             (
                 lb_bootstrap[b],
                 ub_bootstrap[b],
-            ) = self.__class__(
-                propensity_scores=bootstrap_propensities,
-                numerator_outcomes=bootstrap_numerator_outcomes,
-                denominator_outcomes=bootstrap_denominator_outcomes,
-                estimand=self.numerator_estimator.estimand.resample(bootstrap_indices),
-                numerator_kwargs=self.numerator_estimator.extra_args,
-                denominator_kwargs=self.denominator_estimator.extra_args,
-            ).sensitivity_analysis(gamma=gamma)
+            ) = est.sensitivity_analysis(gamma=gamma)
 
         # Calculate the expanded confidence interval as percentiles of the bootstrap estimates
         if alternative == "two-sided":
@@ -1711,8 +1766,8 @@ class TreatmentEffectEstimator(WeightingEstimator):
 
     def __init__(
         self,
-        control_estimator: MeanEstimator,
-        treated_estimator: MeanEstimator,
+        control_estimator: MeanEstimator | RatioEstimator,
+        treated_estimator: MeanEstimator | RatioEstimator,
     ) -> None:
         self.control_estimator = control_estimator
         self.treated_estimator = treated_estimator
@@ -1825,6 +1880,33 @@ class TreatmentEffectEstimator(WeightingEstimator):
 
         return treated_lb - control_ub, treated_ub - control_lb
 
+    def resample(
+        self,
+        B: int,
+        seed: None | (
+            int
+            | list[int]
+            | np.random.SeedSequence
+            | np.random.BitGenerator
+            | np.random.Generator
+        ) = None,
+    ) -> Generator[tuple[WeightingEstimator, WeightingEstimator], None, None]:
+        """Yield a sequence of resampled estimators.
+
+        Parameters
+        ----------
+         B : int
+            Number of bootstrap replications to run.
+         seed : int, list_like, etc
+            A seed for numpy.random.default_rng. See that documentation for details.
+
+        """
+        for control_estimator, treatment_estimator in zip(
+            self.control_estimator.resample(B, seed=seed),
+            self.treated_estimator.resample(B, seed=seed),
+        ):
+            yield control_estimator, treatment_estimator
+
     def expanded_confidence_interval(
         self,
         alpha: float = 0.10,
@@ -1893,47 +1975,9 @@ class TreatmentEffectEstimator(WeightingEstimator):
 
         lb_bootstrap = np.zeros(B)
         ub_bootstrap = np.zeros(B)
-        rng = np.random.default_rng(seed)
-        for b in range(B):
-            # Resample with replacement
-            control_bootstrap_indices = rng.choice(
-                range(len(self.control_estimator.weights)),
-                size=len(self.control_estimator.weights),
-                replace=True,
-            )
-            treated_bootstrap_indices = rng.choice(
-                range(len(self.treated_estimator.weights)),
-                size=len(self.treated_estimator.weights),
-                replace=True,
-            )
-
-            # Implementation note for AIPW and SAIPW estimators:
-            # `self.control_estimator.outcomes` is actually the adjusted outcomes,
-            # outcome minus prediction, and
-            # `self.control_estimator.extra_args["predicted_outcomes"]` is actually just
-            # a vector of all zeros to make the constructor happy. So there is no need
-            # to resample those predicted outcomes.
-            control_estimator = self.control_estimator.__class__(
-                propensity_scores=self.control_estimator.propensity_scores[
-                    control_bootstrap_indices
-                ],
-                outcomes=self.control_estimator.outcomes[control_bootstrap_indices],
-                estimand=self.control_estimator.estimand.resample(
-                    control_bootstrap_indices
-                ),
-                **self.control_estimator.extra_args,
-            )
-            treated_estimator = self.treated_estimator.__class__(
-                propensity_scores=self.treated_estimator.propensity_scores[
-                    treated_bootstrap_indices
-                ],
-                outcomes=self.treated_estimator.outcomes[treated_bootstrap_indices],
-                estimand=self.treated_estimator.estimand.resample(
-                    treated_bootstrap_indices
-                ),
-                **self.treated_estimator.extra_args,
-            )
-
+        for b, (control_estimator, treated_estimator) in enumerate(
+            self.resample(B, seed)
+        ):
             # Calculate sensitivity interval for this bootstrap sample
             control_lb, control_ub = control_estimator.sensitivity_analysis(gamma=gamma)
             treated_lb, treated_ub = treated_estimator.sensitivity_analysis(gamma=gamma)
@@ -1966,6 +2010,15 @@ class SimpleDifferenceEstimator(TreatmentEffectEstimator):
      control_sampling_propensity_scores, control_sampling_propensity_scores : list_like, optional
         Propensity scores for the sampling mechanism for control and treatment groups,
         resp. See Notes.
+     sampling_estimand_class : ["PopulationMean", "NonRespondentMean", "SampleMean"], optional
+        Population for which to estimate the average treatment effect. Used only when
+        sampling propensity scores are specified. Defaults to "PopulationMean" in that
+        case. See Notes.
+     control_denominator_outcomes, treated_denominator_outcomes : list_like, optional
+        If specified, the metric of interest is considered a ratio (with
+        `control_outcomes` and `treated_outcomes` are treated as the numerators), and
+        interest is in the effect of treatment on that ratio. See Notes in ATEEstimator
+        for details.
 
     Notes
     -----
@@ -1995,16 +2048,22 @@ class SimpleDifferenceEstimator(TreatmentEffectEstimator):
         self,
         control_outcomes: list[float | int] | npt.NDArray[np.float64 | np.int64],
         treated_outcomes: list[float | int] | npt.NDArray[np.float64 | np.int64],
-        control_sampling_propensity_scores: Optional[
-            Union[List[float], npt.NDArray[np.float64]]
-        ] = None,
-        treated_sampling_propensity_scores: Optional[
-            Union[List[float], npt.NDArray[np.float64]]
-        ] = None,
+        control_sampling_propensity_scores: (
+            list[float] | npt.NDArray[np.float64] | None
+        ) = None,
+        treated_sampling_propensity_scores: (
+            list[float] | npt.NDArray[np.float64] | None
+        ) = None,
         sampling_estimand_class: Literal[
             "PopulationMean", "NonRespondentMean", "SampleMean"
         ] = "PopulationMean",
-        **kwargs,
+        control_denominator_outcomes: (
+            list[float | int] | npt.NDArray[np.float64 | np.int64] | None
+        ) = None,
+        treated_denominator_outcomes: (
+            list[float | int] | npt.NDArray[np.float64 | np.int64] | None
+        ) = None,
+        **kwargs: Any,
     ) -> None:
         control_outcomes = np.asarray(control_outcomes)
         treated_outcomes = np.asarray(treated_outcomes)
@@ -2029,17 +2088,46 @@ class SimpleDifferenceEstimator(TreatmentEffectEstimator):
                 PopulationMean(np.asarray(treated_sampling_propensity_scores)),
             )
 
-        super().__init__(
-            control_estimator=SIPWEstimator(
+        if (
+            control_denominator_outcomes is not None
+            and treated_denominator_outcomes is not None
+        ):
+            control_denominator_outcomes = np.asarray(control_denominator_outcomes)
+            treated_denominator_outcomes = np.asarray(treated_denominator_outcomes)
+            control_estimator: MeanEstimator | RatioEstimator = RatioEstimator(
+                propensity_scores=np.ones_like(control_outcomes, dtype=np.float64),
+                numerator_outcomes=control_outcomes,
+                denominator_outcomes=control_denominator_outcomes,
+                estimand=control_estimand,
+            )
+            treated_estimator: MeanEstimator | RatioEstimator = RatioEstimator(
+                propensity_scores=np.ones_like(treated_outcomes, dtype=np.float64),
+                numerator_outcomes=treated_outcomes,
+                denominator_outcomes=treated_denominator_outcomes,
+                estimand=treated_estimand,
+            )
+        elif (
+            control_denominator_outcomes is not None
+            or treated_denominator_outcomes is not None
+        ):
+            raise ValueError(
+                "Must specify neither or both `control_denominator_outcomes` and `treated_denominator_outcomes`"
+            )
+        else:
+            control_estimator = SIPWEstimator(
                 propensity_scores=np.ones_like(control_outcomes, dtype=np.float64),
                 outcomes=control_outcomes,
                 estimand=control_estimand,
-            ),
-            treated_estimator=SIPWEstimator(
+            )
+            treated_estimator = SIPWEstimator(
                 propensity_scores=np.ones_like(treated_outcomes, dtype=np.float64),
                 outcomes=treated_outcomes,
                 estimand=treated_estimand,
-            ),
+            )
+
+        super().__init__(
+            control_estimator=control_estimator,
+            treated_estimator=treated_estimator,
         )
 
 
@@ -2061,10 +2149,14 @@ class ATEEstimator(TreatmentEffectEstimator):
      control_sampling_propensity_scores, treated_sampling_propensity_scores : list_like, optional
         Propensity scores for the sampling mechanism for control and treatment groups,
         resp. See Notes.
-     sampling_estimand : ["PopulationMean", "NonRespondentMean", "SampleMean"], optional
+     sampling_estimand_class : ["PopulationMean", "NonRespondentMean", "SampleMean"], optional
         Population for which to estimate the average treatment effect. Used only when
         sampling propensity scores are specified. Defaults to "PopulationMean" in that
         case. See Notes.
+     control_denominator_outcomes, treated_denominator_outcomes : list_like, optional
+        If specified, the metric of interest is considered a ratio (with
+        `control_outcomes` and `treated_outcomes` are treated as the numerators), and
+        interest is in the effect of treatment on that ratio. See Notes.
      control_kwargs, treated_kwargs, kwargs : dict_like
         Extra kwargs to pass to the estimators. `kwargs` are passed to both estimators,
         while `control_kwargs` is only passed to the control estimator and
@@ -2088,6 +2180,32 @@ class ATEEstimator(TreatmentEffectEstimator):
     treatment assignment propensity scores, we can adjust for both non-response bias and
     treatment selection bias.
 
+    Sometimes we are interested in a treatment effect in a subpopulation that is
+    identifiable only in the sample. For example, people may self-identify as belonging
+    to that population in the sample. We can estimate the population mean among the
+    sub-population as a ratio of two MeanEstimators as follows. Let t_i be 1 if person i
+    belongs to the sub-population, and 0 otherwise. We observe t_i only for respondents.
+    Let y_i be the metric of interest. Then the average value of the metric among the
+    sub-population is:
+        \sum_{i=1}^N t_i * y_i     (1/N) \sum_{i=1}^N t_i * y_i
+        ----------------------  =  ----------------------------,
+        \sum_{i=1}^N t_i           (1/N) \sum_{i=1}^N t_i
+    which is the ratio of the population means of t_i * y_i and t_i. Inference
+    (including sensitivity analysis) for such ratios is provided by RatioEstimator.
+
+    We may wish to estimate the impact of a treatment on an outcome in a subpopulation
+    identifiable only in the sample. Let (y0_i, y1_i) be potential outcomes, and assume
+    subpopulation membership is not influenced by treatment, so that t_i does not have
+    associated potential outcomes. The quantity of interest is
+        \sum_{i=1}^N t_i * (y1_i - y0_i)     (1/N) \sum_{i=1}^N t_i * y1_i     (1/N) \sum_{i=1}^N t_i * y0_i
+        --------------------------------  =  -----------------------------  -  -----------------------------.
+        \sum_{i=1}^N t_i                     (1/N) \sum_{i=1}^N t_i            (1/N) \sum_{i=1}^N t_i
+
+    By specifying t_i * y_i as the `control_outcomes` and `treated_outcomes` (the
+    numerator), and t_i as the `control_denominator_outcomes` and
+    `treated_denominator_outcomes`, inference (including sensitivity analysis) for this
+    use case is supported.
+
     """
 
     def __init__(
@@ -2103,18 +2221,24 @@ class ATEEstimator(TreatmentEffectEstimator):
         treated_estimator_class: None | (
             Literal["IPW", "AIPW", "SIPW", "SAIPW"]
         ) = None,
-        control_sampling_propensity_scores: Optional[
-            Union[List[float], npt.NDArray[np.float64]]
-        ] = None,
-        treated_sampling_propensity_scores: Optional[
-            Union[List[float], npt.NDArray[np.float64]]
-        ] = None,
+        control_sampling_propensity_scores: (
+            list[float] | npt.NDArray[np.float64] | None
+        ) = None,
+        treated_sampling_propensity_scores: (
+            list[float] | npt.NDArray[np.float64] | None
+        ) = None,
         sampling_estimand_class: Literal[
             "PopulationMean", "NonRespondentMean", "SampleMean"
         ] = "PopulationMean",
+        control_denominator_outcomes: (
+            list[float | int] | npt.NDArray[np.float64 | np.int64] | None
+        ) = None,
+        treated_denominator_outcomes: (
+            list[float | int] | npt.NDArray[np.float64 | np.int64] | None
+        ) = None,
         control_kwargs: dict[str, Any] | None = None,
         treated_kwargs: dict[str, Any] | None = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> None:
         control_propensity_scores = np.asarray(control_propensity_scores)
         control_outcomes = np.asarray(control_outcomes)
@@ -2136,17 +2260,17 @@ class ATEEstimator(TreatmentEffectEstimator):
             "SAIPW": SAIPWEstimator,
         }
 
-        sampling_estimand_classes: Dict[
+        sampling_estimand_classes: dict[
             str,
-            Type[Union[PopulationMean, NonRespondentMean, SampleMean]],
+            Type[PopulationMean | NonRespondentMean | SampleMean],
         ] = {
             "PopulationMean": PopulationMean,
             "NonRespondentMean": NonRespondentMean,
             "SampleMean": SampleMean,
         }
-        sampling_estimand: Type[
-            Union[PopulationMean, NonRespondentMean, SampleMean]
-        ] = sampling_estimand_classes[sampling_estimand_class]
+        sampling_estimand: Type[PopulationMean | NonRespondentMean | SampleMean] = (
+            sampling_estimand_classes[sampling_estimand_class]
+        )
 
         if control_sampling_propensity_scores is None:
             control_estimand: Estimand = PopulationMean(
@@ -2168,20 +2292,53 @@ class ATEEstimator(TreatmentEffectEstimator):
                 sampling_estimand(np.asarray(treated_sampling_propensity_scores)),
             )
 
-        super().__init__(
-            control_estimator=classes[control_estimator_class or estimator_class](
+        if (
+            control_denominator_outcomes is not None
+            and treated_denominator_outcomes is not None
+        ):
+            control_denominator_outcomes = np.asarray(control_denominator_outcomes)
+            treated_denominator_outcomes = np.asarray(treated_denominator_outcomes)
+            control_estimator = RatioEstimator(
+                propensity_scores=control_propensity_scores,
+                numerator_outcomes=control_outcomes,
+                denominator_outcomes=control_denominator_outcomes,
+                estimand=control_estimand,
+                estimator_class=(control_estimator_class or estimator_class),
+                **control_kwargs_nn,
+            )
+            treated_estimator = RatioEstimator(
+                propensity_scores=treated_propensity_scores,
+                numerator_outcomes=treated_outcomes,
+                denominator_outcomes=treated_denominator_outcomes,
+                estimand=treated_estimand,
+                estimator_class=(treated_estimator_class or estimator_class),
+                **treated_kwargs_nn,
+            )
+        elif (
+            control_denominator_outcomes is not None
+            or treated_denominator_outcomes is not None
+        ):
+            raise ValueError(
+                "Must specify neither or both `control_denominator_outcomes` and `treated_denominator_outcomes`"
+            )
+        else:
+            control_estimator = classes[control_estimator_class or estimator_class](
                 propensity_scores=np.ones_like(control_propensity_scores)
                 - control_propensity_scores,
                 outcomes=control_outcomes,
                 estimand=control_estimand,
                 **control_kwargs_nn,
-            ),
-            treated_estimator=classes[treated_estimator_class or estimator_class](
+            )
+            treated_estimator = classes[treated_estimator_class or estimator_class](
                 propensity_scores=treated_propensity_scores,
                 outcomes=treated_outcomes,
                 estimand=treated_estimand,
                 **treated_kwargs_nn,
-            ),
+            )
+
+        super().__init__(
+            control_estimator=control_estimator,
+            treated_estimator=treated_estimator,
         )
 
 
@@ -2203,10 +2360,15 @@ class ATTEstimator(TreatmentEffectEstimator):
      control_sampling_propensity_scores, treated_sampling_propensity_scores : list_like, optional
         Propensity scores for the sampling mechanism for control and treatment groups,
         resp. See Notes.
-     sampling_estimand : ["PopulationMean", "NonRespondentMean", "SampleMean"], optional
+     sampling_estimand_class : ["PopulationMean", "NonRespondentMean", "SampleMean"], optional
         Population for which to estimate the average treatment effect. Used only when
         sampling propensity scores are specified. Defaults to "PopulationMean" in that
         case. See Notes.
+     control_denominator_outcomes, treated_denominator_outcomes : list_like, optional
+        If specified, the metric of interest is considered a ratio (with
+        `control_outcomes` and `treated_outcomes` are treated as the numerators), and
+        interest is in the effect of treatment on that ratio. See Notes in ATEEstimator
+        for details.
      control_kwargs, treated_kwargs, kwargs : dict_like
         Extra kwargs to pass to the estimators. `kwargs` are passed to both estimators,
         while `control_kwargs` is only passed to the control estimator and
@@ -2236,18 +2398,24 @@ class ATTEstimator(TreatmentEffectEstimator):
         treated_estimator_class: None | (
             Literal["IPW", "AIPW", "SIPW", "SAIPW"]
         ) = None,
-        control_sampling_propensity_scores: Optional[
-            Union[List[float], npt.NDArray[np.float64]]
-        ] = None,
-        treated_sampling_propensity_scores: Optional[
-            Union[List[float], npt.NDArray[np.float64]]
-        ] = None,
+        control_sampling_propensity_scores: (
+            list[float] | npt.NDArray[np.float64] | None
+        ) = None,
+        treated_sampling_propensity_scores: (
+            list[float] | npt.NDArray[np.float64] | None
+        ) = None,
         sampling_estimand_class: Literal[
             "PopulationMean", "NonRespondentMean", "SampleMean"
         ] = "PopulationMean",
+        control_denominator_outcomes: (
+            list[float | int] | npt.NDArray[np.float64 | np.int64] | None
+        ) = None,
+        treated_denominator_outcomes: (
+            list[float | int] | npt.NDArray[np.float64 | np.int64] | None
+        ) = None,
         control_kwargs: dict[str, Any] | None = None,
         treated_kwargs: dict[str, Any] | None = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> None:
         control_propensity_scores = np.asarray(control_propensity_scores)
         control_outcomes = np.asarray(control_outcomes)
@@ -2268,17 +2436,17 @@ class ATTEstimator(TreatmentEffectEstimator):
             "SAIPW": SAIPWEstimator,
         }
 
-        sampling_estimand_classes: Dict[
+        sampling_estimand_classes: dict[
             str,
-            Type[Union[PopulationMean, NonRespondentMean, SampleMean]],
+            Type[PopulationMean | NonRespondentMean | SampleMean],
         ] = {
             "PopulationMean": PopulationMean,
             "NonRespondentMean": NonRespondentMean,
             "SampleMean": SampleMean,
         }
-        sampling_estimand: Type[
-            Union[PopulationMean, NonRespondentMean, SampleMean]
-        ] = sampling_estimand_classes[sampling_estimand_class]
+        sampling_estimand: Type[PopulationMean | NonRespondentMean | SampleMean] = (
+            sampling_estimand_classes[sampling_estimand_class]
+        )
 
         if control_sampling_propensity_scores is None:
             control_estimand: Estimand = NonRespondentMean(
@@ -2302,20 +2470,54 @@ class ATTEstimator(TreatmentEffectEstimator):
                 sampling_estimand(np.asarray(treated_sampling_propensity_scores)),
             )
 
-        super().__init__(
-            control_estimator=classes[control_estimator_class or estimator_class](
+        if (
+            control_denominator_outcomes is not None
+            and treated_denominator_outcomes is not None
+        ):
+            control_denominator_outcomes = np.asarray(control_denominator_outcomes)
+            treated_denominator_outcomes = np.asarray(treated_denominator_outcomes)
+            control_estimator = RatioEstimator(
+                propensity_scores=np.ones_like(control_propensity_scores)
+                - control_propensity_scores,
+                numerator_outcomes=control_outcomes,
+                denominator_outcomes=control_denominator_outcomes,
+                estimand=control_estimand,
+                estimator_class=(control_estimator_class or estimator_class),
+                **control_kwargs_nn,
+            )
+            treated_estimator = RatioEstimator(
+                propensity_scores=np.ones_like(treated_outcomes, dtype=np.float64),
+                numerator_outcomes=treated_outcomes,
+                denominator_outcomes=treated_denominator_outcomes,
+                estimand=treated_estimand,
+                estimator_class=(treated_estimator_class or estimator_class),
+                **treated_kwargs_nn,
+            )
+        elif (
+            control_denominator_outcomes is not None
+            or treated_denominator_outcomes is not None
+        ):
+            raise ValueError(
+                "Must specify neither or both `control_denominator_outcomes` and `treated_denominator_outcomes`"
+            )
+        else:
+            control_estimator = classes[control_estimator_class or estimator_class](
                 propensity_scores=np.ones_like(control_propensity_scores)
                 - control_propensity_scores,
                 outcomes=control_outcomes,
                 estimand=control_estimand,
                 **control_kwargs_nn,
-            ),
-            treated_estimator=classes[treated_estimator_class or estimator_class](
+            )
+            treated_estimator = classes[treated_estimator_class or estimator_class](
                 propensity_scores=np.ones_like(treated_outcomes, dtype=np.float64),
                 outcomes=treated_outcomes,
                 estimand=treated_estimand,
                 **treated_kwargs_nn,
-            ),
+            )
+
+        super().__init__(
+            control_estimator=control_estimator,
+            treated_estimator=treated_estimator,
         )
 
 
@@ -2337,10 +2539,15 @@ class ATCEstimator(TreatmentEffectEstimator):
      control_sampling_propensity_scores, treated_sampling_propensity_scores : list_like, optional
         Propensity scores for the sampling mechanism for control and treatment groups,
         resp. See Notes.
-     sampling_estimand : ["PopulationMean", "NonRespondentMean", "SampleMean"], optional
+     sampling_estimand_class : ["PopulationMean", "NonRespondentMean", "SampleMean"], optional
         Population for which to estimate the average treatment effect. Used only when
         sampling propensity scores are specified. Defaults to "PopulationMean" in that
         case. See Notes.
+     control_denominator_outcomes, treated_denominator_outcomes : list_like, optional
+        If specified, the metric of interest is considered a ratio (with
+        `control_outcomes` and `treated_outcomes` are treated as the numerators), and
+        interest is in the effect of treatment on that ratio. See Notes in ATEEstimator
+        for details.
      control_kwargs, treated_kwargs, kwargs : dict_like
         Extra kwargs to pass to the estimators. `kwargs` are passed to both estimators,
         while `control_kwargs` is only passed to the control estimator and
@@ -2364,24 +2571,26 @@ class ATCEstimator(TreatmentEffectEstimator):
         treated_propensity_scores: list[float] | npt.NDArray[np.float64],
         treated_outcomes: list[float | int] | npt.NDArray[np.float64 | np.int64],
         estimator_class: Literal["IPW", "AIPW", "SIPW", "SAIPW"] = "SIPW",
-        control_estimator_class: Optional[
-            Literal["IPW", "AIPW", "SIPW", "SAIPW"]
-        ] = None,
-        treated_estimator_class: Optional[
-            Literal["IPW", "AIPW", "SIPW", "SAIPW"]
-        ] = None,
-        control_sampling_propensity_scores: Optional[
-            Union[List[float], npt.NDArray[np.float64]]
-        ] = None,
-        treated_sampling_propensity_scores: Optional[
-            Union[List[float], npt.NDArray[np.float64]]
-        ] = None,
+        control_estimator_class: Literal["IPW", "AIPW", "SIPW", "SAIPW"] | None = None,
+        treated_estimator_class: Literal["IPW", "AIPW", "SIPW", "SAIPW"] | None = None,
+        control_sampling_propensity_scores: (
+            list[float] | npt.NDArray[np.float64] | None
+        ) = None,
+        treated_sampling_propensity_scores: (
+            list[float] | npt.NDArray[np.float64] | None
+        ) = None,
         sampling_estimand_class: Literal[
             "PopulationMean", "NonRespondentMean", "SampleMean"
         ] = "PopulationMean",
-        control_kwargs: Optional[Dict[str, Any]] = None,
-        treated_kwargs: Optional[Dict[str, Any]] = None,
-        **kwargs,
+        control_denominator_outcomes: (
+            list[float | int] | npt.NDArray[np.float64 | np.int64] | None
+        ) = None,
+        treated_denominator_outcomes: (
+            list[float | int] | npt.NDArray[np.float64 | np.int64] | None
+        ) = None,
+        control_kwargs: dict[str, Any] | None = None,
+        treated_kwargs: dict[str, Any] | None = None,
+        **kwargs: Any,
     ) -> None:
         control_outcomes = np.asarray(control_outcomes)
         treated_propensity_scores = np.asarray(treated_propensity_scores)
@@ -2402,17 +2611,17 @@ class ATCEstimator(TreatmentEffectEstimator):
             "SAIPW": SAIPWEstimator,
         }
 
-        sampling_estimand_classes: Dict[
+        sampling_estimand_classes: dict[
             str,
-            Type[Union[PopulationMean, NonRespondentMean, SampleMean]],
+            Type[PopulationMean | NonRespondentMean | SampleMean],
         ] = {
             "PopulationMean": PopulationMean,
             "NonRespondentMean": NonRespondentMean,
             "SampleMean": SampleMean,
         }
-        sampling_estimand: Type[
-            Union[PopulationMean, NonRespondentMean, SampleMean]
-        ] = sampling_estimand_classes[sampling_estimand_class]
+        sampling_estimand: Type[PopulationMean | NonRespondentMean | SampleMean] = (
+            sampling_estimand_classes[sampling_estimand_class]
+        )
 
         if control_sampling_propensity_scores is None:
             control_estimand: Estimand = SampleMean(
@@ -2432,19 +2641,52 @@ class ATCEstimator(TreatmentEffectEstimator):
                 sampling_estimand(np.asarray(treated_sampling_propensity_scores)),
             )
 
-        super().__init__(
-            control_estimator=classes[control_estimator_class or estimator_class](
+        if (
+            control_denominator_outcomes is not None
+            and treated_denominator_outcomes is not None
+        ):
+            control_denominator_outcomes = np.asarray(control_denominator_outcomes)
+            treated_denominator_outcomes = np.asarray(treated_denominator_outcomes)
+            control_estimator = RatioEstimator(
+                propensity_scores=np.ones_like(control_outcomes, dtype=np.float64),
+                numerator_outcomes=control_outcomes,
+                denominator_outcomes=control_denominator_outcomes,
+                estimand=control_estimand,
+                estimator_class=(control_estimator_class or estimator_class),
+                **control_kwargs_nn,
+            )
+            treated_estimator = RatioEstimator(
+                propensity_scores=treated_propensity_scores,
+                numerator_outcomes=treated_outcomes,
+                denominator_outcomes=treated_denominator_outcomes,
+                estimand=treated_estimand,
+                estimator_class=(treated_estimator_class or estimator_class),
+                **treated_kwargs_nn,
+            )
+        elif (
+            control_denominator_outcomes is not None
+            or treated_denominator_outcomes is not None
+        ):
+            raise ValueError(
+                "Must specify neither or both `control_denominator_outcomes` and `treated_denominator_outcomes`"
+            )
+        else:
+            control_estimator = classes[control_estimator_class or estimator_class](
                 propensity_scores=np.ones_like(control_outcomes, dtype=np.float64),
                 outcomes=control_outcomes,
                 estimand=control_estimand,
                 **control_kwargs_nn,
-            ),
-            treated_estimator=classes[treated_estimator_class or estimator_class](
+            )
+            treated_estimator = classes[treated_estimator_class or estimator_class](
                 propensity_scores=treated_propensity_scores,
                 outcomes=treated_outcomes,
                 estimand=treated_estimand,
                 **treated_kwargs_nn,
-            ),
+            )
+
+        super().__init__(
+            control_estimator=control_estimator,
+            treated_estimator=treated_estimator,
         )
 
 
@@ -2493,12 +2735,12 @@ class TreatmentEffectRatioEstimator(WeightingEstimator):
         treatment_effect_estimator_class: Literal[
             "SimpleDifference", "ATE", "ATT", "ATC"
         ] = "ATE",
-        control_sampling_propensity_scores: Optional[
-            Union[List[float], npt.NDArray[np.float64]]
-        ] = None,
-        treated_sampling_propensity_scores: Optional[
-            Union[List[float], npt.NDArray[np.float64]]
-        ] = None,
+        control_sampling_propensity_scores: (
+            list[float] | npt.NDArray[np.float64] | None
+        ) = None,
+        treated_sampling_propensity_scores: (
+            list[float] | npt.NDArray[np.float64] | None
+        ) = None,
         sampling_estimand_class: Literal[
             "PopulationMean", "NonRespondentMean", "SampleMean"
         ] = "PopulationMean",
@@ -2560,25 +2802,39 @@ class TreatmentEffectRatioEstimator(WeightingEstimator):
     def variance(self) -> float:
         """Calculate the variance of the ratio estimator using the delta method."""
         # Numerator treatment effect and variance
+        numerator_control_estimator = self.numerator_estimator.control_estimator
+        denominator_control_estimator = self.denominator_estimator.control_estimator
+        numerator_treated_estimator = self.numerator_estimator.treated_estimator
+        denominator_treated_estimator = self.denominator_estimator.treated_estimator
+        if (
+            isinstance(numerator_control_estimator, RatioEstimator)
+            or isinstance(denominator_control_estimator, RatioEstimator)
+            or isinstance(numerator_treated_estimator, RatioEstimator)
+            or isinstance(denominator_treated_estimator, RatioEstimator)
+        ):
+            raise ValueError(
+                "Ratios of treatment effects of RatioEstimators not supported."
+            )
+
         mu_num = self.numerator_estimator.point_estimate()
         var_num = self.numerator_estimator.variance()
         mu_den = self.denominator_estimator.point_estimate()
         var_den = self.denominator_estimator.variance()
 
-        wc = self.numerator_estimator.control_estimator.weights
-        mu_num_c = self.numerator_estimator.control_estimator.point_estimate()
-        mu_den_c = self.denominator_estimator.control_estimator.point_estimate()
-        xc = self.numerator_estimator.control_estimator.outcomes
-        yc = self.denominator_estimator.control_estimator.outcomes
+        wc = numerator_control_estimator.weights
+        mu_num_c = numerator_control_estimator.point_estimate()
+        mu_den_c = denominator_control_estimator.point_estimate()
+        xc = numerator_control_estimator.outcomes
+        yc = denominator_control_estimator.outcomes
         cov_num_den_c = np.sum(np.square(wc) * (xc - mu_num_c) * (yc - mu_den_c)) / (
             np.sum(wc) ** 2.0
         )
 
-        wt = self.numerator_estimator.treated_estimator.weights
-        mu_num_t = self.numerator_estimator.treated_estimator.point_estimate()
-        mu_den_t = self.denominator_estimator.treated_estimator.point_estimate()
-        xt = self.numerator_estimator.treated_estimator.outcomes
-        yt = self.denominator_estimator.treated_estimator.outcomes
+        wt = numerator_treated_estimator.weights
+        mu_num_t = numerator_treated_estimator.point_estimate()
+        mu_den_t = denominator_treated_estimator.point_estimate()
+        xt = numerator_treated_estimator.outcomes
+        yt = denominator_treated_estimator.outcomes
         cov_num_den_t = np.sum(np.square(wt) * (xt - mu_num_t) * (yt - mu_den_t)) / (
             np.sum(wt) ** 2.0
         )

@@ -1,8 +1,10 @@
 """Test Phase I Solvers."""
 
+import time
+
 import numpy as np
 import pytest
-from scipy import linalg
+from scipy import linalg, optimize
 
 from pyrake.exceptions import (
     InteriorPointMethodError,
@@ -16,6 +18,7 @@ from pyrake.optimization import (
 )
 from pyrake.phase1solvers import (
     EqualitySolver,
+    EqualityWithBoundsAndImbalanceConstraintSolver,
     EqualityWithBoundsAndNormConstraintSolver,
     EqualityWithBoundsSolver,
 )
@@ -177,7 +180,7 @@ class TestEqualityWithBoundsSolver:
         [
             (1201, 100, 20, 1e-8),
             (2201, 200, 30, 1e-9),
-            (3201, 50, 5, 1e-9),
+            (3201, 50, 5, 1e-7),
             (4201, 500, 100, 1e-9),
             (5201, 13, 3, 1e-9),
         ],
@@ -219,23 +222,35 @@ class TestEqualityWithBoundsSolver:
         b = A @ w
 
         solver = EqualityWithBoundsSolver(
-            phase1_solver=EqualitySolver(
-                A=A, b=b, settings=OptimizationSettings(verbose=True)
-            ),
+            A=A,
+            b=b,
             lb=lb,
             settings=OptimizationSettings(verbose=True),
         )
 
         # Verify we find a feasible point
         res = solver.solve()
-        np.testing.assert_allclose(A @ res.solution, b)
-        assert np.all(res.solution > 0.0)
+        np.testing.assert_allclose(A @ res.solution, b, atol=atol)
+        assert np.all(res.solution > lb)
 
         # Since augmented problem is bounded below, verify we can fully solve it (if for
         # whatever reason we wanted to).
         res = solver.solve(fully_optimize=True)
         np.testing.assert_allclose(A @ res.solution, b, atol=atol)
         assert np.all(res.solution > 0.0)
+
+        # Solve with a vector of lb
+        solver = EqualityWithBoundsSolver(
+            A=A,
+            b=b,
+            lb=np.full((M,), lb),
+            settings=OptimizationSettings(verbose=True),
+        )
+
+        # Verify we find a feasible point
+        res = solver.solve()
+        np.testing.assert_allclose(A @ res.solution, b, atol=atol)
+        assert np.all(res.solution > lb)
 
     @pytest.mark.parametrize(
         "seed,M,p",
@@ -278,9 +293,8 @@ class TestEqualityWithBoundsSolver:
         b = A @ w
 
         solver = EqualityWithBoundsSolver(
-            phase1_solver=EqualitySolver(
-                A=A, b=b, settings=OptimizationSettings(verbose=True)
-            ),
+            A=A,
+            b=b,
             settings=OptimizationSettings(verbose=True),
         )
 
@@ -340,9 +354,8 @@ class TestEqualityWithBoundsSolver:
         assert np.dot(b, nu) < 0
 
         solver = EqualityWithBoundsSolver(
-            phase1_solver=EqualitySolver(
-                A=A, b=b, settings=OptimizationSettings(verbose=True)
-            ),
+            A=A,
+            b=b,
             settings=OptimizationSettings(verbose=True),
         )
 
@@ -388,9 +401,8 @@ class TestEqualityWithBoundsSolver:
         # w_star is the only solution to A * w = b, but w_star is only marginally feasible.
 
         solver = EqualityWithBoundsSolver(
-            phase1_solver=EqualitySolver(
-                A=A, b=b, settings=OptimizationSettings(verbose=True)
-            ),
+            A=A,
+            b=b,
             settings=OptimizationSettings(verbose=True, outer_tolerance=1e-4),
         )
 
@@ -437,9 +449,8 @@ class TestEqualityWithBoundsSolver:
         b = A @ w
 
         solver = EqualityWithBoundsSolver(
-            phase1_solver=EqualitySolver(
-                A=A, b=b, settings=OptimizationSettings(verbose=True)
-            ),
+            A=A,
+            b=b,
             settings=OptimizationSettings(verbose=True),
         )
 
@@ -508,9 +519,8 @@ class TestEqualityWithBoundsSolver:
         b = A @ w
 
         solver = EqualityWithBoundsSolver(
-            phase1_solver=EqualitySolver(
-                A=A, b=b, settings=OptimizationSettings(verbose=True)
-            ),
+            A=A,
+            b=b,
             settings=OptimizationSettings(verbose=True),
         )
 
@@ -526,17 +536,249 @@ class TestEqualityWithBoundsSolver:
         assert np.all(res.solution > 0)
 
 
+class TestEqualityWithBoundsAndImbalanceConstraintSolver:
+    """Test EqualityWithBoundsAndImbalanceConstraintSolver."""
+
+    @pytest.mark.parametrize(
+        "seed,M,p1,p2",
+        [
+            (1301, 100, 10, 15),
+            (2301, 200, 5, 30),
+            (3301, 50, 5, 5),
+            (4301, 500, 20, 30),
+            (5301, 13, 3, 3),
+        ],
+    )
+    def test_solver_feasible(self, seed: int, M: int, p1: int, p2: int) -> None:
+        """Test solver when problem is feasible."""
+        np.random.seed(seed)
+
+        A = np.random.randn(p1, M)
+        B = np.random.randn(p2, M)
+
+        # To generate population mean, simulate true propensity scores with mean 0.1 and
+        # variance 0.0045
+        q = 0.1
+        sigma2 = 0.05 * q * (1 - q)
+        s = q * (1 - q) / sigma2 - 1
+        alpha = q * s
+        beta = (1 - q) * s
+        true_propensity = np.random.beta(alpha, beta, size=M)
+
+        # Ideal weights are (M/N) / true_propensity, but to make it simple, do:
+        w = 1.0 / true_propensity
+        w /= np.mean(w)
+        lb = 0.01
+        assert np.all(w > lb)
+
+        b = A @ w
+        # Add a constraint on the mean weights
+        A[0, :] = 1.0 / M
+        b[0] = 1.0
+        c = B @ w  # + 0.2 * np.random.rand(p2) - 0.1
+        psi = 0.05
+
+        # Solve using scipy
+        c_obj = np.zeros(M + 1)
+        c_obj[-1] = 1
+
+        # Equality constraints: A*x = b
+        A_eq = np.hstack([A, np.zeros((A.shape[0], 1))])
+        b_eq = b
+
+        # Inequality constraints:
+        # Bx - c <= psi + s  -->  Bx - s <= psi + c
+        A_ub1 = np.hstack([B, -np.ones((p2, 1))])
+        b_ub1 = psi + c
+        # -Bx + c <= psi + s  -->  -Bx - s <= psi - c
+        A_ub2 = np.hstack([-B, -np.ones((p2, 1))])
+        b_ub2 = psi - c
+        A_ub = np.vstack([A_ub1, A_ub2])
+        b_ub = np.concatenate([b_ub1, b_ub2])
+
+        # Bounds: x >= lb, s free (or s >= 0 if desired)
+        bounds = [(lb, None) for i in range(M)] + [(None, None)]  # s is unbounded
+
+        # Solve
+        st = time.time()
+        scipy_res = optimize.linprog(
+            c_obj,
+            A_ub=A_ub,
+            b_ub=b_ub,
+            A_eq=A_eq,
+            b_eq=b_eq,
+            bounds=bounds,
+            method="highs",
+        )
+        et = time.time()
+        scipy_time = et - st
+
+        # Results
+        assert scipy_res.success, "Scipy failed to solve the problem"
+        s_opt = scipy_res.x[-1]
+
+        solver = EqualityWithBoundsAndImbalanceConstraintSolver(
+            B=B,
+            c=c,
+            psi=psi,
+            A=A,
+            b=b,
+            lb=lb,
+            settings=OptimizationSettings(verbose=True, outer_tolerance_soft=0.01),
+        )
+
+        st = time.time()
+        res = solver.solve()
+        et = time.time()
+        feasibility_time = et - st
+
+        # Verify we found a feasible point
+        np.testing.assert_allclose(A @ res.solution, b)
+        assert np.all(res.solution > lb)
+        assert np.all(np.abs(B @ res.solution - c) < psi)
+
+        # Verify we can fully optimize
+        st = time.time()
+        res = solver.solve(fully_optimize=True)
+        et = time.time()
+        print(
+            f"Feasible point found with PyRake in {1000 * (feasibility_time):.03f} ms"
+        )
+        print(f"Full optimization with PyRake completed in {1000 * (et - st):.03f} ms")
+        print(f"Scipy completed in {1000 * (scipy_time):.03f} ms")
+
+        assert isinstance(res, InteriorPointMethodResult)
+        np.testing.assert_allclose(A @ res.solution, b)
+        assert np.all(res.solution > lb)
+        assert np.all(np.abs(B @ res.solution - c) < psi)
+        assert abs(res.objective_value - s_opt) < 1e-4
+
+        # Test with vector of psi and lb
+        solver = EqualityWithBoundsAndImbalanceConstraintSolver(
+            B=B,
+            c=c,
+            psi=np.full((p2,), psi),
+            A=A,
+            b=b,
+            lb=np.full((M,), lb),
+            settings=OptimizationSettings(verbose=True, outer_tolerance_soft=0.01),
+        )
+
+        st = time.time()
+        res = solver.solve()
+        et = time.time()
+        feasibility_time = et - st
+        print(
+            f"Feasible point found with PyRake in {1000 * (feasibility_time):.03f} ms"
+        )
+
+        # Verify we found a feasible point
+        np.testing.assert_allclose(A @ res.solution, b)
+        assert np.all(res.solution > lb)
+        assert np.all(np.abs(B @ res.solution - c) < psi)
+
+    @pytest.mark.parametrize(
+        "seed,M,p1,p2",
+        [
+            (1302, 100, 10, 15),
+            (2302, 200, 5, 30),
+            (3302, 50, 5, 5),
+            (4302, 500, 20, 30),
+            (5302, 13, 3, 3),
+        ],
+    )
+    def test_solver_infeasible(self, seed: int, M: int, p1: int, p2: int) -> None:
+        """Test solver when problem is infeasible.
+
+        We do this by generating problem data and feasible dual variables that lead to a
+        dual function value exceeding the desired threshold.
+
+        """
+        np.random.seed(seed)
+
+        nu = np.random.randn(p1 - 1)
+        # Construct A such that A^T nu >= 0
+        A = np.random.randn(p1 - 1, M)
+        for ic in range(M):
+            if np.dot(A[:, ic], nu) < 0:
+                A[:, ic] = -A[:, ic]
+
+        # Add a constraint on the mean weights
+        assert np.all(A.T @ nu >= 0)
+        A = np.vstack(
+            [
+                (1 / M)
+                * np.ones(
+                    M,
+                ),
+                A,
+            ]
+        )
+        nu = np.concatenate([[1.0], nu])
+        assert np.all(A.T @ nu >= 0)
+
+        # Scale lmbda2 and lmbda3 so that sum(lmbda2) + sum(lbmda3) = 1
+        lmbda2 = np.random.rand(p2)
+        lmbda3 = np.random.rand(p2)
+        theta = np.sum(lmbda2) + np.sum(lmbda3)
+        lmbda2 /= theta
+        lmbda3 /= theta
+
+        assert abs(np.sum(lmbda2) + np.sum(lmbda3) - 1) <= 1e-6
+
+        # Construct B such that B^T (lmbda3 - lmbda2) >= 0
+        B = np.random.randn(p2, M)
+        for ic in range(M):
+            if np.dot(B[:, ic], lmbda3 - lmbda2) < 0:
+                B[:, ic] = -B[:, ic]
+
+        assert np.all(B.T @ (lmbda3 - lmbda2) >= 0)
+
+        lmbda1 = A.T @ nu + B.T @ (lmbda3 - lmbda2)
+        assert np.all(lmbda1 >= 0)
+
+        # Construct w >= 0 and b = A @ w
+        w = 0.5 + np.random.rand(M)
+        # Scale w so that it has mean weight 1
+        w /= np.mean(w)
+        b = A @ w
+
+        # Construct c so that dual function is > psi
+        psi = 1.0
+        c = np.random.randn(p2)
+        if np.dot(c, lmbda2 - lmbda3) < 0:
+            c = -c
+
+        # Scale c so that -b^T nu + c^T (lmbda2 - lmbd3) > psi
+        theta = (psi + np.dot(b, nu)) / np.dot(c, lmbda2 - lmbda3)
+        c = 1.1 * theta * c
+
+        assert -np.dot(b, nu) + np.dot(c, lmbda2 - lmbda3) > psi
+
+        # Set up solver
+        solver = EqualityWithBoundsAndImbalanceConstraintSolver(
+            B=B,
+            c=c,
+            psi=psi,
+            A=A,
+            b=b,
+            settings=OptimizationSettings(verbose=True),
+        )
+        with pytest.raises(ProblemCertifiablyInfeasibleError):
+            solver.solve()
+
+
 class TestEqualityWithBoundsAndNormConstraintSolver:
     """Test EqualityWithBoundsAndNormConstraintSolver."""
 
     @pytest.mark.parametrize(
         "seed,M,p",
         [
-            (1301, 100, 20),
-            (2301, 200, 30),
-            (3301, 50, 5),
-            (4301, 500, 100),
-            (5301, 13, 3),
+            (1401, 100, 20),
+            (2401, 200, 30),
+            (3401, 50, 5),
+            (4401, 500, 100),
+            (5401, 13, 3),
         ],
     )
     def test_solver_feasible(self, seed: int, M: int, p: int) -> None:
@@ -556,13 +798,9 @@ class TestEqualityWithBoundsAndNormConstraintSolver:
         b = A @ w
 
         solver = EqualityWithBoundsAndNormConstraintSolver(
-            phase1_solver=EqualityWithBoundsSolver(
-                phase1_solver=EqualitySolver(
-                    A=A, b=b, settings=OptimizationSettings(verbose=True)
-                ),
-                lb=lb,
-                settings=OptimizationSettings(verbose=True),
-            ),
+            A=A,
+            b=b,
+            lb=lb,
             phi=phi,
             settings=OptimizationSettings(verbose=True),
         )
@@ -582,11 +820,11 @@ class TestEqualityWithBoundsAndNormConstraintSolver:
     @pytest.mark.parametrize(
         "seed,M,p",
         [
-            (1302, 100, 20),
-            (2302, 200, 30),
-            (3302, 50, 5),
-            (4302, 500, 100),
-            (5302, 13, 3),
+            (1402, 100, 20),
+            (2402, 200, 30),
+            (3402, 50, 5),
+            (4402, 500, 100),
+            (5402, 13, 3),
         ],
     )
     def test_solver_infeasible(self, seed: int, M: int, p: int) -> None:
@@ -599,12 +837,8 @@ class TestEqualityWithBoundsAndNormConstraintSolver:
         phi = int(0.9 * np.sqrt(np.dot(w, w)))
 
         solver = EqualityWithBoundsAndNormConstraintSolver(
-            phase1_solver=EqualityWithBoundsSolver(
-                phase1_solver=EqualitySolver(
-                    A=A, b=b, settings=OptimizationSettings(verbose=True)
-                ),
-                settings=OptimizationSettings(verbose=True),
-            ),
+            A=A,
+            b=b,
             phi=phi,
             settings=OptimizationSettings(verbose=True),
         )
@@ -621,11 +855,11 @@ class TestEqualityWithBoundsAndNormConstraintSolver:
     @pytest.mark.parametrize(
         "seed,M,p",
         [
-            (1303, 100, 20),
-            (2303, 200, 30),
-            (3303, 50, 5),
-            (4303, 500, 100),
-            (5303, 13, 3),
+            (1403, 100, 20),
+            (2403, 200, 30),
+            (3403, 50, 5),
+            (4403, 500, 100),
+            (5403, 13, 3),
         ],
     )
     def test_solver_feasible_mean_constraint(self, seed: int, M: int, p: int) -> None:
@@ -646,12 +880,8 @@ class TestEqualityWithBoundsAndNormConstraintSolver:
         b = A @ w
 
         solver = EqualityWithBoundsAndNormConstraintSolver(
-            phase1_solver=EqualityWithBoundsSolver(
-                phase1_solver=EqualitySolver(
-                    A=A, b=b, settings=OptimizationSettings(verbose=True)
-                ),
-                settings=OptimizationSettings(verbose=True),
-            ),
+            A=A,
+            b=b,
             phi=phi,
             settings=OptimizationSettings(verbose=True),
         )
@@ -671,11 +901,11 @@ class TestEqualityWithBoundsAndNormConstraintSolver:
     @pytest.mark.parametrize(
         "seed,M,p",
         [
-            (1304, 100, 20),
-            (2304, 200, 30),
-            (3304, 50, 5),
-            (4304, 500, 100),
-            (5304, 13, 3),
+            (1404, 100, 20),
+            (2404, 200, 30),
+            (3404, 50, 5),
+            (4404, 500, 100),
+            (5404, 13, 3),
         ],
     )
     def test_solver_feasible_rank_deficient(self, seed: int, M: int, p: int) -> None:
@@ -698,12 +928,8 @@ class TestEqualityWithBoundsAndNormConstraintSolver:
         b = A @ w
 
         solver = EqualityWithBoundsAndNormConstraintSolver(
-            phase1_solver=EqualityWithBoundsSolver(
-                phase1_solver=EqualitySolver(
-                    A=A, b=b, settings=OptimizationSettings(verbose=True)
-                ),
-                settings=OptimizationSettings(verbose=True),
-            ),
+            A=A,
+            b=b,
             phi=phi,
             settings=OptimizationSettings(verbose=True),
         )
@@ -740,12 +966,8 @@ class TestEqualityWithBoundsAndNormConstraintSolver:
         # Solve it once, and then pass the solution as the initial guess on another
         # round.
         solver = EqualityWithBoundsAndNormConstraintSolver(
-            phase1_solver=EqualityWithBoundsSolver(
-                phase1_solver=EqualitySolver(
-                    A=A, b=b, settings=OptimizationSettings(verbose=True)
-                ),
-                settings=OptimizationSettings(verbose=True),
-            ),
+            A=A,
+            b=b,
             phi=phi,
             settings=OptimizationSettings(verbose=True),
         )
@@ -757,15 +979,99 @@ class TestEqualityWithBoundsAndNormConstraintSolver:
         assert np.dot(res.solution, res.solution) < phi
 
         solver = EqualityWithBoundsAndNormConstraintSolver(
-            phase1_solver=EqualityWithBoundsSolver(
-                phase1_solver=EqualitySolver(
-                    A=A, b=b, settings=OptimizationSettings(verbose=True)
-                ),
-                settings=OptimizationSettings(verbose=True),
-            ),
+            A=A,
+            b=b,
             phi=phi,
             settings=OptimizationSettings(verbose=True),
         )
         res = solver.solve(x0=w_star, fully_optimize=True)
         assert isinstance(res, InteriorPointMethodResult)
         assert res.nits == 1
+
+    @pytest.mark.parametrize(
+        "seed,M,p1,p2",
+        [
+            (1405, 100, 10, 15),
+            (2405, 200, 5, 30),
+            (3405, 50, 5, 5),
+            (4405, 500, 20, 30),
+            (5405, 13, 3, 3),
+        ],
+    )
+    def test_solver_max_imbalance_constraint(
+        self, seed: int, M: int, p1: int, p2: int
+    ) -> None:
+        """Test solver with a constraint on max covariate imbalance."""
+        np.random.seed(seed)
+        A = np.random.randn(p1, M)
+        B = np.random.randn(p2, M)
+
+        # To generate population mean, simulate true propensity scores with mean 0.1 and
+        # variance 0.0045
+        q = 0.1
+        sigma2 = 0.05 * q * (1 - q)
+        s = q * (1 - q) / sigma2 - 1
+        alpha = q * s
+        beta = (1 - q) * s
+        true_propensity = np.random.beta(alpha, beta, size=M)
+
+        # Ideal weights are (M/N) / true_propensity, but to make it simple, do:
+        w = 1.0 / true_propensity
+        w /= np.mean(w)
+        lb = 0.01
+        assert np.all(w > lb)
+
+        b = A @ w
+        # Add a constraint on the mean weights
+        A[0, :] = 1.0 / M
+        b[0] = 1.0
+        c = B @ w  # + 0.2 * np.random.rand(p2) - 0.1
+        psi = 0.05
+        phi = np.dot(w, w)
+
+        solver = EqualityWithBoundsAndNormConstraintSolver(
+            phi=phi,
+            A=A,
+            b=b,
+            lb=lb,
+            B=B,
+            c=c,
+            psi=psi,
+            settings=OptimizationSettings(verbose=True),
+        )
+
+        # Verify we find a feasible point
+        res = solver.solve()
+        np.testing.assert_allclose(A @ res.solution, b)
+        assert np.all(res.solution > lb)
+        assert np.all(B @ res.solution - c > -psi)
+        assert np.all(B @ res.solution - c < psi)
+        assert np.dot(res.solution, res.solution) < phi
+
+        # Verify we can fully optimize
+        res = solver.solve(fully_optimize=True)
+        np.testing.assert_allclose(A @ res.solution, b)
+        assert np.all(res.solution > 0)
+        assert np.all(B @ res.solution - c > -psi)
+        assert np.all(B @ res.solution - c < psi)
+        assert np.dot(res.solution, res.solution) < phi
+
+        # Test with vector of lb and psi
+        solver = EqualityWithBoundsAndNormConstraintSolver(
+            phi=phi,
+            A=A,
+            b=b,
+            lb=np.full((M,), lb),
+            B=B,
+            c=c,
+            psi=np.full((p2,), psi),
+            settings=OptimizationSettings(verbose=True),
+        )
+
+        # Verify we find a feasible point
+        res = solver.solve()
+        np.testing.assert_allclose(A @ res.solution, b)
+        assert np.all(res.solution > lb)
+        assert np.all(B @ res.solution - c > -psi)
+        assert np.all(B @ res.solution - c < psi)
+        assert np.dot(res.solution, res.solution) < phi

@@ -45,7 +45,7 @@ from .optimization import (
     ProblemCertifiablyInfeasibleError,
     ProblemMarginallyFeasibleError,
 )
-from .rake import Rake
+from .rake import JointCalibrator, Rake
 from .visualizations import (
     meta_analysis,
     plot_balance,
@@ -54,6 +54,7 @@ from .visualizations import (
 
 __all__ = [
     "Rake",
+    "JointCalibrator",
     "Estimand",
     "PopulationMean",
     "NonRespondentMean",

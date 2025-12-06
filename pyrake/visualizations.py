@@ -286,6 +286,8 @@ def plot_balance_2_sample(
     covariates: list[str],
     weights1: dict[str, npt.NDArray],
     weights2: dict[str, npt.NDArray],
+    sigma1: npt.NDArray | None = None,
+    sigma2: npt.NDArray | None = None,
     signed: bool = True,
     title: str | None = None,
     quantify_imbalance: bool = True,
@@ -295,19 +297,11 @@ def plot_balance_2_sample(
 ) -> tuple[pd.DataFrame, Axes]:
     r"""Plot z-statistics for covariates.
 
-    If we were testing the null hypothesis that the sample average equals the (known)
-    population average, then the z-statistic for each covariate would be:
-       (1/M) * X_i^T * w - mu
-       ----------------------,
-           sqrt(sigma^2)
-    where X_i is the vector for feature i and sigma^2 is the estimated variance of
-        (1/M) * X_i^T * w = (1/M^2) * \sum_j w_j^2 (X_ij - nu_i)^2.
-    If X is whitened, (X_ij - nu_i)^2 = 1 for all i, so this is
-    sigma^2 = (1 / M) * mean squared weight. When mean squared weight is 1 (like with a
-    simple average), sigma^2 = 1 / M and the z-statistic is:
-       sqrt(M) * ((1/M) * X_i^T * w - mu)
-    In order to have a consistent notion of balance across all weights (regardless of
-    mean-square), this is the formula we use.
+    If we were testing the null hypothesis that the two populations have equal covariate
+    averages, then the z-statistic for each covariate would be:
+       (1/M2) * X2^T * w2 - (1/M1) * X1^T * w1
+       ---------------------------------------.
+         sqrt(sigma1^2 / M1 + sigma2^2 / M2)
 
     Parameters
     ----------
@@ -317,6 +311,12 @@ def plot_balance_2_sample(
         Feature names.
      weights1, weights2 : Dict[str, array]
         One or more sets of weights.
+     sigma1, sigma2 : npt.NDArray, optional
+        Square root of variances for each population, for putting all covariates on the
+        same scale. The exact values to pass here depend on context, so use judgment
+        about which z-statistic you want to calculate. The key here is to use the same
+        variances regardless of which weights are applied, so you could use variances of
+        each sample, or variances of the respective populations.
      signed : bool, optional
         If True (default), plot the signed z-statistics. Otherwise, plot the two-sided
         z-statistics, which are always >= 0. This results in more condensed plots.
@@ -364,14 +364,23 @@ def plot_balance_2_sample(
     if title is None:
         title = "Covariate Balance with Target Population"
 
+    if X1.shape[1] != X2.shape[1]:
+        raise ValueError("X1 and X2 must have the same columns")
+
     M1 = X1.shape[0]
     M2 = X2.shape[0]
+
+    if sigma1 is None:
+        sigma1 = np.ones((X1.shape[1],))
+
+    if sigma2 is None:
+        sigma2 = np.ones((X2.shape[1],))
 
     df_balance = (
         pd.DataFrame(
             {
                 k: ((1 / M2) * (X2.T @ w2) - (1 / M1) * (X1.T @ weights1[k]))
-                / np.sqrt(1.0 / M1 + 1.0 / M2)
+                / np.sqrt(np.square(sigma1) / M1 + np.square(sigma2) / M2)
                 for k, w2 in weights2.items()
             },
             index=covariates,
@@ -472,7 +481,7 @@ def meta_analysis(
     -------
      point_estimate : float
          Combined point estimate.
-     confidence_interval : Tuple[float, float]
+     confidence_interval : tuple[float, float]
          Combined confidence interval.
      ax : Axes
          The figure.

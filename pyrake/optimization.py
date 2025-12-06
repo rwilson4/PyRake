@@ -3,7 +3,7 @@
 import time
 from abc import ABC, abstractmethod, abstractproperty
 from dataclasses import dataclass
-from typing import Literal, Optional
+from typing import Any, Literal, Type
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -33,7 +33,7 @@ class OptimizationSettings:
         The tolerance level for convergence of the overall optimization problem. It
         controls how close the solution must be to the actual optimal point in terms of
         the objective function value.
-    outer_tolerance_soft : float, default=1e-4
+    outer_tolerance_soft : float, default=1e-3
         Interior Point Methods can struggle to solve problems to high accuracy, and a
         medium accuracy solution is often acceptable. Still, if we're able to solve the
         problem to high accuracy, we'll try to do so. `other_tolerance_soft` is the
@@ -185,6 +185,7 @@ class InteriorPointMethodResult(OptimizationResult):
     inner_suboptimalities: list[list[float]]
     status: Literal[0, 1, 2]
     message: str
+    phase1_res: OptimizationResult | None = None
 
     def plot_convergence(self, ax: Axes | None = None) -> Axes:
         """Plot convergence."""
@@ -250,9 +251,9 @@ class Optimizer(ABC):
 
     def __init__(
         self,
-        phase1_solver: Optional["PhaseISolver"] = None,
+        phase1_solver: Type["PhaseISolver"] | None = None,
         settings: OptimizationSettings | None = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> None:
         """Initialize optimizer."""
         self.phase1_solver = phase1_solver
@@ -273,7 +274,7 @@ class Optimizer(ABC):
     def solve(
         self,
         x0: npt.NDArray[np.float64] | None = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> OptimizationResult:
         """Solve optimization problem.
 
@@ -298,7 +299,7 @@ class PhaseISolver(Optimizer):
         self,
         x0: npt.NDArray[np.float64] | None = None,
         fully_optimize: bool = False,
-        **kwargs,
+        **kwargs: Any,
     ) -> OptimizationResult:
         """Solve optimization problem.
 
@@ -323,9 +324,9 @@ class BaseInteriorPointMethodSolver(Optimizer):
 
     def __init__(
         self,
-        phase1_solver: Optional["PhaseISolver"] = None,
+        phase1_solver: Type[PhaseISolver] | None = None,
         settings: OptimizationSettings | None = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> None:
         """Initialize optimizer."""
         self.phase1_solver = phase1_solver
@@ -338,7 +339,7 @@ class BaseInteriorPointMethodSolver(Optimizer):
         self,
         x0: npt.NDArray[np.float64] | None = None,
         fully_optimize: bool = False,
-        **kwargs,
+        **kwargs: Any,
     ) -> OptimizationResult:
         r"""Solve optimization problem.
 
@@ -375,7 +376,9 @@ class BaseInteriorPointMethodSolver(Optimizer):
         # Applicable only for Phase I methods.
         if not fully_optimize and self.is_feasible(x):
             if self.settings.verbose:
-                print("  Phase I solution was feasible so we're done")
+                print(
+                    f"  Phase I solution was feasible so we're done ({self.__class__.__name__})"
+                )
             return phase1_res
 
         t = self.initialize_barrier_parameter(x0=x)
@@ -393,7 +396,7 @@ class BaseInteriorPointMethodSolver(Optimizer):
         )
         if self.settings.verbose:
             overall_start_time = time.time()
-            print("  Starting IPM")
+            print(f"  Starting IPM ({self.__class__.__name__})")
 
         inner_nits = []
         inner_suboptimalities = []
@@ -420,7 +423,7 @@ class BaseInteriorPointMethodSolver(Optimizer):
                 suboptimality = (
                     self.num_ineq_constraints * self.settings.barrier_multiplier / t
                 )
-                if suboptimality < self.settings.outer_tolerance_soft:
+                if nit > 1 and suboptimality < self.settings.outer_tolerance_soft:
                     # Convergence was good enough
                     x = e.last_iterate
                     status = 1
@@ -428,17 +431,14 @@ class BaseInteriorPointMethodSolver(Optimizer):
                         "Interior Point Method reached an acceptable precision but "
                         f"then ran into numerical difficulties -- {e.__str__()}"
                     )
-                    if (
-                        e.equality_multipliers is not None
-                        and e.inequality_multipliers is not None
-                    ):
-                        equality_multipliers = e.equality_multipliers
-                        inequality_multipliers = e.inequality_multipliers
+                    nu = e.equality_multipliers
+                    lmbda = e.inequality_multipliers
+                    if nu is not None and lmbda is not None:
                         duality_gaps.append(
                             self.evaluate_objective(x)
                             - self.evaluate_dual(
-                                lmbda=e.inequality_multipliers,
-                                nu=e.equality_multipliers,
+                                lmbda=lmbda,
+                                nu=nu,
                                 x_star=x,
                             )
                         )
@@ -491,6 +491,7 @@ class BaseInteriorPointMethodSolver(Optimizer):
             print(
                 f"  IPM completed in "
                 f"{1000 * (overall_end_time - overall_start_time):.03f} ms"
+                f" ({self.__class__.__name__})"
             )
 
         # Applicable only for Phase I methods.
@@ -523,12 +524,13 @@ class BaseInteriorPointMethodSolver(Optimizer):
             inner_suboptimalities=inner_suboptimalities,
             status=status,
             message=message,
+            phase1_res=phase1_res,
         )
 
     def augment_previous_solution(
         self,
         phase1_res: OptimizationResult,
-        **kwargs,
+        **kwargs: Any,
     ) -> npt.NDArray[np.float64]:
         """Initialize variable based on Phase I result."""
         return phase1_res.solution
@@ -562,7 +564,7 @@ class BaseInteriorPointMethodSolver(Optimizer):
         t: float,
         last_step: bool,
         fully_optimize: bool = False,
-        **kwargs,
+        **kwargs: Any,
     ) -> NewtonResult:
         r"""Solve centering step.
 
@@ -898,11 +900,24 @@ class BaseInteriorPointMethodSolver(Optimizer):
         """
         pass
 
-    @abstractmethod
     def btls_keep_feasible(
         self, x: npt.NDArray[np.float64], delta_x: npt.NDArray[np.float64]
     ) -> float:
-        """Make sure x + btls_s * delta_x stays strictly feasible."""
+        """Make sure x + btls_s * delta_x stays strictly feasible.
+
+        This is provided as a convenience function, but it's typically possible to speed
+        up this calculation by providing a custom implementation.
+
+        """
+        btls_s = 1.0
+        while np.any(self.constraints(x + btls_s * delta_x) >= 0):
+            btls_s *= self.settings.backtracking_beta
+            if btls_s < self.settings.backtracking_min_step:
+                raise ConstraintBoundaryError(
+                    message="Descent step takes us too close to constraint boundaries.",
+                )
+
+        return btls_s
 
     @abstractmethod
     def evaluate_objective(self, x: npt.NDArray[np.float64]) -> float:
@@ -919,16 +934,7 @@ class BaseInteriorPointMethodSolver(Optimizer):
     def gradient_barrier(
         self, x: npt.NDArray[np.float64], t: float
     ) -> npt.NDArray[np.float64]:
-        """Calculate gradient of ft at x.
-
-        This is provided as a convenience, but this implementation involves a M-by-q
-        matrix multiply, where M is the number of variables and q the number of
-        constraints. As such, it ends up being one of the more expensive operations in
-        the whole codebase. A custom implementation that takes into account the special
-        structure of the problem can often get this down to O(M) time, rather than
-        O(M*q).
-
-        """
+        """Calculate gradient of ft at x."""
         return t * self.gradient(x) - (
             self.grad_constraints_transpose_multiply(x, 1.0 / self.constraints(x))
         )
@@ -1013,7 +1019,7 @@ class InteriorPointMethodSolver(BaseInteriorPointMethodSolver):
         self,
         x0: npt.NDArray[np.float64] | None = None,
         fully_optimize: bool = False,
-        **kwargs,
+        **kwargs: Any,
     ) -> InteriorPointMethodResult:
         r"""Solve optimization problem.
 
@@ -1056,9 +1062,9 @@ class PhaseIInteriorPointSolver(BaseInteriorPointMethodSolver, PhaseISolver):
 
     def __init__(
         self,
-        phase1_solver: Optional["PhaseISolver"] = None,
+        phase1_solver: Type[PhaseISolver] | None = None,
         settings: OptimizationSettings | None = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> None:
         """Initialize optimizer."""
         super().__init__(phase1_solver=phase1_solver, settings=settings, **kwargs)
@@ -1067,7 +1073,7 @@ class PhaseIInteriorPointSolver(BaseInteriorPointMethodSolver, PhaseISolver):
         self,
         x0: npt.NDArray[np.float64] | None = None,
         fully_optimize: bool = False,
-        **kwargs,
+        **kwargs: Any,
     ) -> OptimizationResult:
         r"""Solve optimization problem.
 

@@ -2,17 +2,18 @@
 
 import time
 from functools import cache
-from typing import Optional
+from typing import Any
 
 import numpy as np
 import numpy.typing as npt
 from scipy import linalg
 
-from .exceptions import ProblemInfeasibleError
+from .exceptions import NewtonStepError, ProblemInfeasibleError
 from .numerical_helpers import (
-    solve_arrow_sparsity_pattern_phase1,
+    solve_block_plus_one,
     solve_diagonal_eta_inverse,
     solve_kkt_system,
+    solve_rank_p_update,
 )
 from .optimization import (
     EqualityConstrainedInteriorPointMethodSolver,
@@ -32,10 +33,13 @@ class EqualitySolver(PhaseISolver):
         self,
         A: npt.NDArray[np.float64],
         b: npt.NDArray[np.float64],
-        phase1_solver: Optional["PhaseISolver"] = None,
         settings: OptimizationSettings | None = None,
     ) -> None:
-        super().__init__(phase1_solver=phase1_solver, settings=settings)
+        if settings is None:
+            self.settings: OptimizationSettings = OptimizationSettings()
+        else:
+            self.settings = settings
+
         p, _ = A.shape
         assert len(b.shape) == 1
         assert b.shape[0] == p
@@ -56,7 +60,7 @@ class EqualitySolver(PhaseISolver):
         self,
         x0: npt.NDArray[np.float64] | None = None,
         fully_optimize: bool = False,
-        **kwargs,
+        **kwargs: Any,
     ) -> OptimizationResult:
         r"""Solve A * x = b.
 
@@ -205,10 +209,14 @@ class EqualityWithBoundsSolver(PhaseIInteriorPointSolver):
 
     Parameters
     ----------
-     lb : float, optional
+     phase1_solver : EqualitySolver, optional
+        This class requires a Phase I solver for the equality constraints, and there are
+        two ways of generating this. The user can either pass an EqualitySolver, or pass
+        A and b and an EqualitySolver will be initialized.
+     A, b : npt.NDArray
+        Equality constraints: A * x = b. Required when phase1_solver is None.
+     lb : float or list[float], optional
         Lower bound on elements of x. Defaults to 0.
-     phase1_solver : EqualitySolver
-        A solver for A * x = b.
      settings : OptimizationSettings
         Optimization settings.
 
@@ -216,14 +224,20 @@ class EqualityWithBoundsSolver(PhaseIInteriorPointSolver):
 
     def __init__(
         self,
-        lb: float = 0.0,
         phase1_solver: EqualitySolver | None = None,
+        A: npt.NDArray[np.float64] | None = None,
+        b: npt.NDArray[np.float64] | None = None,
+        lb: float | list[float] | npt.NDArray[np.float64] = 0.0,
         settings: OptimizationSettings | None = None,
     ) -> None:
-        if phase1_solver is None:
-            raise ValueError("phase1_solver is required.")
-
-        super().__init__(phase1_solver=phase1_solver, settings=settings)
+        if phase1_solver is not None:
+            super().__init__(phase1_solver=phase1_solver, settings=settings)
+        elif A is not None and b is not None:
+            super().__init__(
+                phase1_solver=EqualitySolver(A, b, settings=settings), settings=settings
+            )
+        else:
+            raise ValueError("Must specify `A` and `b`.")
 
         self.lb = lb
         self.s0_plus_eps = 0.0
@@ -301,13 +315,13 @@ class EqualityWithBoundsSolver(PhaseIInteriorPointSolver):
     def augment_previous_solution(
         self,
         phase1_res: OptimizationResult,
-        **kwargs,
+        **kwargs: Any,
     ) -> npt.NDArray[np.float64]:
         """Initialize variable based on Phase I result."""
         x = np.zeros((len(phase1_res.solution) + 1,))
         x[0 : self.dimension] = phase1_res.solution
         eps = 1.0
-        x[self.dimension] = -phase1_res.solution.min() + self.lb + eps
+        x[self.dimension] = np.max(self.lb - phase1_res.solution) + eps
         self.s0_plus_eps = x[self.dimension] + eps
         return x
 
@@ -331,7 +345,7 @@ class EqualityWithBoundsSolver(PhaseIInteriorPointSolver):
         """
         M = self.dimension
         t1 = self.num_ineq_constraints / max(self.settings.outer_tolerance, x0[M])
-        t2 = np.sum(1.0 / (x0[0:M] + x0[M] - self.lb)) - M / 1.0
+        t2 = np.sum(1.0 / (x0[0:M] - self.lb + x0[M])) - M / 1.0
         return max(1.0, t1, t2)
 
     def calculate_newton_step(
@@ -375,10 +389,85 @@ class EqualityWithBoundsSolver(PhaseIInteriorPointSolver):
         return solve_kkt_system(
             A=np.hstack((self.A, np.zeros((self.num_eq_constraints, 1)))),
             g=-self.gradient_barrier(x, t),
-            hessian_solve=solve_arrow_sparsity_pattern_phase1,
+            hessian_solve=EqualityWithBoundsSolver._solve_arrow_sparsity_pattern,
             eta_inverse=self._hessian_ft_diagonal_inverse(x, t),
             one_over_psi_squared=self._hessian_one_over_psi_squared(x),
         )
+
+    @staticmethod
+    def _solve_arrow_sparsity_pattern(
+        b: npt.NDArray[np.float64],
+        eta_inverse: npt.NDArray[np.float64],
+        one_over_psi_squared: float,
+    ) -> npt.NDArray[np.float64]:
+        """Solve H * x = b.
+
+        Solves a linear system of equations where H has an arrow sparsity pattern:
+             _                 _
+            |  diag(eta)   eta  |
+        H = |                   |
+            |_   eta^T   theta _|
+
+        Because of this structure, we can solve the system in linear time. See Notes for
+        more details.
+
+        Parameters
+        ----------
+         b : npt.NDArray[np.float64]
+            Right hand side. Can be either a vector or a matrix, in which case we solve the
+            system for each column of b.
+         eta_inverse : npt.NDArray[np.float64]
+            One divided by the diagonal elements of the upper left block of H.
+         one_over_psi_squared : float
+            1.0 / (theta - np.sum(eta))
+
+        Returns
+        -------
+         x : npt.NDArray[np.float64]
+            The solution.
+
+        Notes
+        -----
+        Like `solve_arrow_sparsity_pattern`, but for the specific instance used to solve:
+          minimize    s
+          subject to  A * x = b
+                      -x <= s.
+
+        In this case, eta[i]^{-1} = (x_i + s)^2, diag_eta_inverse_dot_zeta[i] = 1.0, and
+        1 / psi_squared = (s0 + eps - s)^2 / M. Thus, we can solve the system both faster
+        and with more numerical stability.
+
+        `solve_arrow_sparsity_pattern` uses 2*M + 1 divides, 3*M multiplies, and 3*M adds,
+        or 8*M + 1 flops. `solve_arrow_sparsity_pattern_phase1` uses 0 divides, M + 1
+        multiplies, and 2 * M + 1 adds, or 3*M + 2 flops.
+
+        """
+        if not np.all(eta_inverse > 0) or one_over_psi_squared <= 0:
+            raise NewtonStepError("Hessian is not strictly positive definite.")
+
+        M = eta_inverse.shape[0]
+        # Calculate x
+        x = np.zeros_like(b)
+        if b.ndim == 1:
+            if b.shape[0] != M + 1:
+                raise ValueError(
+                    "Dimension mismatch: b must have M + 1 entries, where M = len(eta)."
+                )
+            x[M] = (b[M] - np.sum(b[0:M])) * one_over_psi_squared
+            x[0:M] = b[0:M] * eta_inverse - x[M]
+        elif b.ndim == 2:
+            if b.shape[0] != M + 1:
+                raise ValueError(
+                    "Dimension mismatch: b must have M + 1 rows, where M = len(eta)."
+                )
+            x[M, :] = (b[M, :] - np.sum(b[0:M, :], axis=0)) * one_over_psi_squared
+            x[0:M, :] = b[0:M, :] * eta_inverse[:, np.newaxis] - x[M, :]
+        else:
+            raise ValueError(
+                "Dimension mismatch: b must be either a 1D or 2D NumPy array."
+            )
+
+        return x
 
     def btls_keep_feasible(
         self, x: npt.NDArray[np.float64], delta_x: npt.NDArray[np.float64]
@@ -414,7 +503,11 @@ class EqualityWithBoundsSolver(PhaseIInteriorPointSolver):
         #   s + btls_s * delta_s < s0 + eps
         mask = (delta_w + delta_s) < 0
         feasibility = np.full_like(delta_w, np.inf, dtype=np.float64)
-        feasibility[mask] = (w[mask] + s - self.lb) / -(delta_w[mask] + delta_s)
+        lb = self.lb
+        if isinstance(lb, (list, tuple, np.ndarray)):
+            feasibility[mask] = (w[mask] + s - lb[mask]) / -(delta_w[mask] + delta_s)
+        else:
+            feasibility[mask] = (w[mask] + s - lb) / -(delta_w[mask] + delta_s)
         btls_s = min(
             np.min(feasibility),
             (self.s0_plus_eps - s) / delta_s if delta_s > 0 else np.inf,
@@ -472,8 +565,8 @@ class EqualityWithBoundsSolver(PhaseIInteriorPointSolver):
         g = np.zeros((M + 1,))
         w = x[0:M]
         s = x[M]
-        g[0:M] = -1.0 / (w + s - self.lb)
-        g[M] = t - np.sum(1.0 / (w + s - self.lb)) + M / (self.s0_plus_eps - s)
+        g[0:M] = -1.0 / (w - self.lb + s)
+        g[M] = t - np.sum(1.0 / (w - self.lb + s)) + M / (self.s0_plus_eps - s)
         return g
 
     def hessian_multiply(
@@ -522,7 +615,7 @@ class EqualityWithBoundsSolver(PhaseIInteriorPointSolver):
         M = self.dimension
         w = x[0:M]
         s = x[M]
-        return np.square(1.0 / (w + np.full_like(w, s - self.lb)))
+        return np.square(1.0 / (w - self.lb + s))
 
     def _hessian_ft_diagonal_inverse(
         self, x: npt.NDArray[np.float64], t: float
@@ -531,14 +624,14 @@ class EqualityWithBoundsSolver(PhaseIInteriorPointSolver):
         M = self.dimension
         w = x[0:M]
         s = x[M]
-        return np.square(w + np.full_like(w, s - self.lb))
+        return np.square(w - self.lb + s)
 
     def _hessian_ft_edge(self, x: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
         """Calculate last row/column of Hessian of ft at x."""
         M = self.dimension
         w = x[0:M]
         s = x[M]
-        return np.square(1.0 / (w + np.full_like(w, s - self.lb)))
+        return np.square(1.0 / (w - self.lb + s))
 
     def _hessian_ft_corner(self, x: npt.NDArray[np.float64]) -> float:
         """Calculate bottom right corner of Hessian of ft at x."""
@@ -546,7 +639,7 @@ class EqualityWithBoundsSolver(PhaseIInteriorPointSolver):
         w = x[0:M]
         s = x[M]
         return (M * ((1.0 / (self.s0_plus_eps - s)) ** 2)) + np.sum(
-            np.square(1.0 / (w + np.full_like(w, s - self.lb)))
+            np.square(1.0 / (w - self.lb + s))
         )
 
     def _hessian_one_over_psi_squared(self, x: npt.NDArray[np.float64]) -> float:
@@ -561,7 +654,7 @@ class EqualityWithBoundsSolver(PhaseIInteriorPointSolver):
             -x_i <= s - lb,
               s  <= s0 + eps,
         or:
-           -x_i - s + lb        <= 0,
+           -x_i - s + lb         <= 0,
                   s - (s0 + eps) <= 0
 
         """
@@ -579,7 +672,6 @@ class EqualityWithBoundsSolver(PhaseIInteriorPointSolver):
           | -I  -1 |
           |  0   1 |
            -       -
-
 
         """
         M = self.dimension
@@ -649,39 +741,46 @@ class EqualityWithBoundsSolver(PhaseIInteriorPointSolver):
         if abs(M * lmbda[M] - (np.sum(lmbda[0:M]) - 1)) > 1e-3:
             return -np.inf
 
+        if isinstance(self.lb, (list, tuple, np.ndarray)):
+            lb = np.asarray(self.lb)
+        else:
+            lb = np.full((M,), self.lb)
+
         return (
             -np.dot(self.b, nu)
-            + self.lb * np.sum(lmbda[0:M])
+            + np.dot(lb, lmbda[0:M])
             - M * lmbda[M] * self.s0_plus_eps
         )
 
 
-class EqualityWithBoundsAndNormConstraintSolver(
+class EqualityWithBoundsAndImbalanceConstraintSolver(
     EqualityConstrainedInteriorPointMethodSolver, PhaseIInteriorPointSolver
 ):
-    r"""Find x satisfying A * x = b, x > lb, and \| x \|_2^2 < phi.
+    r"""Find x satisfying A * x = b, x > lb, and \| B * x - c \|_\infty < psi.
 
     We do this by solving:
-      minimize   \| x \|_2^2
-      subject to A * x = b
-                 x \succeq lb.
+       minimize    s
+       subject to  A * x = b
+                   x \succeq lb
+                   -s \preceq B * x - c \preceq s
 
-    If the resulting x^\star has \| x^\star \|_2^2 > phi, the original problem is
-    infeasible.
+    If the resulting s^\star is > psi, the original problem is infeasible.
 
     Parameters
     ----------
-     phi : float
-        Constraint on norm of x.
-
-    Returns
-    -------
-     res : OptimizationResult
-        The solution.
-     phase1_solver : EqualityWithBoundsSolver
-        Phase I solver, to return a point satisfying A * x = b, x > lb. Note: lb is
-        specified when constructing `phase1_solver` and does not need to be specified in
-        this constructor.
+     B, c : npt.NDArray, optional
+        Parameters for imbalance constraints.
+     psi : float or list[float], optional
+        Parameters for imbalance constraints.
+     phase1_solver : EqualityWithBoundsSolver, optional
+        This class requires a Phase I solver for the equality and bounds constraints,
+        and there are two ways of generating this. The user can either pass an
+        EqualityWithBoundsSolver or pass A, b, and lb, and a PhaseISolver will be
+        initialized.
+     A, b : npt.NDArray
+        Equality constraints: A * x = b. Required when phase1_solver is None.
+     lb : float or list[float], optional
+        Lower bound on elements of x. Defaults to 0.
      settings : OptimizationSettings
         Optimization settings.
 
@@ -689,15 +788,33 @@ class EqualityWithBoundsAndNormConstraintSolver(
 
     def __init__(
         self,
-        phi: float,
+        B: npt.NDArray[np.float64],
+        c: npt.NDArray[np.float64],
+        psi: float | list[float] | npt.NDArray[np.float64],
         phase1_solver: EqualityWithBoundsSolver | None = None,
+        A: npt.NDArray[np.float64] | None = None,
+        b: npt.NDArray[np.float64] | None = None,
+        lb: float | list[float] | npt.NDArray[np.float64] = 0.0,
         settings: OptimizationSettings | None = None,
     ) -> None:
-        if phase1_solver is None:
-            raise ValueError("phase1_solver is required.")
+        if phase1_solver is not None:
+            super().__init__(phase1_solver=phase1_solver, settings=settings)
+        elif A is not None and b is not None:
+            super().__init__(
+                phase1_solver=EqualityWithBoundsSolver(
+                    A=A,
+                    b=b,
+                    lb=lb,
+                    settings=settings,
+                ),
+                settings=settings,
+            )
+        else:
+            raise ValueError("Must specify `A` and `b`.")
 
-        super().__init__(phase1_solver=phase1_solver, settings=settings)
-        self.phi = phi
+        self.B = B
+        self.c = c
+        self.psi = psi
 
     @property
     def dimension(self) -> int:
@@ -712,7 +829,7 @@ class EqualityWithBoundsAndNormConstraintSolver(
     @property
     def num_ineq_constraints(self) -> int:
         """Count inequality constraints."""
-        return self.A.shape[1]
+        return self.A.shape[1] + 2 * self.B.shape[0]
 
     @property
     def A(self) -> npt.NDArray[np.float64]:
@@ -753,7 +870,7 @@ class EqualityWithBoundsAndNormConstraintSolver(
         return self.phase1_solver.svd_A()
 
     @property
-    def lb(self) -> float:
+    def lb(self) -> float | list[float] | npt.NDArray[np.float64]:
         """Wrap lb."""
         if self.phase1_solver is None:
             raise ValueError("PhaseISolver not specified.")
@@ -762,6 +879,736 @@ class EqualityWithBoundsAndNormConstraintSolver(
             raise ValueError("PhaseISolver must be an EqualityWithBoundsSolver.")
 
         return self.phase1_solver.lb
+
+    def is_feasible(self, x: npt.NDArray[np.float64]) -> bool:
+        """Determine whether a feasible point has been found."""
+        if np.all(np.abs(self.B @ x[0:-1] - self.c) < self.psi):
+            return True
+        return False
+
+    def check_for_infeasibility(self, result: NewtonResult) -> None:
+        """Check if infeasible."""
+        if result.dual_value > 0.0:
+            raise ProblemCertifiablyInfeasibleError(
+                message=(
+                    "Problem certifiably infeasible: dual value was "
+                    f"{result.dual_value} > 0.0"
+                ),
+                result=result,
+            )
+
+    def augment_previous_solution(
+        self,
+        phase1_res: OptimizationResult,
+        **kwargs: Any,
+    ) -> npt.NDArray[np.float64]:
+        """Initialize variable based on Phase I result."""
+        x = np.zeros((len(phase1_res.solution) + 1,))
+        x[0 : self.dimension] = phase1_res.solution
+        eps = 1.0
+        x[self.dimension] = (
+            max(
+                np.max(self.B @ phase1_res.solution - self.c - self.psi),
+                np.max(-(self.B @ phase1_res.solution - self.c) - self.psi),
+            )
+            + eps
+        )
+        return x
+
+    def finalize_solution(self, x: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+        """De-augment solution."""
+        return x[0 : self.dimension]
+
+    def initialize_barrier_parameter(self, x0: npt.NDArray[np.float64]) -> float:
+        """Initialize barrier parameter.
+
+        Modifies the method from EqualityConstrainedInteriorPointMethodSolver to account
+        for the augmented variable.
+
+        Parameters
+        ----------
+         x0 : npt.NDArray[np.float64]
+            Initial guess. Must be strictly feasible.
+
+        Returns
+        -------
+         t : float
+            Barrier parameter.
+
+        """
+        M = self.dimension
+        delta_f0 = self.gradient(x0)
+        delta_phi = -self.grad_constraints_transpose_multiply(
+            x0, 1.0 / self.constraints(x0)
+        )
+
+        A_delta_f0 = self.A @ delta_f0[0:M]
+        A_delta_phi = self.A @ delta_phi[0:M]
+
+        U, s, Vh = self.svd_A()
+        rank = int(np.sum(s > 1e-5))
+        U = U[:, 0:rank]
+        s = s[0:rank]
+        z_phi = U @ ((U.T @ A_delta_phi) / np.square(s))
+        z_f0 = U @ ((U.T @ A_delta_f0) / np.square(s))
+
+        schur_complement = np.dot(delta_f0, delta_f0) - np.dot(A_delta_f0, z_f0)
+        t_star_s = -np.dot(delta_f0, delta_phi) + np.dot(A_delta_f0, z_phi)
+
+        return min(
+            self.num_ineq_constraints / self.settings.outer_tolerance,
+            max(1.0, t_star_s / max(schur_complement, 1e-16)),
+        )
+
+    def calculate_newton_step(
+        self,
+        x: npt.NDArray[np.float64],
+        t: float,
+    ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
+        r"""Calculate Newton step.
+
+        Calculates Newton step for the "inner" problem:
+          minimize   ft(x) := t * f0(x) - \sum_i log(-fi(x))
+          subject to A * x = b.
+
+        Parameters
+        ----------
+         x : vector
+            Current estimate.
+         t : float
+            Barrier parameter.
+
+        Returns
+        -------
+         delta_x : vector
+            Newton step.
+         nu : vector
+            Lagrange multiplier associated with equality constraints.
+
+        Notes
+        -----
+        The Newton step, delta_x, is the solution of the system:
+           _       _   _       _     _         _
+          | H   A^T | | delta_x |   | - grad_ft |
+          | A    0  | |   nu    | = |      0    |
+           -       -   -       -     -         -
+        where H is the Hessian of ft evaluated at x, grad_f is the gradient of ft
+        evaluated at x, and nu is the Lagrange multiplier associated with the equality
+        constraints.
+
+        Our Hessian has a block structure, so we use the `solve_block_plus_one` helper
+        function. The upper left block, A11, itself has a special structure: it's
+        diagonal plus 2, rank-p updates. So we use two nested calls to
+        `solve_rank_p_update` in its solution.
+
+        """
+        Bx_minus_c = self.B @ x[: self.dimension] - self.c  # shape (q,)
+        eta_inverse: npt.NDArray[np.float64] = self._hessian_ft_diagonal_inverse(x)
+        kappa_pos: npt.NDArray[np.float64] = self._hessian_ft_kappa_pos(x, Bx_minus_c)
+        kappa_neg: npt.NDArray[np.float64] = self._hessian_ft_kappa_neg(x, Bx_minus_c)
+
+        def A_solve(b: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+            return solve_rank_p_update(
+                b,
+                kappa=kappa_pos,
+                A_solve=solve_diagonal_eta_inverse,
+                eta_inverse=eta_inverse,
+            )
+
+        def A_solve_nested(b: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+            return solve_rank_p_update(b, kappa=kappa_neg, A_solve=A_solve)
+
+        return solve_kkt_system(
+            A=np.hstack((self.A, np.zeros((self.num_eq_constraints, 1)))),
+            g=-self.gradient_barrier(x, t),
+            hessian_solve=solve_block_plus_one,
+            A12=self._hessian_ft_edge(x, Bx_minus_c),
+            A22=self._hessian_ft_corner(x, Bx_minus_c),
+            A11_solve=A_solve_nested,
+        )
+
+    def btls_keep_feasible(
+        self, x: npt.NDArray[np.float64], delta_x: npt.NDArray[np.float64]
+    ) -> float:
+        """Make sure x + theta * delta_x stays strictly feasible."""
+        M = self.dimension
+        w = x[:M]
+        s = x[M]
+        delta_w = delta_x[:M]
+        delta_s = delta_x[M]
+
+        Bw_minus_c = self.B @ w - self.c
+        B_delta_w = self.B @ delta_w
+
+        # Constraint 1: x + theta * delta_x >= lb
+        mask = delta_w < 0
+        theta1 = np.inf
+        lb = self.lb
+        if np.any(mask):
+            if isinstance(lb, (list, tuple, np.ndarray)):
+                theta1 = np.min((w[mask] - lb[mask]) / -delta_w[mask])
+            else:
+                theta1 = np.min((w[mask] - lb) / -delta_w[mask])
+
+        # Constraint 2: -psi - s < Bx - c + theta * (B delta_x)
+        mask2 = B_delta_w + delta_s < 0
+        theta2 = np.inf
+        psi = self.psi
+        if np.any(mask2):
+            if isinstance(psi, (list, tuple, np.ndarray)):
+                theta2 = np.min(
+                    (Bw_minus_c[mask2] + psi[mask2] + s)
+                    / np.abs(B_delta_w[mask2] + delta_s)
+                )
+            else:
+                theta2 = np.min(
+                    (Bw_minus_c[mask2] + psi + s) / np.abs(B_delta_w[mask2] + delta_s)
+                )
+
+        # Constraint 3: Bx - c + theta * (B delta_x) < psi + s + theta * delta_s
+        mask3 = B_delta_w - delta_s > 0
+        theta3 = np.inf
+        if np.any(mask3):
+            if isinstance(psi, (list, tuple, np.ndarray)):
+                theta3 = np.min(
+                    -(Bw_minus_c[mask3] - psi[mask3] - s) / (B_delta_w[mask3] - delta_s)
+                )
+            else:
+                theta3 = np.min(
+                    -(Bw_minus_c[mask3] - psi - s) / (B_delta_w[mask3] - delta_s)
+                )
+
+        # Take minimum positive theta
+        return min(theta1, theta2, theta3)
+
+    def evaluate_objective(self, x: npt.NDArray[np.float64]) -> float:
+        """Calculate f0 at w."""
+        return x[self.dimension]
+
+    def gradient(self, x: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+        r"""Calculate gradient of f0 at x.
+
+        f0(x, s) = s, so \partial f0 / \partial x_i = 0 and \partial f0 / \partial s =
+        1.
+
+        """
+        grad = np.zeros_like(x)
+        grad[self.dimension] = 1.0
+        return grad
+
+    def hessian_multiply(
+        self, x: npt.NDArray, t: float, y: npt.NDArray
+    ) -> npt.NDArray[np.float64]:
+        """Multiply H * y.
+
+        Parameters
+        ----------
+         x : npt.NDArray
+            Current point.
+         t : float
+            The barrier objective parameter.
+         y : npt.NDArray
+            Multiplicand.
+
+        Returns
+        -------
+         Hy : npt.NDArray
+            H * y
+
+        Notes
+        -----
+        Exploits the special structure of the Hessian to compute H * y faster than
+        O(M^2).
+
+        """
+        M = self.dimension
+        y_x = y[:M]  # shape (M,)
+        y_s = y[M]  # scalar
+
+        Bx_minus_c = self.B @ x[:M] - self.c  # shape (q,)
+
+        # Diagonal component
+        eta = self._hessian_ft_diagonal(x)  # shape (M,)
+
+        # Rank-q factors
+        kappa_pos = self._hessian_ft_kappa_pos(x, Bx_minus_c)  # shape (M, q)
+        kappa_neg = self._hessian_ft_kappa_neg(x, Bx_minus_c)  # shape (M, q)
+
+        # Mixed derivatives
+        hxs = self._hessian_ft_edge(x, Bx_minus_c)  # shape (M,)
+        hss = self._hessian_ft_corner(x, Bx_minus_c)  # scalar
+
+        # Compute Hxx * y_x
+        Hxx_yx = (  # shape (M,)
+            eta * y_x
+            + kappa_pos @ (kappa_pos.T @ y_x)
+            + kappa_neg @ (kappa_neg.T @ y_x)
+        )
+
+        # Add mixed derivative term
+        Hy_x = Hxx_yx + hxs * y_s  # shape (M,)
+
+        # Compute lower block: Hxs^T y_x + Hss * y_s
+        Hy_s = np.dot(hxs, y_x) + hss * y_s  # scalar
+
+        # Concatenate result
+        return np.append(Hy_x, Hy_s)
+
+    def _hessian_ft_diagonal(
+        self, x: npt.NDArray[np.float64]
+    ) -> npt.NDArray[np.float64]:
+        """Calculate diagonal component of Hessian of ft at x."""
+        return np.square(1.0 / (x[0 : self.dimension] - self.lb))
+
+    def _hessian_ft_diagonal_inverse(
+        self, x: npt.NDArray[np.float64]
+    ) -> npt.NDArray[np.float64]:
+        """Calculate inverse of diagonal component of Hessian of ft at x."""
+        return np.square(x[0 : self.dimension] - self.lb)
+
+    def _hessian_ft_kappa_pos(
+        self, x: npt.NDArray[np.float64], Bx_minus_c: npt.NDArray[np.float64]
+    ) -> npt.NDArray[np.float64]:
+        """Calculate positive rank update to Hessian of ft at x."""
+        M = self.dimension
+        s = x[M]
+        denom_pos = s + self.psi + Bx_minus_c  # shape (q,)
+        if np.any(denom_pos <= 0):
+            raise ValueError(
+                "Barrier argument out of domain: denominators must be positive."
+            )
+
+        # Each column: B[j, :] / denom_pos[j]
+        return self.B.T / denom_pos
+
+    def _hessian_ft_kappa_neg(
+        self, x: npt.NDArray[np.float64], Bx_minus_c: npt.NDArray[np.float64]
+    ) -> npt.NDArray[np.float64]:
+        """Calculate negative rank update to Hessian of ft at x."""
+        M = self.dimension
+        s = x[M]
+        denom_neg = s + self.psi - Bx_minus_c  # shape (q,)
+        if np.any(denom_neg <= 0):
+            raise ValueError(
+                "Barrier argument out of domain: denominators must be positive."
+            )
+        return self.B.T / denom_neg
+
+    def _hessian_ft_edge(
+        self, x: npt.NDArray[np.float64], Bx_minus_c: npt.NDArray[np.float64]
+    ) -> npt.NDArray[np.float64]:
+        """Calculate last row/column of Hessian of ft at x."""
+        M = self.dimension
+        s = x[M]
+        denom_pos = s + self.psi + Bx_minus_c
+        denom_neg = s + self.psi - Bx_minus_c
+
+        # Domain check for numerical stability
+        if np.any(denom_pos <= 0) or np.any(denom_neg <= 0):
+            raise ValueError(
+                "Barrier argument out of domain: denominators must be positive."
+            )
+
+        return self.B.T @ (np.square(1.0 / denom_pos) - np.square(1.0 / denom_neg))
+
+    def _hessian_ft_corner(
+        self, x: npt.NDArray[np.float64], Bx_minus_c: npt.NDArray[np.float64]
+    ) -> float:
+        """Calculate bottom right corner of Hessian of ft at x."""
+        M = self.dimension
+        s = x[M]
+        denom_pos = s + self.psi + Bx_minus_c
+        denom_neg = s + self.psi - Bx_minus_c
+        # For numerical stability, ensure denominators are not zero or negative
+        if np.any(denom_pos <= 0) or np.any(denom_neg <= 0):
+            raise ValueError(
+                "Barrier argument out of domain: denominators must be positive."
+            )
+
+        return np.sum(np.square(1.0 / denom_pos) + np.square(1.0 / denom_neg))
+
+    def constraints(self, x: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+        r"""Calculate the vector of constraints, fi(x) <= 0.
+
+        Our constraints are:
+            x_i >= lb, i = 1, ..., M
+            -s <= Bj^T * x - cj <= s, j = 1, ..., q,
+        where Bj is the jth row of B and cj the jth element of c. We can rewrite this in
+        standard form as:
+                 -x_i   + lb <= 0, i = 1, ..., M
+            -Bj^T x - s + cj <= 0, j = 1, ..., q
+             Bj^T x - s - cj <= 0, j = 1, ..., q.
+
+        """
+        M = self.dimension
+        Bx_minus_c = self.B @ x[0:M] - self.c
+        return np.concatenate(
+            [
+                -x[0:M] + self.lb,
+                -Bx_minus_c - np.full_like(self.c, x[M]) - self.psi,
+                Bx_minus_c - np.full_like(self.c, x[M]) - self.psi,
+            ]
+        )
+
+    def grad_constraints(self, x: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+        """Calculate the gradients of constraints, fi(x) <= 0.
+
+        In this case, the matrix of gradients is:
+           _       _
+          | -I   0  |
+          | -B  -1  |
+          | +B  -1  |
+           -       -
+
+        """
+        M = self.dimension
+        q = self.B.shape[0]
+
+        # Top block: -I (M x M), zeros (M x 1)
+        top_left = -np.eye(M)
+        top_right = np.zeros((M, 1))
+
+        # Middle block: -B (q x M), -1 (q x 1)
+        middle_left = -self.B
+        middle_right = -np.ones((q, 1))
+
+        # Lower block: +B (q x M), -1 (q x 1)
+        lower_left = self.B
+        lower_right = -np.ones((q, 1))
+
+        return np.vstack(
+            [
+                np.hstack([top_left, top_right]),
+                np.hstack([middle_left, middle_right]),
+                np.hstack([lower_left, lower_right]),
+            ]
+        )
+
+    def grad_constraints_multiply(
+        self, x: npt.NDArray[np.float64], y: npt.NDArray[np.float64]
+    ) -> npt.NDArray[np.float64]:
+        """
+        Efficiently compute grad_constraints(x) @ y using block structure.
+
+        Parameters
+        ----------
+        x : npt.NDArray[np.float64]
+            Current point (not used in this function, but kept for API consistency).
+        y : npt.NDArray[np.float64]
+            Vector to multiply, shape (M + 1,)
+
+        Returns
+        -------
+        result : npt.NDArray[np.float64]
+            Product, shape (M + 2q,)
+        """
+        M = self.dimension
+        By = self.B @ y[:M]
+        return np.concatenate([-y[:M], -By - y[M], By - y[M]])
+
+    def grad_constraints_transpose_multiply(
+        self, x: npt.NDArray[np.float64], y: npt.NDArray[np.float64]
+    ) -> npt.NDArray[np.float64]:
+        """
+        Efficiently compute grad_constraints(x).T @ y using block structure.
+
+        Parameters
+        ----------
+        x : npt.NDArray[np.float64]
+            Current point (not used in this function, but kept for API consistency).
+        y : npt.NDArray[np.float64]
+            Vector to multiply, shape (M + 2q,)
+
+        Returns
+        -------
+        result : npt.NDArray[np.float64]
+            Product, shape (M + 1,)
+        """
+        M = self.dimension
+        q = self.B.shape[0]
+
+        y1 = y[:M]  # Top block
+        y2 = y[M : M + q]  # Middle block
+        y3 = y[M + q :]  # Lower block
+
+        x_part = -y1 + self.B.T @ (y3 - y2)
+        s_part = -np.sum(y2) - np.sum(y3)
+
+        return np.append(x_part, s_part)
+
+    def evaluate_dual(
+        self,
+        lmbda: npt.NDArray[np.float64],
+        nu: npt.NDArray[np.float64],
+        x_star: npt.NDArray[np.float64],
+    ) -> float:
+        """Evaluate dual function.
+
+        Parameters
+        ----------
+         lmbda : vector
+            Lagrange multipliers for inequality constraints.
+         nu : vector
+            Lagrange multipliers for equality constraints.
+         x_star : vector
+            The solution.
+
+        Returns
+        -------
+         g : float
+            The dual function evaluated at lmbda, nu.
+
+        Notes
+        -----
+        The Lagrangian is:
+          s + nu^T (Ax - b) + lambda_1^T (-x + lb * 1) + lambda_2^T (-B x - s * 1 + c)
+            + lambda_3^T (B x - s * 1 - c)
+          = (A^T nu - lambda_1 + B^T (lambda_3 - lambda_2))^T x
+            + (1 - sum(lambda_2) - sum(lambda_3)) * s
+            - b^T nu + lb * sum(lambda_1) + c^T (lambda_2 - lambda_3),
+        which is unbounded below unless
+            lambda1 = A^T nu + B^T (lambda_3 - lambda_2), and
+            sum(lambda_2) + sum(lambda_3) = 1.
+        So the dual function equals
+            - b^T nu + lb * sum(lambda_1) + c^T (lambda_2 - lambda_3)
+        in that case, and is -infinity otherwise.
+
+        """
+        M = self.dimension
+        q = self.B.shape[0]
+        lmbda1 = lmbda[0:M]
+        lmbda2 = lmbda[M : (M + q)]
+        lmbda3 = lmbda[(M + q) : (M + 2 * q)]
+
+        atol = 1e-3
+        if not np.allclose(
+            lmbda1, self.A.T @ nu + self.B.T @ (lmbda3 - lmbda2), atol=atol
+        ):
+            return -np.inf
+
+        if abs(np.sum(lmbda2) + np.sum(lmbda3) - 1) > atol:
+            return -np.inf
+
+        if isinstance(self.lb, (list, tuple, np.ndarray)):
+            lb = np.asarray(self.lb)
+        else:
+            lb = np.full((M,), self.lb)
+
+        return (
+            -np.dot(self.b, nu)
+            + np.dot(lb, lmbda1)
+            + np.dot(self.c - self.psi, lmbda2)
+            - np.dot(self.c + self.psi, lmbda3)
+        )
+
+
+class EqualityWithBoundsAndNormConstraintSolver(
+    EqualityConstrainedInteriorPointMethodSolver, PhaseIInteriorPointSolver
+):
+    r"""Find x satisfying A * x = b, x > lb, and \| x \|_2^2 < phi.
+
+    We do this by solving:
+      minimize   \| x \|_2^2
+      subject to A * x = b
+                 x \succeq lb
+                 \| B * x - c \|_\infty < psi (optional).
+
+    If the resulting x^\star has \| x^\star \|_2^2 > phi, the original problem is
+    infeasible.
+
+    Parameters
+    ----------
+     phi : float
+        Constraint on norm of x.
+     phase1_solver : EqualityWithBoundsSolver | EqualityWithBoundsAndImbalanceConstraintSolver, optional
+        This class requires a Phase I solver for the equality and inequality
+        constraints, and there are two ways of generating this. The user can either pass
+        an EqualityWithBoundsSolver (or EqualityWithBoundsAndImbalanceConstraintSolver),
+        or pass A, b, and lb (and B, c and psi if applicable), and a PhaseISolver will
+        be initialized.
+     A, b : npt.NDArray
+        Equality constraints: A * x = b. Required when phase1_solver is None.
+     lb : float or list[float], optional
+        Lower bound on elements of x. Defaults to 0.
+     B, c : npt.NDArray, optional
+        Parameters for imbalance constraints.
+     psi : float, optional
+        Parameters for imbalance constraints.
+     settings : OptimizationSettings
+        Optimization settings.
+
+    """
+
+    def __init__(
+        self,
+        phi: float,
+        phase1_solver: (
+            EqualityWithBoundsSolver
+            | EqualityWithBoundsAndImbalanceConstraintSolver
+            | None
+        ) = None,
+        A: npt.NDArray[np.float64] | None = None,
+        b: npt.NDArray[np.float64] | None = None,
+        lb: float | list[float] | npt.NDArray[np.float64] = 0.0,
+        B: npt.NDArray[np.float64] | None = None,
+        c: npt.NDArray[np.float64] | None = None,
+        psi: float | list[float] | npt.NDArray[np.float64] | None = None,
+        settings: OptimizationSettings | None = None,
+    ) -> None:
+        if phase1_solver is not None:
+            super().__init__(
+                phase1_solver=phase1_solver,
+                settings=settings,
+            )
+        elif B is not None:
+            if c is None or psi is None:
+                raise ValueError("Must specify `c` and `psi`.")
+
+            if A is None or b is None:
+                raise ValueError("Must specify `A` and `b`.")
+
+            super().__init__(
+                phase1_solver=EqualityWithBoundsAndImbalanceConstraintSolver(
+                    B=B, c=c, psi=psi, A=A, b=b, lb=lb, settings=settings
+                ),
+                settings=settings,
+            )
+        elif A is not None and b is not None:
+            super().__init__(
+                phase1_solver=EqualityWithBoundsSolver(
+                    A=A,
+                    b=b,
+                    lb=lb,
+                    settings=settings,
+                ),
+                settings=settings,
+            )
+        else:
+            raise ValueError("Must specify `A` and `b`.")
+
+        self.phi = phi
+
+    @property
+    def dimension(self) -> int:
+        """Problem dimension."""
+        return self.A.shape[1]
+
+    @property
+    def num_eq_constraints(self) -> int:
+        """Count equality constraints."""
+        return self.A.shape[0]
+
+    @property
+    def num_ineq_constraints(self) -> int:
+        """Count inequality constraints."""
+        B = self.B
+        if B is None:
+            return self.A.shape[1]
+
+        return self.A.shape[1] + 2 * B.shape[0]
+
+    @property
+    def A(self) -> npt.NDArray[np.float64]:
+        """Wrap A."""
+        if self.phase1_solver is None:
+            raise ValueError("PhaseISolver not specified.")
+
+        if isinstance(
+            self.phase1_solver,
+            (
+                EqualityWithBoundsSolver,
+                EqualityWithBoundsAndImbalanceConstraintSolver,
+            ),
+        ):
+            return self.phase1_solver.A
+
+        raise ValueError("PhaseISolver must be an EqualityWithBoundsSolver.")
+
+    @property
+    def b(self) -> npt.NDArray[np.float64]:
+        """Wrap b."""
+        if self.phase1_solver is None:
+            raise ValueError("PhaseISolver not specified.")
+
+        if isinstance(
+            self.phase1_solver,
+            (
+                EqualityWithBoundsSolver,
+                EqualityWithBoundsAndImbalanceConstraintSolver,
+            ),
+        ):
+            return self.phase1_solver.b
+
+        raise ValueError("PhaseISolver must be an EqualityWithBoundsSolver.")
+
+    def svd_A(
+        self,
+    ) -> tuple[
+        npt.NDArray[np.float32 | np.float64],
+        npt.NDArray[np.float32 | np.float64],
+        npt.NDArray[np.float32 | np.float64],
+    ]:
+        """Calculate and cache SVD of A."""
+        if self.phase1_solver is None:
+            raise ValueError("phase1_solver is required.")
+
+        if isinstance(
+            self.phase1_solver,
+            (
+                EqualityWithBoundsSolver,
+                EqualityWithBoundsAndImbalanceConstraintSolver,
+            ),
+        ):
+            return self.phase1_solver.svd_A()
+
+        raise ValueError("phase1_solver must be an EqualityWithBoundsSolver")
+
+    @property
+    def lb(self) -> float | list[float] | npt.NDArray[np.float64]:
+        """Wrap lb."""
+        if self.phase1_solver is None:
+            raise ValueError("PhaseISolver not specified.")
+
+        if isinstance(
+            self.phase1_solver,
+            (
+                EqualityWithBoundsSolver,
+                EqualityWithBoundsAndImbalanceConstraintSolver,
+            ),
+        ):
+            return self.phase1_solver.lb
+
+        raise ValueError("PhaseISolver must be an EqualityWithBoundsSolver.")
+
+    @property
+    def B(self) -> npt.NDArray[np.float64] | None:
+        """Wrap B."""
+        if isinstance(
+            self.phase1_solver, EqualityWithBoundsAndImbalanceConstraintSolver
+        ):
+            return self.phase1_solver.B
+
+        return None
+
+    @property
+    def c(self) -> npt.NDArray[np.float64] | None:
+        """Wrap c."""
+        if isinstance(
+            self.phase1_solver, EqualityWithBoundsAndImbalanceConstraintSolver
+        ):
+            return self.phase1_solver.c
+
+        return None
+
+    @property
+    def psi(self) -> float | list[float] | npt.NDArray[np.float64] | None:
+        """Wrap psi."""
+        if isinstance(
+            self.phase1_solver, EqualityWithBoundsAndImbalanceConstraintSolver
+        ):
+            return self.phase1_solver.psi
+
+        return None
 
     def is_feasible(self, x: npt.NDArray[np.float64]) -> bool:
         """Determine whether a feasible point has been found."""
@@ -836,11 +1683,35 @@ class EqualityWithBoundsAndNormConstraintSolver(
         time.
 
         """
+        if self.B is None:
+            return solve_kkt_system(
+                A=self.A,
+                g=-self.gradient_barrier(x, t),
+                hessian_solve=solve_diagonal_eta_inverse,
+                eta_inverse=self._hessian_ft_diagonal_inverse(x, t),
+            )
+
+        assert self.c is not None
+        Bx_minus_c = self.B @ x - self.c  # shape (p2,)
+        eta_inverse: npt.NDArray[np.float64] = self._hessian_ft_diagonal_inverse(x, t)
+        kappa_pos: npt.NDArray[np.float64] = self._hessian_ft_kappa_pos(x, Bx_minus_c)
+        kappa_neg: npt.NDArray[np.float64] = self._hessian_ft_kappa_neg(x, Bx_minus_c)
+
+        def A_solve(b: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+            return solve_rank_p_update(
+                b,
+                kappa=kappa_pos,
+                A_solve=solve_diagonal_eta_inverse,
+                eta_inverse=eta_inverse,
+            )
+
+        def A_solve_nested(b: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+            return solve_rank_p_update(b, kappa=kappa_neg, A_solve=A_solve)
+
         return solve_kkt_system(
             A=self.A,
             g=-self.gradient_barrier(x, t),
-            hessian_solve=solve_diagonal_eta_inverse,
-            eta_inverse=self._hessian_ft_diagonal_inverse(x, t),
+            hessian_solve=A_solve_nested,
         )
 
     def btls_keep_feasible(
@@ -858,10 +1729,41 @@ class EqualityWithBoundsAndNormConstraintSolver(
 
 
         """
-        mask = delta_x < 0
-        feasibility = np.full_like(delta_x, np.inf, dtype=np.float64)
-        feasibility[mask] = (x[mask] - self.lb) / -delta_x[mask]
-        return float(np.min(feasibility))
+        mask1 = delta_x < 0
+        theta1 = np.inf
+        lb = self.lb
+        if np.any(mask1):
+            if isinstance(lb, (list, tuple, np.ndarray)):
+                theta1 = np.min((x[mask1] - lb[mask1]) / -delta_x[mask1])
+            else:
+                theta1 = np.min((x[mask1] - lb) / -delta_x[mask1])
+
+        if self.B is None:
+            return float(theta1)
+
+        assert self.c is not None
+        assert self.psi is not None
+        Bx_minus_c = self.B @ x - self.c
+        B_delta_x = self.B @ delta_x
+
+        mask2 = B_delta_x < 0
+        theta2 = np.inf
+        psi = self.psi
+        if np.any(mask2):
+            if isinstance(psi, (list, tuple, np.ndarray)):
+                theta2 = np.min((Bx_minus_c[mask2] + psi[mask2]) / -B_delta_x[mask2])
+            else:
+                theta2 = np.min((Bx_minus_c[mask2] + self.psi) / -B_delta_x[mask2])
+
+        mask3 = B_delta_x > 0
+        theta3 = np.inf
+        if np.any(mask3):
+            if isinstance(psi, (list, tuple, np.ndarray)):
+                theta3 = np.min(-(Bx_minus_c[mask3] - psi[mask3]) / B_delta_x[mask3])
+            else:
+                theta3 = np.min(-(Bx_minus_c[mask3] - psi) / B_delta_x[mask3])
+
+        return min(theta1, theta2, theta3)
 
     def evaluate_objective(self, x: npt.NDArray[np.float64]) -> float:
         """Calculate f0 at x."""
@@ -871,12 +1773,6 @@ class EqualityWithBoundsAndNormConstraintSolver(
         """Calculate gradient of ft at w."""
         return 2.0 * x
 
-    def gradient_barrier(
-        self, x: npt.NDArray[np.float64], t: float
-    ) -> npt.NDArray[np.float64]:
-        """Calculate gradient of ft at x."""
-        return (2.0 * t) * x - 1.0 / (x - self.lb)
-
     def hessian_multiply(
         self, x: npt.NDArray, t: float, y: npt.NDArray
     ) -> npt.NDArray[np.float64]:
@@ -885,8 +1781,23 @@ class EqualityWithBoundsAndNormConstraintSolver(
         Our Hessian is diagonal, H = diag(eta), H * y = eta * y
 
         """
-        eta = self._hessian_ft_diagonal(x, t)
-        return eta * y
+        if self.B is None:
+            eta = self._hessian_ft_diagonal(x, t)
+            return eta * y
+
+        assert self.c is not None
+        Bx_minus_c = self.B @ x - self.c
+
+        # Diagonal component
+        eta = self._hessian_ft_diagonal(x, t)  # shape (M,)
+
+        # Rank-q factors
+        kappa_pos = self._hessian_ft_kappa_pos(x, Bx_minus_c)  # shape (M, p2)
+        kappa_neg = self._hessian_ft_kappa_neg(x, Bx_minus_c)  # shape (M, p2)
+
+        return (  # shape (M,)
+            eta * y + kappa_pos @ (kappa_pos.T @ y) + kappa_neg @ (kappa_neg.T @ y)
+        )
 
     def _hessian_ft_diagonal(
         self, x: npt.NDArray[np.float64], t: float
@@ -913,29 +1824,105 @@ class EqualityWithBoundsAndNormConstraintSolver(
         tx2 = np.square(np.sqrt(t) * (x - self.lb))
         return np.square((x - self.lb) / np.sqrt(2.0 * tx2 + 1.0))
 
+    def _hessian_ft_kappa_pos(
+        self, x: npt.NDArray[np.float64], Bx_minus_c: npt.NDArray[np.float64]
+    ) -> npt.NDArray[np.float64]:
+        """Calculate positive rank update to Hessian of ft at x."""
+        psi = self.psi
+        if psi is None:
+            raise ValueError("psi not defined")
+
+        denom_pos = psi + Bx_minus_c  # shape (p2,)
+        if np.any(denom_pos <= 0):
+            raise ValueError(
+                "Barrier argument out of domain: denominators must be positive."
+            )
+
+        # Each column: B[j, :] / denom_pos[j]
+        assert self.B is not None  # Satisfy type-checker
+        return self.B.T / denom_pos
+
+    def _hessian_ft_kappa_neg(
+        self, x: npt.NDArray[np.float64], Bx_minus_c: npt.NDArray[np.float64]
+    ) -> npt.NDArray[np.float64]:
+        """Calculate negative rank update to Hessian of ft at x."""
+        psi = self.psi
+        if psi is None:
+            raise ValueError("psi not defined")
+
+        denom_neg = psi - Bx_minus_c  # shape (q,)
+        if np.any(denom_neg <= 0):
+            raise ValueError(
+                "Barrier argument out of domain: denominators must be positive."
+            )
+        assert self.B is not None  # Satisfy type-checker
+        return self.B.T / denom_neg
+
     def constraints(self, x: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
         """Calculate the vector of constraints, fi(x) <= 0.
 
         Our constraints are x >= lb, or -x + lb <= 0
 
         """
-        return -x + self.lb
+        if self.B is None:
+            return -x + self.lb
+
+        c = self.c
+        psi = self.psi
+
+        if c is None or psi is None:
+            raise ValueError("c and psi must be defined")
+
+        Bx_minus_c = self.B @ x - c
+        return np.concatenate(
+            [
+                -x + self.lb,
+                -Bx_minus_c - psi,
+                Bx_minus_c - psi,
+            ]
+        )
 
     def grad_constraints(self, x: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
         """Calculate the gradients of constraints, fi(x) <= 0."""
-        return -np.eye(len(x))
+        B = self.B
+        if B is None:
+            return -np.eye(len(x))
+
+        return np.vstack(
+            [
+                -np.eye(len(x)),
+                -B,
+                B,
+            ]
+        )
 
     def grad_constraints_multiply(
         self, x: npt.NDArray[np.float64], y: npt.NDArray[np.float64]
     ) -> npt.NDArray[np.float64]:
         """Calculate grad_constraints(x) @ y."""
-        return -y
+        B = self.B
+        if B is None:
+            return -y
+
+        By = B @ y
+        return np.concatenate([-y, -By, By])
 
     def grad_constraints_transpose_multiply(
         self, x: npt.NDArray[np.float64], y: npt.NDArray[np.float64]
     ) -> npt.NDArray[np.float64]:
         """Calculate grad_constraints(x).T @ y."""
-        return -y
+        B = self.B
+        if B is None:
+            return -y
+
+        M = self.dimension
+        p2 = B.shape[0]
+
+        y1 = y[:M]  # Top block
+        y2 = y[M : M + p2]  # Middle block
+        y3 = y[M + p2 :]  # Lower block
+
+        return -y1 + B.T @ (y3 - y2)
 
     def evaluate_dual(
         self,
@@ -963,9 +1950,37 @@ class EqualityWithBoundsAndNormConstraintSolver(
         just the optimal lambda_star, nu_star.
 
         """
-        lmbda_minus_AT_nu = lmbda - self.A.T @ nu
+        M = self.dimension
+        B = self.B
+        if isinstance(self.lb, (list, tuple, np.ndarray)):
+            lb = np.asarray(self.lb)
+        else:
+            lb = np.full((M,), self.lb)
+
+        if B is None:
+            lmbda_minus_AT_nu = lmbda - self.A.T @ nu
+            return (
+                -0.25 * np.dot(lmbda_minus_AT_nu, lmbda_minus_AT_nu)
+                - np.dot(self.b, nu)
+                + np.dot(lb, lmbda)
+            )
+
+        c = self.c
+        psi = self.psi
+
+        if c is None or psi is None:
+            raise ValueError("c and psi must be defined")
+
+        p2 = B.shape[0]
+        lmbda1 = lmbda[:M]
+        lmbda2 = lmbda[M : (M + p2)]
+        lmbda3 = lmbda[(M + p2) :]
+
+        lmbda_minus_AT_nu = lmbda1 - self.A.T @ nu + B.T @ (lmbda2 - lmbda3)
         return (
             -0.25 * np.dot(lmbda_minus_AT_nu, lmbda_minus_AT_nu)
             - np.dot(self.b, nu)
-            + self.lb * np.sum(lmbda)
+            + np.dot(lb, lmbda1)
+            + np.dot(c - psi, lmbda2)
+            - np.dot(c + psi, lmbda3)
         )

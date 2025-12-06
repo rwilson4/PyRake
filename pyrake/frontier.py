@@ -7,6 +7,7 @@ from matplotlib.axes import Axes
 
 from .optimization import InteriorPointMethodResult
 from .phase1solvers import (
+    EqualityWithBoundsAndImbalanceConstraintSolver,
     EqualityWithBoundsAndNormConstraintSolver,
     EqualityWithBoundsSolver,
 )
@@ -180,7 +181,10 @@ class EfficientFrontier:
             self.rake.phase1_solver, EqualityWithBoundsAndNormConstraintSolver
         ):
             res_min = self.rake.phase1_solver.solve(fully_optimize=True)
-        elif isinstance(self.rake.phase1_solver, EqualityWithBoundsSolver):
+        elif isinstance(
+            self.rake.phase1_solver,
+            (EqualityWithBoundsSolver, EqualityWithBoundsAndImbalanceConstraintSolver),
+        ):
             res_min = EqualityWithBoundsAndNormConstraintSolver(
                 phi=np.inf,
                 phase1_solver=self.rake.phase1_solver,
@@ -190,7 +194,7 @@ class EfficientFrontier:
             raise ValueError("Unrecognized Phase I Solver")
 
         w0 = res_min.solution
-        phi_min = np.dot(w0, w0) / self.rake.dimension
+        phi_min = np.mean(w0 * w0)
         weights = [w0]
         variances = [phi_min]
         lagrange_multipliers = [0.0]
@@ -205,12 +209,11 @@ class EfficientFrontier:
         # Find the feasible weights that most closely match baseline, regardless of
         # variance.
         self.rake.update_phi(phi_max)
-        res_max = self.rake.solve(x0=w0)
+        res_max = self.rake.solve()
         phi_max_nn = np.dot(res_max.solution, res_max.solution) / self.rake.dimension
 
         # Calculate a range of optimal weights between phi_min and phi_max
         phi_grid = np.linspace(phi_min, phi_max_nn, num=num_points)[1:-1]
-        w = w0
         for phi in phi_grid:
             self.rake.update_phi(phi)
             ipm_res = self.rake.solve()
@@ -220,7 +223,6 @@ class EfficientFrontier:
             lagrange_multipliers.append(ipm_res.inequality_multipliers[-1])
             distances.append(ipm_res.objective_value)
             ipm_results.append(ipm_res)
-            w = ipm_res.solution
 
         weights.append(res_max.solution)
         variances.append(phi_max_nn)

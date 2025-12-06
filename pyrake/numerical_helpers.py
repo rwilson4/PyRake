@@ -1,6 +1,7 @@
 """Numerical linear algebra routines."""
 
 from collections.abc import Callable
+from typing import Any
 
 import numpy as np
 import numpy.typing as npt
@@ -87,27 +88,31 @@ def solve_diagonal_eta_inverse(
         raise ValueError("b must be either a 1D or 2D NumPy array.")
 
 
-def solve_diagonal_plus_rank_one(
+def solve_rank_one_update(
     b: npt.NDArray[np.float64],
-    eta: npt.NDArray[np.float64],
-    zeta: npt.NDArray[np.float64],
+    kappa: npt.NDArray[np.float64],
+    A_solve: Callable[..., npt.NDArray[np.float64]],
+    **kwargs: Any,
 ) -> npt.NDArray[np.float64]:
     """Solve H * x = b.
 
-    Solves a linear system of equations where H is diagonal plus a rank one matrix,
-       H = diag(eta) + zeta * zeta^T.
-    Because of this structure, we can solve the system in linear time. See Notes for
-    more details.
+    Solves a linear system of equations where H = A + kappa * kappa^T, where A has some
+    special structure that makes it easy to solve A * y = c, and kappa is a vector.
+    Thus, H is a rank-one update to A.
 
     Parameters
     ----------
      b : npt.NDArray[np.float64]
         Right hand side. Can be either a vector or a matrix, in which case we solve the
         system for each column of b.
-     eta : npt.NDArray[np.float64]
-        Diagonal component of H.
-     zeta : npt.NDArray[np.float64]
+     kappa : npt.NDArray[np.float64]
         Rank-one component of H.
+     A_solve : Callable
+        A function that solves A * y = c. The first argument to A_solve will be c.
+        Additional arguments will be passed via **kwargs. A_solve should be able to
+        accept multiple right-hand-sides.
+     kwargs
+        Extra arguments to pass to A_solve.
 
     Returns
     -------
@@ -116,62 +121,65 @@ def solve_diagonal_plus_rank_one(
 
     Notes
     -----
-    Let H = diag(eta) + zeta * zeta^T, where eta and zeta are both vectors of length M.
-    We can solve H * x = b in O(M) time as follows:
-       1. Solve diag(eta) * x' = b. This is just x' = b / eta, elementwise (M
-          divisions).
-       2. Solve diag(eta) * xi = zeta, or xi = zeta / eta (M divisions).
-       3. Calculate x as x' - ((zeta^T * x') / (1 + zeta^T * xi)) * xi. This is 2 dot
+    Let H = A + kappa * kappa^T, where kappa is a vector of length M. We can solve
+    H * x = b in O(2*t + 6*M) time, where t is the time needed to solve A*y = c, as
+    follows:
+       1. Solve A * x' = b (t time).
+       2. Solve A * xi = kappa (t time).
+       3. Calculate x as x' - ((kappa^T * x') / (1 + kappa^T * xi)) * xi. This is 2 dot
           products (each involving M multiplies and M-1 adds) plus M multiplies and M
           subtractions, or O(3M) multiplies plus O(3M) adds, plus a single add and a
           division.
-    In total that's 2M divisions, 3M multiplies, and 3M adds.
+    In total that's 2*t, 3M multiplies, and 3M adds.
+
 
     """
-    if not np.all(eta > 0):
-        raise NewtonStepError("Hessian is not strictly positive definite.")
+    if b.ndim == 1:
+        if b.shape != kappa.shape:
+            raise ValueError("b and kappa must have the same length.")
+    elif b.ndim == 2:
+        if b.shape[0] != kappa.shape[0]:
+            raise ValueError("Number of rows in beta must match length of kappa.")
+    else:
+        raise ValueError("b must be either a 1D or 2D NumPy array.")
 
-    if eta.shape != zeta.shape:
-        raise ValueError("Dimension mismatch: eta and zeta had different dimensions.")
-
-    xi = zeta / eta
-    den = 1.0 / (1.0 + np.dot(zeta, xi))
+    x_prime = A_solve(b, **kwargs)
+    xi = A_solve(kappa, **kwargs)
+    den = 1.0 / (1.0 + np.dot(kappa, xi))
 
     if b.ndim == 1:
-        if b.shape != eta.shape:
-            raise ValueError("b and eta must have the same length.")
-        x_prime = b / eta
-        return x_prime - den * (np.dot(zeta, x_prime) * xi)
+        return x_prime - (np.dot(kappa, x_prime) * den) * xi
     elif b.ndim == 2:
-        if b.shape[0] != eta.shape[0]:
-            raise ValueError("Number of rows in beta must match length of eta.")
-        x_prime = b / eta[:, np.newaxis]
-        return x_prime - den * np.outer(xi, zeta.T @ x_prime)
+        return x_prime - den * np.outer(xi, kappa.T @ x_prime)
     else:
         raise ValueError("b must be either a 1D or 2D NumPy array.")
 
 
-def solve_diagonal_plus_rank_one_eta_inverse(
+def solve_rank_p_update(
     b: npt.NDArray[np.float64],
-    eta_inverse: npt.NDArray[np.float64],
-    zeta: npt.NDArray[np.float64],
+    kappa: npt.NDArray[np.float64],
+    A_solve: Callable[..., npt.NDArray[np.float64]],
+    **kwargs: Any,
 ) -> npt.NDArray[np.float64]:
     """Solve H * x = b.
 
-    Solves a linear system of equations where H is diagonal plus a rank one matrix,
-       H = diag(eta) + zeta * zeta^T.
-    Because of this structure, we can solve the system in linear time. See Notes for
-    more details.
+    Solves a linear system of equations where H = A + kappa * kappa^T, where A has some
+    special structure that makes it easy to solve A * y = c, and kappa is rank p. Thus,
+    H is a rank-p update to A.
 
     Parameters
     ----------
      b : npt.NDArray[np.float64]
         Right hand side. Can be either a vector or a matrix, in which case we solve the
         system for each column of b.
-     eta_inverse : npt.NDArray[np.float64]
-        One over the diagonal component of H.
-     zeta : npt.NDArray[np.float64]
-        Rank-one component of H.
+     kappa : npt.NDArray[np.float64]
+        Rank-p component of H.
+     A_solve : Callable
+        A function that solves A * y = c. The first argument to A_solve will be c.
+        Additional arguments will be passed via **kwargs. A_solve should be able to
+        accept multiple right-hand-sides.
+     kwargs
+        Extra arguments to pass to A_solve.
 
     Returns
     -------
@@ -180,39 +188,250 @@ def solve_diagonal_plus_rank_one_eta_inverse(
 
     Notes
     -----
-    Let H = diag(eta) + zeta * zeta^T, where eta and zeta are both vectors of length M.
-    We can solve H * x = b in O(M) time as follows:
-       1. Solve diag(eta) * x' = b. This is just x' = b / eta, elementwise (M
-          divisions).
-       2. Solve diag(eta) * xi = zeta, or xi = zeta / eta (M divisions).
-       3. Calculate x as x' - ((zeta^T * x') / (1 + zeta^T * xi)) * xi. This is 2 dot
-          products (each involving M multiplies and M-1 adds) plus M multiplies and M
-          subtractions, or O(3M) multiplies plus O(3M) adds, plus a single add and a
-          division.
-    In total that's 2M divisions, 3M multiplies, and 3M adds.
+    Let H = A + kappa * kappa^T, where kappa is an M-by-p matrix. We can solve H * x = b
+    in O((p + q) * t + 2 * M * p * (p + 2 * q)) time, where t is the number of flops
+    needed to solve A*y = c, as follows:
+       1. Solve A * xi = kappa. This is p solves with A (at most p * t flops; by passing
+          multiple right hand sides it may be less than p * t flops, since we avoid
+          duplicating calculations unnecessarily). xi is M-by-p.
+       2. Calculate G = I + kappa^T * xi (p^2 * M multiplies and p^2 * (M - 1) + p adds,
+          or O(2 * M * p^2) flops). G is p-by-p.
+       3. Compute the Cholesky factorization of G (1/3 * p^3 flops).
+       4. Solve A * x' = b (When there are q right-hand-sides, this is at most q * t
+          flops). x' is M-by-q.
+       5. Calculate z = kappa^T * x' (p * q * M multiplies and p * q * (M - 1) adds or
+          2 * M * p * q flops). z is p-by-q.
+       6. Solve G * y = z, using the Cholesky factorization. It takes 2 * p^2 * q time
+          to solve for y. y is p-by-q.
+       7. Calculate x as x' - xi @ y. This is M * p * q multiplies and M * p * q adds or
+          2 * M * p * q flops.
+    In total that's (p + q) * t + 2 * M * p^2 + 4 * M * p * q + (1/3) * p^3 + 2 * p^2 * q
+    flops, or (p + q) * t + 2 * M * p * (p + 2 * q) + p^2 * ((1/3) * p + 2 * q) or
+    (p + q) * t + 2 * M * p * (p + 2 * q) when p and q << M.
 
     """
-    if not np.all(eta_inverse > 0):
-        raise NewtonStepError("Hessian is not strictly positive definite.")
+    if b.ndim not in (1, 2):
+        raise ValueError("b must be either a 1D or 2D NumPy array.")
 
-    if eta_inverse.shape != zeta.shape:
-        raise ValueError("Dimension mismatch: eta and zeta had different dimensions.")
+    if b.shape[0] != kappa.shape[0]:
+        raise ValueError("Number of rows in beta must match length of kappa.")
 
-    xi = zeta * eta_inverse
-    den = 1.0 / (1.0 + np.dot(zeta, xi))
+    # xi is M-by-p
+    xi = A_solve(kappa, **kwargs)
+
+    # G is p-by-p
+    G = np.eye(kappa.shape[1]) + kappa.T @ xi
+    try:
+        c, lower = linalg.cho_factor(G, lower=True)
+    except np.linalg.LinAlgError:
+        raise NewtonStepError("H is not positive definite")
+
+    # q RHS -> x_prime is M-by-q
+    x_prime = A_solve(b, **kwargs)
+    z = kappa.T @ x_prime  # p-by-q
+
+    # y is p-by-q
+    y = linalg.cho_solve((c, lower), z)
+    return x_prime - xi @ y
+
+
+def solve_block_plus_one(
+    b: npt.NDArray[np.float64],
+    A12: npt.NDArray[np.float64],
+    A22: float,
+    A11_solve: Callable[..., npt.NDArray[np.float64]],
+    **kwargs: Any,
+) -> npt.NDArray[np.float64]:
+    """Solve H * x = b.
+
+    Solves a linear system of equations where H has a block structure:
+         _              _
+        |    A11    A12  |
+    H = |                |.
+        |_  A12^T   A22 _|
+
+    We assume that A11 has some special structure that allows us to solve A11 * y = c
+    efficiencly; that A12 is a vector, and A22 a scalar.
+
+    Parameters
+    ----------
+     b : npt.NDArray[np.float64]
+        Right hand side. Can be either a vector or a matrix, in which case we solve the
+        system for each column of b.
+     A12 : npt.NDArray[np.float64]
+        Last row/column of H, other than the bottom right element.
+     A22 : float
+        The bottom right element of H.
+     A11_solve : Callable
+        A function that solves A11 * y = c. The first argument to A11_solve will be c.
+        Additional arguments will be passed via **kwargs. A11_solve should be able to
+        accept multiple right-hand-sides.
+     kwargs
+        Extra arguments to pass to A11_solve.
+
+    Returns
+    -------
+     x : npt.NDArray[np.float64]
+        The solution.
+
+    Notes
+    -----
+    Uses the Schur complement to solve the system efficiently. Assume that it takes t
+    flops to solve A11 * y = c. Assume A11 is square of dimension M, so that H is square
+    of dimension M + 1. Let b1 be the first M rows of b and b2 the last row. Assume
+    there are q right-hand-sides, so that b has q columns. Let x1 be the first M rows of
+    x, and x2 the last row.
+
+    First form A12' = A11^{-1} A12. This involves 1 solve with A11, or t flops. Next
+    form b1' = A11^{-1} b1, which takes q * t flops. (Passing multiple right hand sides
+    avoids duplicate calculations, so it may be less than q * t flops.)
+
+    Form the Schur complement, s = A22 - A12^T * A12', which is a scalar. Forming s
+    involves a dot products of length M, or 2 * M flops. If H and A11 are both positive
+    definite, then s > 0.
+
+    Calculate x2 = (b2 - A12^T * b1') / s. It takes 2 * M * q flops to form the q right
+    hand sides and then q divisions by s. x2 is either scalar of a vector of length q.
+
+    Calculate x1 = b1' - A12' * x2 in 2 * M * q flops. Concatenate x1 and x2 as the
+    return value. In total, that's (q + 1) * t + 2 * M * (2 * q + 1) flops.
+
+    """
+    if A12.ndim != 1:
+        raise ValueError("Dimension mismatch")
+
+    M = A12.shape[0]
+    if b.shape[0] != M + 1:
+        raise ValueError("Dimension mismatch")
 
     if b.ndim == 1:
-        if b.shape != eta_inverse.shape:
-            raise ValueError("b and eta_inverse must have the same length.")
-        x_prime = b * eta_inverse
-        return x_prime - den * (np.dot(zeta, x_prime) * xi)
+        b1 = b[:M]
+        b2 = b[M]
     elif b.ndim == 2:
-        if b.shape[0] != eta_inverse.shape[0]:
-            raise ValueError("Number of rows in beta must match length of eta_inverse.")
-        x_prime = b * eta_inverse[:, np.newaxis]
-        return x_prime - den * np.outer(xi, zeta.T @ x_prime)
+        b1 = b[:M, :]
+        b2 = b[M, :]
     else:
         raise ValueError("b must be either a 1D or 2D NumPy array.")
+
+    A12_prime = A11_solve(A12, **kwargs)
+    b1_prime = A11_solve(b1, **kwargs)
+    s = A22 - np.dot(A12, A12_prime)
+    if s <= 0.0:
+        raise NewtonStepError("H is not positive definite")
+
+    # Calculate x
+    x = np.zeros_like(b)
+    if b.ndim == 1:
+        x[M] = (b2 - np.dot(A12, b1_prime)) / s
+        x[0:M] = b1_prime - A12_prime * x[M]
+        return x
+
+    x[M, :] = (b2 - A12.T @ b1_prime) / s
+    x[0:M, :] = b1_prime - np.outer(A12_prime, x[M, :])
+    return x
+
+
+def solve_with_schur(
+    b: npt.NDArray[np.float64],
+    A12: npt.NDArray[np.float64],
+    A22: npt.NDArray[np.float64],
+    A11_solve: Callable[..., npt.NDArray[np.float64]],
+    **kwargs: Any,
+) -> npt.NDArray[np.float64]:
+    """Solve H * x = b.
+
+    Solves a linear system of equations where H has a block structure:
+         _                 _
+        |    A11      A12   |
+    H = |                   |.
+        |_  A12^T     A22  _|
+
+    We assume that A11 has some special structure that allows us to solve A11 * y = c
+    efficiencly.
+
+    Parameters
+    ----------
+     b : npt.NDArray[np.float64]
+        Right hand side. Can be either a vector or a matrix, in which case we solve the
+        system for each column of b.
+     A12, A22 : npt.NDArray[np.float64]
+        Components of H.
+     A11_solve : Callable
+        A function that solves A11 * y = c. The first argument to A11_solve will be c.
+        Additional arguments will be passed via **kwargs. A11_solve should be able to
+        accept multiple right-hand-sides.
+     kwargs
+        Extra arguments to pass to A11_solve.
+
+    Returns
+    -------
+     x : npt.NDArray[np.float64]
+        The solution.
+
+    Notes
+    -----
+    Uses the Schur complement to solve the system efficiently. Assume that it takes t
+    flops to solve A11 * y = c. Assume A11 is square of dimension M, and that A12 has p
+    columns, so that H is square of dimension M + p. Let b1 be the first M rows of b and
+    b2 the last p. Assume there are q right-hand-sides, so that b has q columns. Let x1
+    be the first M rows of x, and x2 the last row.
+
+    First form A12' = A11^{-1} A12. This involves p solves with A11, or p * t flops.
+    (Passing multiple right hand sides avoids duplicate calculations, so it may be less
+    than p * t flops.) Next form b1' = A11^{-1} b1, which takes q * t flops.
+
+    Form the Schur complement, S = A22 - A12^T * A12', which is p-by-p. Forming S
+    involves p^2 dot products of length M, or 2 * M * p^2 flops. If H and A11 are both
+    positive definite, then so is S.
+
+    Determine x2 by solving S * x2 = b2 - A12^T * b1'. It takes 2 * M * p * q flops to
+    form the q right hand sides, plus (1/3) * p^3 flops to compute the Cholesky
+    decomposition of S, plus 2 * p^2 * q flops to solve the q right hand sides. x2 is
+    p-by-q.
+
+    Calculate x1 = b1' - A12' * x2 in 2 * M * p * q flops. Concatenate x1 and x2 as the
+    return value. In total, that's (p + q) * t + 2 * M * p * (p + 2 * q) + (1/3) * p^3
+    + 2 * p^2 * q
+
+
+    """
+    if A12.ndim <= 1 or A12.shape[1] <= 1:
+        raise ValueError("Please use `solve_block_plus_one` for this.")
+
+    if A12.ndim > 2:
+        raise ValueError("Dimension mismatch: A12 should be a matrix.")
+
+    M, p = A12.shape
+    if A22.ndim != 2 or not all(s == p for s in A22.shape):
+        raise ValueError(f"Dimension mismatch: {A22.shape=:}; expected ({p}, {p}).")
+
+    if b.shape[0] != M + p:
+        raise ValueError(f"Dimension mismatch: {b.shape[0]=:}; expected {M + p}.")
+
+    if b.ndim == 1:
+        b1 = b[:M]
+        b2 = b[M:]
+    elif b.ndim == 2:
+        b1 = b[:M, :]
+        b2 = b[M:, :]
+    else:
+        raise ValueError("b must be either a 1D or 2D NumPy array.")
+
+    A12_prime = A11_solve(A12, **kwargs)
+    b1_prime = A11_solve(b1, **kwargs)
+    S = A22 - A12.T @ A12_prime
+
+    try:
+        c, lower = linalg.cho_factor(S, lower=True)
+        x2 = linalg.cho_solve((c, lower), b2 - A12.T @ b1_prime)
+    except np.linalg.LinAlgError:
+        raise NewtonStepError("H is not positive definite")
+
+    x1 = b1_prime - A12_prime @ x2
+    if b.ndim == 1:
+        return np.concatenate([x1, x2])
+
+    return np.vstack([x1, x2])
 
 
 def solve_arrow_sparsity_pattern(
@@ -293,6 +512,21 @@ def solve_arrow_sparsity_pattern(
         raise ValueError("Dimension mismatch: eta and zeta had different dimensions.")
 
     M = eta.shape[0]
+    if b.shape[0] != M + 1:
+        raise ValueError(
+            "Dimension mismatch: b must have M + 1 rows, where M = len(eta)."
+        )
+
+    if b.ndim == 1:
+        b1 = b[:M]
+        b2 = b[M]
+        b1_prime = b1 / eta
+    elif b.ndim == 2:
+        b1 = b[:M, :]
+        b2 = b[M, :]
+        b1_prime = b1 / eta[:, np.newaxis]
+    else:
+        raise ValueError("b must be either a 1D or 2D NumPy array.")
 
     # Calculate diag(eta)^{-1} * zeta and psi^2
     diag_eta_inverse_dot_zeta = zeta / eta
@@ -303,97 +537,12 @@ def solve_arrow_sparsity_pattern(
     # Calculate x
     x = np.zeros_like(b)
     if b.ndim == 1:
-        if b.shape[0] != M + 1:
-            raise ValueError(
-                "Dimension mismatch: b must have M + 1 entries, where M = len(eta)."
-            )
-        x[M] = (b[M] - np.dot(diag_eta_inverse_dot_zeta, b[0:M])) / psi_squared
-        x[0:M] = b[0:M] / eta - x[M] * diag_eta_inverse_dot_zeta
-    elif b.ndim == 2:
-        if b.shape[0] != M + 1:
-            raise ValueError(
-                "Dimension mismatch: b must have M + 1 rows, where M = len(eta)."
-            )
-        x[M, :] = (b[M, :] - (diag_eta_inverse_dot_zeta.T @ b[0:M, :])) / psi_squared
-        x[0:M, :] = b[0:M, :] / eta[:, np.newaxis] - np.outer(
-            diag_eta_inverse_dot_zeta, x[M, :]
-        )
-    else:
-        raise ValueError("Dimension mismatch: b must be either a 1D or 2D NumPy array.")
+        x[M] = (b2 - np.dot(zeta, b1_prime)) / psi_squared
+        x[0:M] = b1_prime - diag_eta_inverse_dot_zeta * x[M]
+        return x
 
-    return x
-
-
-def solve_arrow_sparsity_pattern_phase1(
-    b: npt.NDArray[np.float64],
-    eta_inverse: npt.NDArray[np.float64],
-    one_over_psi_squared: float,
-) -> npt.NDArray[np.float64]:
-    """Solve H * x = b.
-
-    Solves a linear system of equations where H has an arrow sparsity pattern:
-         _                 _
-        |  diag(eta)   eta  |
-    H = |                   |
-        |_   eta^T   theta _|
-
-    Because of this structure, we can solve the system in linear time. See Notes for
-    more details.
-
-    Parameters
-    ----------
-     b : npt.NDArray[np.float64]
-        Right hand side. Can be either a vector or a matrix, in which case we solve the
-        system for each column of b.
-     eta_inverse : npt.NDArray[np.float64]
-        One divided by the diagonal elements of the upper left block of H.
-     one_over_psi_squared : float
-        1.0 / (theta - np.sum(eta))
-
-    Returns
-    -------
-     x : npt.NDArray[np.float64]
-        The solution.
-
-    Notes
-    -----
-    Like `solve_arrow_sparsity_pattern`, but for the specific instance used to solve:
-      minimize    s
-      subject to  A * x = b
-                  -x <= s.
-
-    In this case, eta[i]^{-1} = (x_i + s)^2, diag_eta_inverse_dot_zeta[i] = 1.0, and
-    1 / psi_squared = (s0 + eps - s)^2 / M. Thus, we can solve the system both faster
-    and with more numerical stability.
-
-    `solve_arrow_sparsity_pattern` uses 2*M + 1 divides, 3*M multiplies, and 3*M adds,
-    or 8*M + 1 flops. `solve_arrow_sparsity_pattern_phase1` uses 0 divides, M + 1
-    multiplies, and 2 * M + 1 adds, or 3*M + 2 flops.
-
-    """
-    if not np.all(eta_inverse > 0) or one_over_psi_squared <= 0:
-        raise NewtonStepError("Hessian is not strictly positive definite.")
-
-    M = eta_inverse.shape[0]
-    # Calculate x
-    x = np.zeros_like(b)
-    if b.ndim == 1:
-        if b.shape[0] != M + 1:
-            raise ValueError(
-                "Dimension mismatch: b must have M + 1 entries, where M = len(eta)."
-            )
-        x[M] = (b[M] - np.sum(b[0:M])) * one_over_psi_squared
-        x[0:M] = b[0:M] * eta_inverse - x[M]
-    elif b.ndim == 2:
-        if b.shape[0] != M + 1:
-            raise ValueError(
-                "Dimension mismatch: b must have M + 1 rows, where M = len(eta)."
-            )
-        x[M, :] = (b[M, :] - np.sum(b[0:M, :], axis=0)) * one_over_psi_squared
-        x[0:M, :] = b[0:M, :] * eta_inverse[:, np.newaxis] - x[M, :]
-    else:
-        raise ValueError("Dimension mismatch: b must be either a 1D or 2D NumPy array.")
-
+    x[M, :] = (b2 - zeta.T @ b1_prime) / psi_squared
+    x[0:M, :] = b1_prime - np.outer(diag_eta_inverse_dot_zeta, x[M, :])
     return x
 
 
@@ -401,7 +550,7 @@ def solve_kkt_system(
     A: npt.NDArray[np.float64],
     g: npt.NDArray[np.float64],
     hessian_solve: Callable[..., npt.NDArray[np.float64]],
-    **kwargs,
+    **kwargs: Any,
 ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
     """Solve a KKT system of equations.
 
