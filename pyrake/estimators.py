@@ -1564,10 +1564,13 @@ class RatioEstimator(WeightingEstimator):
             np.sum(w) ** 2.0
         )
 
-        return (
-            ((1.0 / mu_den) ** 2.0) * var_num
-            + ((mu_num / (mu_den**2.0)) ** 2.0) * var_den
-            - (2.0 * mu_num / (mu_den**3.0)) * cov_num_den
+        return max(
+            0.0,
+            (
+                ((1.0 / mu_den) ** 2.0) * var_num
+                + ((mu_num / (mu_den**2.0)) ** 2.0) * var_den
+                - (2.0 * mu_num / (mu_den**3.0)) * cov_num_den
+            ),
         )
 
     def sensitivity_analysis(self, gamma: float = 6.0) -> tuple[float, float]:
