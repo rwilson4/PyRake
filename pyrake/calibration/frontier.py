@@ -196,7 +196,7 @@ class EfficientFrontier:
         w0 = res_min.solution
         phi_min = np.mean(w0 * w0)
         weights = [w0]
-        variances = [phi_min]
+        variances = [float(phi_min)]
         lagrange_multipliers = [0.0]
         distances = [self.rake.distance.evaluate(w0)]
 
@@ -219,7 +219,7 @@ class EfficientFrontier:
             ipm_res = self.rake.solve()
 
             weights.append(ipm_res.solution)
-            variances.append(phi)
+            variances.append(float(phi))
             lagrange_multipliers.append(ipm_res.inequality_multipliers[-1])
             distances.append(ipm_res.objective_value)
             ipm_results.append(ipm_res)

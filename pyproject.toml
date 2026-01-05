@@ -19,6 +19,8 @@ typing-extensions = "^4.15.0"
 pytest = "^8.3.5"
 black = "^25.1.0"
 ruff = "^0.11.6"
+mypy = "^1.14.0"
+pandas-stubs = "^2.2.0"
 
 [build-system]
 requires = ["poetry-core"]
@@ -131,3 +133,61 @@ indent-style = "space"
 skip-magic-trailing-comma = false
 line-ending = "auto"
 docstring-code-format = true
+
+# Mypy configuration
+[tool.mypy]
+# Python version
+python_version = "3.11"
+
+# Import discovery
+files = ["pyrake", "test"]
+mypy_path = "$MYPY_CONFIG_FILE_DIR"
+namespace_packages = true
+explicit_package_bases = true
+
+# Platform configuration
+platform = "darwin"
+
+# Strictness settings - progressive approach
+# Start with moderate strictness, can be increased over time
+check_untyped_defs = true
+disallow_any_generics = true
+disallow_incomplete_defs = false  # Set to true once codebase is mostly typed
+disallow_subclassing_any = true
+disallow_untyped_calls = false  # Set to true for stricter checking
+disallow_untyped_decorators = false  # Common in scientific code
+disallow_untyped_defs = false  # Set to true once codebase is mostly typed
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_return_any = false  # Scientific libraries often use Any
+warn_unused_configs = true
+warn_unused_ignores = true
+
+# Error messages
+pretty = true
+show_error_codes = true
+show_error_context = true
+
+# Miscellaneous strictness flags
+strict_equality = true
+extra_checks = true
+
+# Warnings
+warn_unreachable = true
+warn_no_return = true
+
+# Per-module options for third-party libraries without stubs
+[[tool.mypy.overrides]]
+module = [
+    "scipy.*",
+    "matplotlib.*",
+    "seaborn.*",
+]
+ignore_missing_imports = true
+
+# Test files can be less strict
+[[tool.mypy.overrides]]
+module = "test.*"
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+check_untyped_defs = false

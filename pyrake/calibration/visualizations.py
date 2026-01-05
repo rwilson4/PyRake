@@ -277,13 +277,13 @@ def plot_balance(
 
 
 def plot_balance_2_sample(
-    X1: npt.NDArray,
-    X2: npt.NDArray,
+    X1: npt.NDArray[np.float64],
+    X2: npt.NDArray[np.float64],
     covariates: list[str],
-    weights1: dict[str, npt.NDArray],
-    weights2: dict[str, npt.NDArray],
-    sigma1: npt.NDArray | None = None,
-    sigma2: npt.NDArray | None = None,
+    weights1: dict[str, npt.NDArray[np.float64]],
+    weights2: dict[str, npt.NDArray[np.float64]],
+    sigma1: npt.NDArray[np.float64] | None = None,
+    sigma2: npt.NDArray[np.float64] | None = None,
     signed: bool = True,
     title: str | None = None,
     quantify_imbalance: bool = True,

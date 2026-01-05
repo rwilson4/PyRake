@@ -1,5 +1,7 @@
 """Estimation visualizations."""
 
+from typing import Literal, cast
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -69,7 +71,7 @@ def meta_analysis(
             [
                 estimator.pvalue(
                     null_value=null_value,
-                    alternative=alternative,
+                    alternative=cast("Literal['less', 'greater']", alternative),
                 )
                 for null_value in null_values
             ]
@@ -108,18 +110,18 @@ def meta_analysis(
 
     # Calculate the point estimate as the null hypothesis with maximal p-value.
     # If there are multiple hypotheses with that same p-value, use the midpoint.
-    pe_low = df_meta["Null Hypothesis"].loc[df_meta["Combined"].values.argmax()]
+    pe_low = df_meta["Null Hypothesis"].loc[df_meta["Combined"].values.argmax()]  # type: ignore[union-attr]
     pe_high = df_meta["Null Hypothesis"].loc[
-        len(null_values) - 1 - df_meta["Combined"].values[::-1].argmax()
+        len(null_values) - 1 - df_meta["Combined"].values[::-1].argmax()  # type: ignore[union-attr]
     ]
     point_estimate = 0.5 * (pe_low + pe_high)
 
     # Find the first and last null hypotheses with p-values larger than the threshold.
     ci_low = df_meta["Null Hypothesis"].loc[
-        (df_meta["Combined"] >= alpha).values.argmax()
+        (df_meta["Combined"] >= alpha).values.argmax()  # type: ignore[union-attr]
     ]
     ci_high = df_meta["Null Hypothesis"].loc[
-        len(null_values) - 1 - (df_meta["Combined"].values[::-1] >= alpha).argmax()
+        len(null_values) - 1 - (df_meta["Combined"].values[::-1] >= alpha).argmax()  # type: ignore[union-attr,operator]
     ]
 
     # Plot the p-value curves for each platform and the combination.

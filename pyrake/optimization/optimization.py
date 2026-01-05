@@ -251,7 +251,7 @@ class Optimizer(ABC):
 
     def __init__(
         self,
-        phase1_solver: type["PhaseISolver"] | None = None,
+        phase1_solver: "PhaseISolver | None" = None,
         settings: OptimizationSettings | None = None,
         **kwargs: Any,
     ) -> None:
@@ -324,7 +324,7 @@ class BaseInteriorPointMethodSolver(Optimizer):
 
     def __init__(
         self,
-        phase1_solver: type[PhaseISolver] | None = None,
+        phase1_solver: "PhaseISolver | None" = None,
         settings: OptimizationSettings | None = None,
         **kwargs: Any,
     ) -> None:
@@ -462,8 +462,8 @@ class BaseInteriorPointMethodSolver(Optimizer):
                 )
 
             x = result.solution
-            equality_multipliers = result.equality_multipliers
-            inequality_multipliers = result.inequality_multipliers
+            equality_multipliers = result.equality_multipliers  # type: ignore[assignment]
+            inequality_multipliers = result.inequality_multipliers  # type: ignore[assignment]
             inner_nits.append(result.nits)
             inner_suboptimalities.append(result.suboptimalities)
             duality_gaps.append(result.objective_value - result.dual_value)
@@ -941,7 +941,7 @@ class BaseInteriorPointMethodSolver(Optimizer):
 
     @abstractmethod
     def hessian_multiply(
-        self, x: npt.NDArray, t: float, y: npt.NDArray
+        self, x: npt.NDArray[np.float64], t: float, y: npt.NDArray[np.float64]
     ) -> npt.NDArray[np.float64]:
         """Multiply H * y."""
 
@@ -1062,7 +1062,7 @@ class PhaseIInteriorPointSolver(BaseInteriorPointMethodSolver, PhaseISolver):
 
     def __init__(
         self,
-        phase1_solver: type[PhaseISolver] | None = None,
+        phase1_solver: "PhaseISolver | None" = None,
         settings: OptimizationSettings | None = None,
         **kwargs: Any,
     ) -> None:

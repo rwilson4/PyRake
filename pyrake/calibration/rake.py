@@ -524,7 +524,7 @@ class Rake(EqualityConstrainedInteriorPointMethodSolver, InteriorPointMethodSolv
         return self.distance.gradient(x)
 
     def hessian_multiply(
-        self, x: npt.NDArray, t: float, y: npt.NDArray
+        self, x: npt.NDArray[np.float64], t: float, y: npt.NDArray[np.float64]
     ) -> npt.NDArray[np.float64]:
         """Multiply H * y.
 
