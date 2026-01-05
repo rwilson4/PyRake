@@ -1,12 +1,8 @@
 """Estimation utilities."""
 
-from .estimators import (
+from .base_classes import Estimand, SimpleEstimand, WeightingEstimator
+from .population import (
     AIPWEstimator,
-    ATCEstimator,
-    ATEEstimator,
-    ATTEstimator,
-    DoubleSamplingEstimand,
-    Estimand,
     IPWEstimator,
     MeanEstimator,
     NonRespondentMean,
@@ -14,32 +10,38 @@ from .estimators import (
     RatioEstimator,
     SAIPWEstimator,
     SampleMean,
-    SimpleDifferenceEstimator,
     SIPWEstimator,
+)
+from .treatment_effects import (
+    ATCEstimator,
+    ATEEstimator,
+    ATTEstimator,
+    DoubleSamplingEstimand,
+    SimpleDifferenceEstimator,
     TreatmentEffectEstimator,
     TreatmentEffectRatioEstimator,
-    WeightingEstimator,
 )
 from .visualizations import meta_analysis
 
 __all__ = [
+    "WeightingEstimator",
+    "MeanEstimator",
+    "IPWEstimator",
     "AIPWEstimator",
-    "ATCEstimator",
+    "SIPWEstimator",
+    "SAIPWEstimator",
+    "RatioEstimator",
+    "TreatmentEffectEstimator",
+    "SimpleDifferenceEstimator",
     "ATEEstimator",
     "ATTEstimator",
-    "DoubleSamplingEstimand",
-    "Estimand",
-    "IPWEstimator",
-    "MeanEstimator",
-    "NonRespondentMean",
-    "PopulationMean",
-    "RatioEstimator",
-    "SAIPWEstimator",
-    "SampleMean",
-    "SimpleDifferenceEstimator",
-    "SIPWEstimator",
-    "TreatmentEffectEstimator",
+    "ATCEstimator",
     "TreatmentEffectRatioEstimator",
-    "WeightingEstimator",
+    "Estimand",
+    "SimpleEstimand",
+    "PopulationMean",
+    "NonRespondentMean",
+    "SampleMean",
+    "DoubleSamplingEstimand",
     "meta_analysis",
 ]

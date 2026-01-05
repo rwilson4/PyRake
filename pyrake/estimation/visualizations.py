@@ -2,14 +2,13 @@
 
 import matplotlib.pyplot as plt
 import numpy as np
-import numpy.typing as npt
 import pandas as pd
 import scipy.stats as stats
 import seaborn as sns
 from matplotlib import ticker
 from matplotlib.axes import Axes
 
-from .estimators import WeightingEstimator
+from .base_classes import WeightingEstimator
 
 
 def meta_analysis(
