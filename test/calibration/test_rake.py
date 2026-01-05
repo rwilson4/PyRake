@@ -7,17 +7,17 @@ import pytest
 from scipy.special import expit, logit
 
 
-from pyrake.distance_metrics import (
+from pyrake.calibration.distance_metrics import (
     Huber,
     KLDivergence,
     SquaredL2,
 )
-from pyrake.optimization import (
+from pyrake.optimization.optimization import (
     InteriorPointMethodResult,
     OptimizationSettings,
     ProblemCertifiablyInfeasibleError,
 )
-from pyrake.rake import Rake
+from pyrake.calibration.rake import Rake
 
 
 @pytest.mark.parametrize(

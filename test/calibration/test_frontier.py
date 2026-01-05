@@ -6,9 +6,9 @@ import numpy as np
 import pytest
 from scipy.special import expit, logit
 
-from pyrake.distance_metrics import KLDivergence
-from pyrake.frontier import EfficientFrontier
-from pyrake.rake import Rake
+from pyrake.calibration.distance_metrics import KLDivergence
+from pyrake.calibration.frontier import EfficientFrontier
+from pyrake.calibration.rake import Rake
 
 
 @pytest.mark.parametrize(

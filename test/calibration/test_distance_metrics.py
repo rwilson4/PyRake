@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from pyrake.distance_metrics import (
+from pyrake.calibration.distance_metrics import (
     Huber,
     KLDivergence,
     SquaredL2,

@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 from scipy import linalg
 
-from pyrake.numerical_helpers import (
+from pyrake.optimization.numerical_helpers import (
     solve_arrow_sparsity_pattern,
     solve_block_plus_one,
     solve_diagonal,

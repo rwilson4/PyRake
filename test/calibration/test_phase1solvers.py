@@ -6,17 +6,17 @@ import numpy as np
 import pytest
 from scipy import linalg, optimize
 
-from pyrake.exceptions import (
+from pyrake.optimization.exceptions import (
     InteriorPointMethodError,
     ProblemInfeasibleError,
 )
-from pyrake.optimization import (
+from pyrake.optimization.optimization import (
     InteriorPointMethodResult,
     OptimizationSettings,
     ProblemCertifiablyInfeasibleError,
     ProblemMarginallyFeasibleError,
 )
-from pyrake.phase1solvers import (
+from pyrake.calibration.phase1solvers import (
     EqualitySolver,
     EqualityWithBoundsAndImbalanceConstraintSolver,
     EqualityWithBoundsAndNormConstraintSolver,

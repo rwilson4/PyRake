@@ -8,21 +8,20 @@ import numpy as np
 import numpy.typing as npt
 from scipy import linalg
 
-from .exceptions import NewtonStepError, ProblemInfeasibleError
-from .numerical_helpers import (
-    solve_block_plus_one,
-    solve_diagonal_eta_inverse,
-    solve_kkt_system,
-    solve_rank_p_update,
-)
-from .optimization import (
+from ..optimization import (
     EqualityConstrainedInteriorPointMethodSolver,
     NewtonResult,
+    NewtonStepError,
     OptimizationResult,
     OptimizationSettings,
     PhaseIInteriorPointSolver,
     PhaseISolver,
     ProblemCertifiablyInfeasibleError,
+    ProblemInfeasibleError,
+    solve_block_plus_one,
+    solve_diagonal_eta_inverse,
+    solve_kkt_system,
+    solve_rank_p_update,
 )
 
 

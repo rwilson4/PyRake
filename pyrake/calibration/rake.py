@@ -4,17 +4,15 @@ import numpy as np
 import numpy.typing as npt
 
 from .distance_metrics import Distance
-from .numerical_helpers import (
-    solve_diagonal_eta_inverse,
-    solve_kkt_system,
-    solve_rank_one_update,
-    solve_rank_p_update,
-)
-from .optimization import (
+from ..optimization import (
     EqualityConstrainedInteriorPointMethodSolver,
     InteriorPointMethodSolver,
     OptimizationSettings,
     PhaseISolver,
+    solve_diagonal_eta_inverse,
+    solve_kkt_system,
+    solve_rank_one_update,
+    solve_rank_p_update,
 )
 from .phase1solvers import (
     EqualityWithBoundsAndImbalanceConstraintSolver,

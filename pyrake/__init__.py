@@ -1,7 +1,17 @@
 """Balancing Weights and Raking."""
 
-from .distance_metrics import Huber, KLDivergence, SquaredL2
-from .estimators import (
+from .calibration import (
+    EfficientFrontier,
+    EfficientFrontierResults,
+    Huber,
+    JointCalibrator,
+    KLDivergence,
+    Rake,
+    SquaredL2,
+    plot_balance,
+    plot_balance_2_sample,
+)
+from .estimation import (
     AIPWEstimator,
     ATCEstimator,
     ATEEstimator,
@@ -20,36 +30,28 @@ from .estimators import (
     TreatmentEffectEstimator,
     TreatmentEffectRatioEstimator,
     WeightingEstimator,
+    meta_analysis,
 )
-from .exceptions import (
+from .optimization import (
     BacktrackingLineSearchError,
     CenteringStepError,
     ConstraintBoundaryError,
     InteriorPointMethodError,
-    InvalidDescentDirectionError,
-    NewtonStepError,
-    OptimizationError,
-    ProblemInfeasibleError,
-    SevereCurvatureError,
-)
-from .frontier import EfficientFrontier, EfficientFrontierResults
-from .optimization import (
     InteriorPointMethodResult,
     InteriorPointMethodSolver,
+    InvalidDescentDirectionError,
     NewtonResult,
+    NewtonStepError,
+    OptimizationError,
     OptimizationResult,
     OptimizationSettings,
     Optimizer,
     PhaseIInteriorPointSolver,
     PhaseISolver,
     ProblemCertifiablyInfeasibleError,
+    ProblemInfeasibleError,
     ProblemMarginallyFeasibleError,
-)
-from .rake import JointCalibrator, Rake
-from .visualizations import (
-    meta_analysis,
-    plot_balance,
-    plot_balance_2_sample,
+    SevereCurvatureError,
 )
 
 __all__ = [

@@ -10,7 +10,7 @@ import pytest
 from scipy import optimize, stats
 from scipy.special import expit, logit
 
-from pyrake.estimators import (
+from pyrake.estimation.estimators import (
     AIPWEstimator,
     ATCEstimator,
     ATEEstimator,
