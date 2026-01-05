@@ -147,7 +147,7 @@ class EfficientFrontierResults:
         distances = np.array(
             [
                 abs(dy * x - dx * y + x2y1_y2x1)
-                for x, y in zip(self.distances, self.variances)
+                for x, y in zip(self.distances, self.variances, strict=False)
             ]
         )
         return int(distances.argmax())
@@ -183,7 +183,7 @@ class EfficientFrontier:
             res_min = self.rake.phase1_solver.solve(fully_optimize=True)
         elif isinstance(
             self.rake.phase1_solver,
-            (EqualityWithBoundsSolver, EqualityWithBoundsAndImbalanceConstraintSolver),
+            EqualityWithBoundsSolver | EqualityWithBoundsAndImbalanceConstraintSolver,
         ):
             res_min = EqualityWithBoundsAndNormConstraintSolver(
                 phi=np.inf,

@@ -11,7 +11,6 @@ import scipy.stats as stats
 import seaborn as sns
 from matplotlib.axes import Axes
 
-
 WilcoxonResult = namedtuple(
     "WilcoxonResult", ["statistic", "zstatistic", "pvalue", "log_pvalue"]
 )
@@ -182,7 +181,7 @@ def plot_balance(
         )
 
     if test is None:
-        test_nn: list[str] = ["z"] * p
+        test_nn: list[Literal["z", "wilcoxon"]] = ["z"] * p
     elif isinstance(test, list):
         if len(test) != p:
             raise ValueError("`test` must be scalar or same length as `mu`")
@@ -248,7 +247,7 @@ def plot_balance(
                 )
             )
         )
-        for key in weights.keys():
+        for key in weights:
             df_balance["Method"] = np.where(
                 df_balance["Method"] == key,
                 f"{key} (imbalance: {imbalance.loc[key]:,.0f})",
@@ -403,7 +402,7 @@ def plot_balance_2_sample(
                 )
             )
         )
-        for key in weights1.keys():
+        for key in weights1:
             df_balance["Method"] = np.where(
                 df_balance["Method"] == key,
                 f"{key} (imbalance: {imbalance.loc[key]:,.0f})",

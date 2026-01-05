@@ -23,3 +23,111 @@ ruff = "^0.11.6"
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+# Black configuration
+[tool.black]
+line-length = 88
+target-version = ['py311']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | build
+  | dist
+)/
+'''
+
+# Ruff configuration
+[tool.ruff]
+# Set line length to match black
+line-length = 88
+target-version = "py311"
+
+# Exclude common directories
+exclude = [
+    ".bzr",
+    ".direnv",
+    ".eggs",
+    ".git",
+    ".git-rewrite",
+    ".hg",
+    ".mypy_cache",
+    ".nox",
+    ".pants.d",
+    ".pytype",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".venv",
+    "__pypackages__",
+    "_build",
+    "buck-out",
+    "build",
+    "dist",
+    "node_modules",
+    "venv",
+]
+
+[tool.ruff.lint]
+# Enable recommended rules plus additional useful ones
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # pyflakes
+    "I",      # isort
+    "N",      # pep8-naming
+    "UP",     # pyupgrade
+    "B",      # flake8-bugbear
+    "C4",     # flake8-comprehensions
+    "SIM",    # flake8-simplify
+    "TCH",    # flake8-type-checking
+    "NPY",    # numpy-specific rules
+    "RUF",    # ruff-specific rules
+]
+
+# Ignore specific rules that may conflict with scientific computing practices
+ignore = [
+    "E501",   # Line too long (handled by black)
+    "E741",   # Ambiguous variable name (common in math: l, I, O)
+    "N803",   # Argument name should be lowercase (allows single-letter math vars)
+    "N806",   # Variable in function should be lowercase (allows math notation like M, N, X)
+    "NPY002", # Allow numpy.random.Generator for newer code
+    "SIM108", # Use ternary operator (sometimes clearer to use if-else)
+]
+
+# Allow autofix for all enabled rules (when `--fix`) is provided
+fixable = ["ALL"]
+unfixable = []
+
+# Allow unused variables when underscore-prefixed
+dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+
+[tool.ruff.lint.per-file-ignores]
+# Test files can have longer lines, assert statements, magic values
+"test/**/*.py" = [
+    "B011",   # Don't require assertRaises for tests
+    "N802",   # Function name should be lowercase (test class methods can be camelCase)
+]
+
+[tool.ruff.lint.isort]
+# Configure import sorting to match your project structure
+known-first-party = ["pyrake"]
+section-order = ["future", "standard-library", "third-party", "first-party", "local-folder"]
+
+[tool.ruff.lint.pydocstyle]
+# Use numpy-style docstrings
+convention = "numpy"
+
+[tool.ruff.format]
+# Use black-compatible formatting
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+docstring-code-format = true

@@ -151,8 +151,8 @@ class EqualitySolver(PhaseISolver):
 
         return OptimizationResult(solution=x)
 
-    @cache
-    def svd_A(
+    @cache  # noqa: B019
+    def svd_A(  # noqa: N802
         self,
     ) -> tuple[
         npt.NDArray[np.float32 | np.float64],
@@ -257,7 +257,7 @@ class EqualityWithBoundsSolver(PhaseIInteriorPointSolver):
         return self.A.shape[1] + 1
 
     @property
-    def A(self) -> npt.NDArray[np.float64]:
+    def A(self) -> npt.NDArray[np.float64]:  # noqa: N802
         """Wrap A."""
         if self.phase1_solver is None:
             raise ValueError("PhaseISolver not specified.")
@@ -278,7 +278,7 @@ class EqualityWithBoundsSolver(PhaseIInteriorPointSolver):
 
         return self.phase1_solver.b
 
-    def svd_A(
+    def svd_A(  # noqa: N802
         self,
     ) -> tuple[
         npt.NDArray[np.float32 | np.float64],
@@ -296,9 +296,7 @@ class EqualityWithBoundsSolver(PhaseIInteriorPointSolver):
 
     def is_feasible(self, x: npt.NDArray[np.float64]) -> bool:
         """Determine whether a feasible point has been found."""
-        if np.all(x[0 : self.dimension] > self.lb):
-            return True
-        return False
+        return bool(np.all(x[0 : self.dimension] > self.lb))
 
     def check_for_infeasibility(self, result: NewtonResult) -> None:
         """Check if infeasible."""
@@ -503,7 +501,7 @@ class EqualityWithBoundsSolver(PhaseIInteriorPointSolver):
         mask = (delta_w + delta_s) < 0
         feasibility = np.full_like(delta_w, np.inf, dtype=np.float64)
         lb = self.lb
-        if isinstance(lb, (list, tuple, np.ndarray)):
+        if isinstance(lb, list | tuple | np.ndarray):
             feasibility[mask] = (w[mask] + s - lb[mask]) / -(delta_w[mask] + delta_s)
         else:
             feasibility[mask] = (w[mask] + s - lb) / -(delta_w[mask] + delta_s)
@@ -512,7 +510,7 @@ class EqualityWithBoundsSolver(PhaseIInteriorPointSolver):
             (self.s0_plus_eps - s) / delta_s if delta_s > 0 else np.inf,
         )
 
-        return btls_s
+        return float(btls_s)
 
     def evaluate_objective(self, x: npt.NDArray[np.float64]) -> float:
         """Calculate f0 at w."""
@@ -740,7 +738,7 @@ class EqualityWithBoundsSolver(PhaseIInteriorPointSolver):
         if abs(M * lmbda[M] - (np.sum(lmbda[0:M]) - 1)) > 1e-3:
             return -np.inf
 
-        if isinstance(self.lb, (list, tuple, np.ndarray)):
+        if isinstance(self.lb, list | tuple | np.ndarray):
             lb = np.asarray(self.lb)
         else:
             lb = np.full((M,), self.lb)
@@ -831,7 +829,7 @@ class EqualityWithBoundsAndImbalanceConstraintSolver(
         return self.A.shape[1] + 2 * self.B.shape[0]
 
     @property
-    def A(self) -> npt.NDArray[np.float64]:
+    def A(self) -> npt.NDArray[np.float64]:  # noqa: N802
         """Wrap A."""
         if self.phase1_solver is None:
             raise ValueError("PhaseISolver not specified.")
@@ -852,7 +850,7 @@ class EqualityWithBoundsAndImbalanceConstraintSolver(
 
         return self.phase1_solver.b
 
-    def svd_A(
+    def svd_A(  # noqa: N802
         self,
     ) -> tuple[
         npt.NDArray[np.float32 | np.float64],
@@ -881,9 +879,7 @@ class EqualityWithBoundsAndImbalanceConstraintSolver(
 
     def is_feasible(self, x: npt.NDArray[np.float64]) -> bool:
         """Determine whether a feasible point has been found."""
-        if np.all(np.abs(self.B @ x[0:-1] - self.c) < self.psi):
-            return True
-        return False
+        return bool(np.all(np.abs(self.B @ x[0:-1] - self.c) < self.psi))
 
     def check_for_infeasibility(self, result: NewtonResult) -> None:
         """Check if infeasible."""
@@ -1006,7 +1002,9 @@ class EqualityWithBoundsAndImbalanceConstraintSolver(
         kappa_pos: npt.NDArray[np.float64] = self._hessian_ft_kappa_pos(x, Bx_minus_c)
         kappa_neg: npt.NDArray[np.float64] = self._hessian_ft_kappa_neg(x, Bx_minus_c)
 
-        def A_solve(b: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+        def A_solve(  # noqa: N802
+            b: npt.NDArray[np.float64],
+        ) -> npt.NDArray[np.float64]:
             return solve_rank_p_update(
                 b,
                 kappa=kappa_pos,
@@ -1014,7 +1012,9 @@ class EqualityWithBoundsAndImbalanceConstraintSolver(
                 eta_inverse=eta_inverse,
             )
 
-        def A_solve_nested(b: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+        def A_solve_nested(  # noqa: N802
+            b: npt.NDArray[np.float64],
+        ) -> npt.NDArray[np.float64]:
             return solve_rank_p_update(b, kappa=kappa_neg, A_solve=A_solve)
 
         return solve_kkt_system(
@@ -1044,7 +1044,7 @@ class EqualityWithBoundsAndImbalanceConstraintSolver(
         theta1 = np.inf
         lb = self.lb
         if np.any(mask):
-            if isinstance(lb, (list, tuple, np.ndarray)):
+            if isinstance(lb, list | tuple | np.ndarray):
                 theta1 = np.min((w[mask] - lb[mask]) / -delta_w[mask])
             else:
                 theta1 = np.min((w[mask] - lb) / -delta_w[mask])
@@ -1054,7 +1054,7 @@ class EqualityWithBoundsAndImbalanceConstraintSolver(
         theta2 = np.inf
         psi = self.psi
         if np.any(mask2):
-            if isinstance(psi, (list, tuple, np.ndarray)):
+            if isinstance(psi, list | tuple | np.ndarray):
                 theta2 = np.min(
                     (Bw_minus_c[mask2] + psi[mask2] + s)
                     / np.abs(B_delta_w[mask2] + delta_s)
@@ -1068,7 +1068,7 @@ class EqualityWithBoundsAndImbalanceConstraintSolver(
         mask3 = B_delta_w - delta_s > 0
         theta3 = np.inf
         if np.any(mask3):
-            if isinstance(psi, (list, tuple, np.ndarray)):
+            if isinstance(psi, list | tuple | np.ndarray):
                 theta3 = np.min(
                     -(Bw_minus_c[mask3] - psi[mask3] - s) / (B_delta_w[mask3] - delta_s)
                 )
@@ -1388,7 +1388,7 @@ class EqualityWithBoundsAndImbalanceConstraintSolver(
         if abs(np.sum(lmbda2) + np.sum(lmbda3) - 1) > atol:
             return -np.inf
 
-        if isinstance(self.lb, (list, tuple, np.ndarray)):
+        if isinstance(self.lb, list | tuple | np.ndarray):
             lb = np.asarray(self.lb)
         else:
             lb = np.full((M,), self.lb)
@@ -1507,17 +1507,14 @@ class EqualityWithBoundsAndNormConstraintSolver(
         return self.A.shape[1] + 2 * B.shape[0]
 
     @property
-    def A(self) -> npt.NDArray[np.float64]:
+    def A(self) -> npt.NDArray[np.float64]:  # noqa: N802
         """Wrap A."""
         if self.phase1_solver is None:
             raise ValueError("PhaseISolver not specified.")
 
         if isinstance(
             self.phase1_solver,
-            (
-                EqualityWithBoundsSolver,
-                EqualityWithBoundsAndImbalanceConstraintSolver,
-            ),
+            EqualityWithBoundsSolver | EqualityWithBoundsAndImbalanceConstraintSolver,
         ):
             return self.phase1_solver.A
 
@@ -1531,16 +1528,13 @@ class EqualityWithBoundsAndNormConstraintSolver(
 
         if isinstance(
             self.phase1_solver,
-            (
-                EqualityWithBoundsSolver,
-                EqualityWithBoundsAndImbalanceConstraintSolver,
-            ),
+            EqualityWithBoundsSolver | EqualityWithBoundsAndImbalanceConstraintSolver,
         ):
             return self.phase1_solver.b
 
         raise ValueError("PhaseISolver must be an EqualityWithBoundsSolver.")
 
-    def svd_A(
+    def svd_A(  # noqa: N802
         self,
     ) -> tuple[
         npt.NDArray[np.float32 | np.float64],
@@ -1553,10 +1547,7 @@ class EqualityWithBoundsAndNormConstraintSolver(
 
         if isinstance(
             self.phase1_solver,
-            (
-                EqualityWithBoundsSolver,
-                EqualityWithBoundsAndImbalanceConstraintSolver,
-            ),
+            EqualityWithBoundsSolver | EqualityWithBoundsAndImbalanceConstraintSolver,
         ):
             return self.phase1_solver.svd_A()
 
@@ -1570,17 +1561,14 @@ class EqualityWithBoundsAndNormConstraintSolver(
 
         if isinstance(
             self.phase1_solver,
-            (
-                EqualityWithBoundsSolver,
-                EqualityWithBoundsAndImbalanceConstraintSolver,
-            ),
+            EqualityWithBoundsSolver | EqualityWithBoundsAndImbalanceConstraintSolver,
         ):
             return self.phase1_solver.lb
 
         raise ValueError("PhaseISolver must be an EqualityWithBoundsSolver.")
 
     @property
-    def B(self) -> npt.NDArray[np.float64] | None:
+    def B(self) -> npt.NDArray[np.float64] | None:  # noqa: N802
         """Wrap B."""
         if isinstance(
             self.phase1_solver, EqualityWithBoundsAndImbalanceConstraintSolver
@@ -1696,7 +1684,9 @@ class EqualityWithBoundsAndNormConstraintSolver(
         kappa_pos: npt.NDArray[np.float64] = self._hessian_ft_kappa_pos(x, Bx_minus_c)
         kappa_neg: npt.NDArray[np.float64] = self._hessian_ft_kappa_neg(x, Bx_minus_c)
 
-        def A_solve(b: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+        def A_solve(  # noqa: N802
+            b: npt.NDArray[np.float64],
+        ) -> npt.NDArray[np.float64]:
             return solve_rank_p_update(
                 b,
                 kappa=kappa_pos,
@@ -1704,7 +1694,9 @@ class EqualityWithBoundsAndNormConstraintSolver(
                 eta_inverse=eta_inverse,
             )
 
-        def A_solve_nested(b: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+        def A_solve_nested(  # noqa: N802
+            b: npt.NDArray[np.float64],
+        ) -> npt.NDArray[np.float64]:
             return solve_rank_p_update(b, kappa=kappa_neg, A_solve=A_solve)
 
         return solve_kkt_system(
@@ -1732,7 +1724,7 @@ class EqualityWithBoundsAndNormConstraintSolver(
         theta1 = np.inf
         lb = self.lb
         if np.any(mask1):
-            if isinstance(lb, (list, tuple, np.ndarray)):
+            if isinstance(lb, list | tuple | np.ndarray):
                 theta1 = np.min((x[mask1] - lb[mask1]) / -delta_x[mask1])
             else:
                 theta1 = np.min((x[mask1] - lb) / -delta_x[mask1])
@@ -1749,7 +1741,7 @@ class EqualityWithBoundsAndNormConstraintSolver(
         theta2 = np.inf
         psi = self.psi
         if np.any(mask2):
-            if isinstance(psi, (list, tuple, np.ndarray)):
+            if isinstance(psi, list | tuple | np.ndarray):
                 theta2 = np.min((Bx_minus_c[mask2] + psi[mask2]) / -B_delta_x[mask2])
             else:
                 theta2 = np.min((Bx_minus_c[mask2] + self.psi) / -B_delta_x[mask2])
@@ -1757,7 +1749,7 @@ class EqualityWithBoundsAndNormConstraintSolver(
         mask3 = B_delta_x > 0
         theta3 = np.inf
         if np.any(mask3):
-            if isinstance(psi, (list, tuple, np.ndarray)):
+            if isinstance(psi, list | tuple | np.ndarray):
                 theta3 = np.min(-(Bx_minus_c[mask3] - psi[mask3]) / B_delta_x[mask3])
             else:
                 theta3 = np.min(-(Bx_minus_c[mask3] - psi) / B_delta_x[mask3])
@@ -1951,7 +1943,7 @@ class EqualityWithBoundsAndNormConstraintSolver(
         """
         M = self.dimension
         B = self.B
-        if isinstance(self.lb, (list, tuple, np.ndarray)):
+        if isinstance(self.lb, list | tuple | np.ndarray):
             lb = np.asarray(self.lb)
         else:
             lb = np.full((M,), self.lb)

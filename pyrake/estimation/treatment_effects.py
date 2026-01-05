@@ -1,7 +1,7 @@
 """Treatment effect estimators."""
 
 from collections.abc import Generator
-from typing import Any, Literal, Type
+from typing import Any, Literal
 
 import numpy as np
 import numpy.typing as npt
@@ -196,11 +196,11 @@ class TreatmentEffectEstimator(WeightingEstimator):
             A seed for numpy.random.default_rng. See that documentation for details.
 
         """
-        for control_estimator, treatment_estimator in zip(
+        yield from zip(
             self.control_estimator.resample(B, seed=seed),
             self.treated_estimator.resample(B, seed=seed),
-        ):
-            yield control_estimator, treatment_estimator
+            strict=False,
+        )
 
     def expanded_confidence_interval(
         self,
@@ -335,7 +335,7 @@ class SimpleDifferenceEstimator(TreatmentEffectEstimator):
     ----------
     - Tipton, Elizabeth and Erin Hartman. 2023. "Generalizability and Transportability."
       In Handbook of Matching and Weighting Adjustments for Causal Inference, , pg.
-      39–59. Chapman and Hall/CRC.
+      39--59. Chapman and Hall/CRC.
 
     """
 
@@ -557,13 +557,13 @@ class ATEEstimator(TreatmentEffectEstimator):
 
         sampling_estimand_classes: dict[
             str,
-            Type[PopulationMean | NonRespondentMean | SampleMean],
+            type[PopulationMean | NonRespondentMean | SampleMean],
         ] = {
             "PopulationMean": PopulationMean,
             "NonRespondentMean": NonRespondentMean,
             "SampleMean": SampleMean,
         }
-        sampling_estimand: Type[PopulationMean | NonRespondentMean | SampleMean] = (
+        sampling_estimand: type[PopulationMean | NonRespondentMean | SampleMean] = (
             sampling_estimand_classes[sampling_estimand_class]
         )
 
@@ -733,13 +733,13 @@ class ATTEstimator(TreatmentEffectEstimator):
 
         sampling_estimand_classes: dict[
             str,
-            Type[PopulationMean | NonRespondentMean | SampleMean],
+            type[PopulationMean | NonRespondentMean | SampleMean],
         ] = {
             "PopulationMean": PopulationMean,
             "NonRespondentMean": NonRespondentMean,
             "SampleMean": SampleMean,
         }
-        sampling_estimand: Type[PopulationMean | NonRespondentMean | SampleMean] = (
+        sampling_estimand: type[PopulationMean | NonRespondentMean | SampleMean] = (
             sampling_estimand_classes[sampling_estimand_class]
         )
 
@@ -908,13 +908,13 @@ class ATCEstimator(TreatmentEffectEstimator):
 
         sampling_estimand_classes: dict[
             str,
-            Type[PopulationMean | NonRespondentMean | SampleMean],
+            type[PopulationMean | NonRespondentMean | SampleMean],
         ] = {
             "PopulationMean": PopulationMean,
             "NonRespondentMean": NonRespondentMean,
             "SampleMean": SampleMean,
         }
-        sampling_estimand: Type[PopulationMean | NonRespondentMean | SampleMean] = (
+        sampling_estimand: type[PopulationMean | NonRespondentMean | SampleMean] = (
             sampling_estimand_classes[sampling_estimand_class]
         )
 

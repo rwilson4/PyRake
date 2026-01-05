@@ -2,7 +2,7 @@
 
 import math
 from abc import ABC, abstractmethod, abstractproperty
-from typing import Literal
+from typing import Literal, Self
 
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
@@ -13,7 +13,6 @@ import seaborn as sns
 from matplotlib.axes import Axes
 from matplotlib.lines import Line2D
 from scipy import stats
-from typing_extensions import Self
 
 
 class Estimand(ABC):
@@ -120,9 +119,9 @@ class WeightingEstimator(ABC):
          - Zhao, Qingyuan, Dylan S Small, and Bhaswar B Bhattacharya. 2019. "Sensitivity
            Analysis for Inverse Probability Weighting Estimators via the Percentile
            Bootstrap." Journal of the Royal Statistical Society Series B: Statistical
-           Methodology 81 (4). Oxford University Press: pg. 735–61.
+           Methodology 81 (4). Oxford University Press: pg. 735--61.
          - Fogarty, Colin. 2023. "Sensitivity Analysis." In Handbook of Matching and
-           Weighting Adjustments for Causal Inference, , pg. 553–82. Chapman and
+           Weighting Adjustments for Causal Inference, , pg. 553--82. Chapman and
            Hall/CRC.
 
         """
@@ -214,12 +213,12 @@ class WeightingEstimator(ABC):
         t = (pe - null_value) / se
 
         if alternative == "greater" or alternative == "two-sided":
-            p_greater = stats.norm.sf(t)
+            p_greater = float(stats.norm.sf(t))
             if alternative == "greater":
                 return p_greater
 
         if alternative == "less" or alternative == "two-sided":
-            p_less = stats.norm.cdf(t)
+            p_less = float(stats.norm.cdf(t))
             if alternative == "less":
                 return p_less
 
@@ -265,12 +264,12 @@ class WeightingEstimator(ABC):
             zcrit = stats.norm.isf(alpha)
 
         if alternative == "greater" or alternative == "two-sided":
-            lb = pe - zcrit * se
+            lb = float(pe - zcrit * se)
             if alternative == "greater":
                 return lb, np.inf
 
         if alternative == "less" or alternative == "two-sided":
-            ub = pe + zcrit * se
+            ub = float(pe + zcrit * se)
             if alternative == "less":
                 return -np.inf, ub
 
@@ -496,8 +495,8 @@ class WeightingEstimator(ABC):
         )
 
         if axis_label_size is not None:
-            ax.xaxis.label.set_size(axis_label_size)
-            ax.yaxis.label.set_size(axis_label_size)
+            ax.xaxis.label.set_fontsize(axis_label_size)
+            ax.yaxis.label.set_fontsize(axis_label_size)
 
         if tick_label_size is not None:
             ax.tick_params(axis="both", which="major", labelsize=tick_label_size)

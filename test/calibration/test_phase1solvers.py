@@ -6,6 +6,12 @@ import numpy as np
 import pytest
 from scipy import linalg, optimize
 
+from pyrake.calibration.phase1solvers import (
+    EqualitySolver,
+    EqualityWithBoundsAndImbalanceConstraintSolver,
+    EqualityWithBoundsAndNormConstraintSolver,
+    EqualityWithBoundsSolver,
+)
 from pyrake.optimization.exceptions import (
     InteriorPointMethodError,
     ProblemInfeasibleError,
@@ -15,12 +21,6 @@ from pyrake.optimization.optimization import (
     OptimizationSettings,
     ProblemCertifiablyInfeasibleError,
     ProblemMarginallyFeasibleError,
-)
-from pyrake.calibration.phase1solvers import (
-    EqualitySolver,
-    EqualityWithBoundsAndImbalanceConstraintSolver,
-    EqualityWithBoundsAndNormConstraintSolver,
-    EqualityWithBoundsSolver,
 )
 
 
@@ -103,7 +103,7 @@ class TestEqualitySolver:
         solver = EqualitySolver(A=A, b=b)
 
         with pytest.raises(ProblemInfeasibleError):
-            solver.solve().solution
+            solver.solve()
 
     @pytest.mark.parametrize(
         "seed,M,p",

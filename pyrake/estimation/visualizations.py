@@ -87,13 +87,13 @@ def meta_analysis(
     for alternative in ["less", "greater"]:
         df_meta[f"Combined ({alternative})"] = df_meta.apply(
             lambda row, alternative=alternative: fisher(
-                [row[f"{platform} ({alternative})"] for platform in estimators.keys()]
+                [row[f"{platform} ({alternative})"] for platform in estimators]
             ),
             axis=1,
         )
 
     # Calculate a two-sided p-value based on both one-side p-values.
-    for platform in list(estimators.keys()) + ["Combined"]:
+    for platform in [*list(estimators.keys()), "Combined"]:
         df_meta[platform] = df_meta.apply(
             lambda row, platform=platform: min(
                 1.0, 2 * min(row[f"{platform} (less)"], row[f"{platform} (greater)"])
@@ -101,7 +101,7 @@ def meta_analysis(
             axis=1,
         )
 
-    df_meta = df_meta[["Null Hypothesis"] + list(estimators.keys()) + ["Combined"]]
+    df_meta = df_meta[["Null Hypothesis", *list(estimators.keys()), "Combined"]]
 
     # Calculate max pvals for each platform so we know how tall the vertical lines should be.
     max_pvals = df_meta.values[:, 1:].max(axis=0)
@@ -161,8 +161,8 @@ def meta_analysis(
         ax.set_xlabel(xlabel)
 
     if axis_label_size is not None:
-        ax.xaxis.label.set_size(axis_label_size)
-        ax.yaxis.label.set_size(axis_label_size)
+        ax.xaxis.label.set_fontsize(axis_label_size)
+        ax.yaxis.label.set_fontsize(axis_label_size)
 
     ax.xaxis.set_major_formatter(
         ticker.FuncFormatter(lambda x, pos: ("{0:" + xtick_format + "}").format(x))

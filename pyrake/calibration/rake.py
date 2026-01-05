@@ -3,7 +3,6 @@
 import numpy as np
 import numpy.typing as npt
 
-from .distance_metrics import Distance
 from ..optimization import (
     EqualityConstrainedInteriorPointMethodSolver,
     InteriorPointMethodSolver,
@@ -14,6 +13,7 @@ from ..optimization import (
     solve_rank_one_update,
     solve_rank_p_update,
 )
+from .distance_metrics import Distance
 from .phase1solvers import (
     EqualityWithBoundsAndImbalanceConstraintSolver,
     EqualityWithBoundsAndNormConstraintSolver,
@@ -222,7 +222,7 @@ class Rake(EqualityConstrainedInteriorPointMethodSolver, InteriorPointMethodSolv
             )
 
     @property
-    def A(self) -> npt.NDArray[np.float64]:
+    def A(self) -> npt.NDArray[np.float64]:  # noqa: N802
         """Matrix representing equality constraints."""
         return (1 / self.dimension) * self.X.T
 
@@ -231,7 +231,7 @@ class Rake(EqualityConstrainedInteriorPointMethodSolver, InteriorPointMethodSolv
         """Right-hand side of equality constraints."""
         return self.mu
 
-    def svd_A(
+    def svd_A(  # noqa: N802
         self,
     ) -> tuple[
         npt.NDArray[np.float32 | np.float64],
@@ -244,11 +244,9 @@ class Rake(EqualityConstrainedInteriorPointMethodSolver, InteriorPointMethodSolv
 
         if not isinstance(
             self.phase1_solver,
-            (
-                EqualityWithBoundsSolver,
-                EqualityWithBoundsAndImbalanceConstraintSolver,
-                EqualityWithBoundsAndNormConstraintSolver,
-            ),
+            EqualityWithBoundsSolver
+            | EqualityWithBoundsAndImbalanceConstraintSolver
+            | EqualityWithBoundsAndNormConstraintSolver,
         ):
             raise ValueError(
                 "phase1_solver must be an EqualityWithBoundsSolver or "
@@ -372,7 +370,9 @@ class Rake(EqualityConstrainedInteriorPointMethodSolver, InteriorPointMethodSolv
             )
             kappa_phi: npt.NDArray[np.float64] = self._hessian_ft_rank_one(x)
 
-            def A_solve_B_pos(b: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+            def A_solve_B_pos(  # noqa: N802
+                b: npt.NDArray[np.float64],
+            ) -> npt.NDArray[np.float64]:
                 return solve_rank_p_update(
                     b,
                     kappa=kappa_B_pos,
@@ -380,7 +380,9 @@ class Rake(EqualityConstrainedInteriorPointMethodSolver, InteriorPointMethodSolv
                     eta_inverse=eta_inverse,
                 )
 
-            def A_solve_B_neg(b: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+            def A_solve_B_neg(  # noqa: N802
+                b: npt.NDArray[np.float64],
+            ) -> npt.NDArray[np.float64]:
                 return solve_rank_p_update(b, kappa=kappa_B_neg, A_solve=A_solve_B_pos)
 
             return solve_kkt_system(
@@ -394,14 +396,12 @@ class Rake(EqualityConstrainedInteriorPointMethodSolver, InteriorPointMethodSolv
         if self.B is not None and self.phi is None:
             assert self.c is not None
             Bx_minus_c = self.B @ x - self.c
-            kappa_B_pos: npt.NDArray[np.float64] = self._hessian_ft_kappa_pos(
-                x, Bx_minus_c
-            )
-            kappa_B_neg: npt.NDArray[np.float64] = self._hessian_ft_kappa_neg(
-                x, Bx_minus_c
-            )
+            kappa_B_pos = self._hessian_ft_kappa_pos(x, Bx_minus_c)
+            kappa_B_neg = self._hessian_ft_kappa_neg(x, Bx_minus_c)
 
-            def A_solve_nested(b: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+            def A_solve_nested(  # noqa: N802
+                b: npt.NDArray[np.float64],
+            ) -> npt.NDArray[np.float64]:
                 return solve_rank_p_update(
                     b,
                     kappa=kappa_B_pos,
@@ -464,7 +464,7 @@ class Rake(EqualityConstrainedInteriorPointMethodSolver, InteriorPointMethodSolv
         theta1 = np.inf
         min_weight = self.min_weight
         if np.any(mask):
-            if isinstance(min_weight, (list, tuple, np.ndarray)):
+            if isinstance(min_weight, list | tuple | np.ndarray):
                 theta1 = np.min((x[mask] - min_weight[mask]) / -delta_x[mask])
             else:
                 theta1 = np.min((x[mask] - min_weight) / -delta_x[mask])
@@ -482,7 +482,7 @@ class Rake(EqualityConstrainedInteriorPointMethodSolver, InteriorPointMethodSolv
             mask2 = B_delta_x < 0
             theta2 = np.inf
             if np.any(mask2):
-                if isinstance(psi, (list, tuple, np.ndarray)):
+                if isinstance(psi, list | tuple | np.ndarray):
                     theta2 = np.min(
                         (Bx_minus_c[mask2] + psi[mask2]) / -B_delta_x[mask2]
                     )
@@ -492,7 +492,7 @@ class Rake(EqualityConstrainedInteriorPointMethodSolver, InteriorPointMethodSolv
             mask3 = B_delta_x > 0
             theta3 = np.inf
             if np.any(mask3):
-                if isinstance(psi, (list, tuple, np.ndarray)):
+                if isinstance(psi, list | tuple | np.ndarray):
                     theta3 = np.min(
                         -(Bx_minus_c[mask3] - psi[mask3]) / B_delta_x[mask3]
                     )
@@ -913,7 +913,7 @@ class JointCalibrator(Rake):
             if psi1 is None:
                 psi1 = 1.5 / np.sqrt(M1)
 
-            if isinstance(psi1, (list, tuple, np.ndarray)) and len(psi1) != q1:
+            if isinstance(psi1, list | tuple | np.ndarray) and len(psi1) != q1:
                 raise ValueError("Dimension mismatch")
 
         if Z2 is not None:
@@ -931,7 +931,7 @@ class JointCalibrator(Rake):
             if psi2 is None:
                 psi2 = 1.5 / np.sqrt(M2)
 
-            if isinstance(psi2, (list, tuple, np.ndarray)) and len(psi2) != q2:
+            if isinstance(psi2, list | tuple | np.ndarray) and len(psi2) != q2:
                 raise ValueError("Dimension mismatch")
 
         if Z3 is not None:
@@ -954,27 +954,27 @@ class JointCalibrator(Rake):
             if psi3 is None:
                 psi3 = 1.5 * np.sqrt(1 / M1 + 1 / M2)
 
-            if isinstance(psi3, (list, tuple, np.ndarray)) and len(psi3) != q3:
+            if isinstance(psi3, list | tuple | np.ndarray) and len(psi3) != q3:
                 raise ValueError("Dimension mismatch")
 
         if M1 is None:
-            if isinstance(min_weight1, (list, tuple, np.ndarray)):
+            if isinstance(min_weight1, list | tuple | np.ndarray):
                 M1 = len(min_weight1)
             else:
                 raise ValueError("Cannot infer weight dimension")
         elif (
-            isinstance(min_weight1, (list, tuple, np.ndarray))
+            isinstance(min_weight1, list | tuple | np.ndarray)
             and len(min_weight1) != M1
         ):
             raise ValueError("Dimension mismatch")
 
         if M2 is None:
-            if isinstance(min_weight2, (list, tuple, np.ndarray)):
+            if isinstance(min_weight2, list | tuple | np.ndarray):
                 M2 = len(min_weight2)
             else:
                 raise ValueError("Cannot infer weight dimension")
         elif (
-            isinstance(min_weight2, (list, tuple, np.ndarray))
+            isinstance(min_weight2, list | tuple | np.ndarray)
             and len(min_weight2) != M2
         ):
             raise ValueError("Dimension mismatch")
@@ -1066,7 +1066,7 @@ class JointCalibrator(Rake):
             ZT_blocks.append(np.hstack([(M / M1) * Z1.T, np.zeros((q1, M2))]))
             nu_blocks.append(nu1)
 
-            if isinstance(psi1, (list, tuple, np.ndarray)):
+            if isinstance(psi1, list | tuple | np.ndarray):
                 psi_blocks.append(np.asarray(psi1))
             else:
                 psi_blocks.append(np.full(q1, psi1))
@@ -1077,7 +1077,7 @@ class JointCalibrator(Rake):
             ZT_blocks.append(np.hstack([np.zeros((q2, M1)), (M / M2) * Z2.T]))
             nu_blocks.append(nu2)
 
-            if isinstance(psi2, (list, tuple, np.ndarray)):
+            if isinstance(psi2, list | tuple | np.ndarray):
                 psi_blocks.append(np.asarray(psi2))
             else:
                 psi_blocks.append(np.full(q2, psi2))
@@ -1087,7 +1087,7 @@ class JointCalibrator(Rake):
             ZT_blocks.append(np.hstack([-(M / M1) * Z3.T, (M / M2) * Z4.T]))
             nu_blocks.append(np.zeros(q3))
 
-            if isinstance(psi3, (list, tuple, np.ndarray)):
+            if isinstance(psi3, list | tuple | np.ndarray):
                 psi_blocks.append(np.asarray(psi3))
             else:
                 psi_blocks.append(np.full(q3, psi3))
@@ -1103,12 +1103,12 @@ class JointCalibrator(Rake):
 
         # Build min_weight
         min_weight_blocks = []
-        if isinstance(min_weight1, (list, tuple, np.ndarray)):
+        if isinstance(min_weight1, list | tuple | np.ndarray):
             min_weight_blocks.append(min_weight1)
         else:
             min_weight_blocks.append(np.full(M1, min_weight1))
 
-        if isinstance(min_weight2, (list, tuple, np.ndarray)):
+        if isinstance(min_weight2, list | tuple | np.ndarray):
             min_weight_blocks.append(min_weight2)
         else:
             min_weight_blocks.append(np.full(M2, min_weight2))

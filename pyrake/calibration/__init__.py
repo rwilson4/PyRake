@@ -6,13 +6,13 @@ from .rake import JointCalibrator, Rake
 from .visualizations import plot_balance, plot_balance_2_sample
 
 __all__ = [
-    "Rake",
-    "JointCalibrator",
-    "Huber",
-    "KLDivergence",
-    "SquaredL2",
     "EfficientFrontier",
     "EfficientFrontierResults",
+    "Huber",
+    "JointCalibrator",
+    "KLDivergence",
+    "Rake",
+    "SquaredL2",
     "plot_balance",
     "plot_balance_2_sample",
 ]

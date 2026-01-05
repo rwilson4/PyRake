@@ -224,7 +224,7 @@ def solve_rank_p_update(
     try:
         c, lower = linalg.cho_factor(G, lower=True)
     except np.linalg.LinAlgError:
-        raise NewtonStepError("H is not positive definite")
+        raise NewtonStepError("H is not positive definite") from None
 
     # q RHS -> x_prime is M-by-q
     x_prime = A_solve(b, **kwargs)
@@ -425,7 +425,7 @@ def solve_with_schur(
         c, lower = linalg.cho_factor(S, lower=True)
         x2 = linalg.cho_solve((c, lower), b2 - A12.T @ b1_prime)
     except np.linalg.LinAlgError:
-        raise NewtonStepError("H is not positive definite")
+        raise NewtonStepError("H is not positive definite") from None
 
     x1 = b1_prime - A12_prime @ x2
     if b.ndim == 1:
@@ -633,7 +633,7 @@ def solve_kkt_system(
         if not np.allclose(U_r @ (U_r.T @ neg_c), neg_c):
             raise NewtonStepError(
                 "KKT system did not have a solution, because A is not full rank."
-            )
+            ) from None
 
         s_inv = np.zeros_like(s)
         s_inv[0:rank] = 1.0 / s[0:rank]

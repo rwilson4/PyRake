@@ -3,7 +3,7 @@
 import time
 from abc import ABC, abstractmethod, abstractproperty
 from dataclasses import dataclass
-from typing import Any, Literal, Type
+from typing import Any, Literal
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -251,7 +251,7 @@ class Optimizer(ABC):
 
     def __init__(
         self,
-        phase1_solver: Type["PhaseISolver"] | None = None,
+        phase1_solver: type["PhaseISolver"] | None = None,
         settings: OptimizationSettings | None = None,
         **kwargs: Any,
     ) -> None:
@@ -324,7 +324,7 @@ class BaseInteriorPointMethodSolver(Optimizer):
 
     def __init__(
         self,
-        phase1_solver: Type[PhaseISolver] | None = None,
+        phase1_solver: type[PhaseISolver] | None = None,
         settings: OptimizationSettings | None = None,
         **kwargs: Any,
     ) -> None:
@@ -1062,7 +1062,7 @@ class PhaseIInteriorPointSolver(BaseInteriorPointMethodSolver, PhaseISolver):
 
     def __init__(
         self,
-        phase1_solver: Type[PhaseISolver] | None = None,
+        phase1_solver: type[PhaseISolver] | None = None,
         settings: OptimizationSettings | None = None,
         **kwargs: Any,
     ) -> None:
@@ -1126,14 +1126,14 @@ class EqualityConstrainedInteriorPointMethodSolver(BaseInteriorPointMethodSolver
     """Class for problems with equality constraints, A * x = b."""
 
     @abstractproperty
-    def A(self) -> npt.NDArray[np.float64]:
+    def A(self) -> npt.NDArray[np.float64]:  # noqa: N802
         """Matrix representing equality constraints."""
 
     @abstractproperty
     def b(self) -> npt.NDArray[np.float64]:
         """Right-hand side of equality constraints."""
 
-    def svd_A(
+    def svd_A(  # noqa: N802
         self,
     ) -> tuple[
         npt.NDArray[np.float32 | np.float64],

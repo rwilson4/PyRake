@@ -2,12 +2,11 @@
 
 import math
 from collections.abc import Generator
-from typing import Any, Literal, Type
+from typing import Any, Literal, Self
 
 import numpy as np
 import numpy.typing as npt
 from scipy import optimize
-from typing_extensions import Self
 
 from .base_classes import Estimand, SimpleEstimand, WeightingEstimator
 
@@ -114,7 +113,7 @@ class MeanEstimator(WeightingEstimator):
         propensity_scores: list[float] | npt.NDArray[np.float64],
         outcomes: list[float | int] | npt.NDArray[np.float64 | np.int64],
         estimand: Estimand | None = None,
-        estimand_class: Type[SimpleEstimand] | None = None,
+        estimand_class: type[SimpleEstimand] | None = None,
         **kwargs: Any,
     ) -> None:
         if len(propensity_scores) != len(outcomes):
@@ -360,7 +359,7 @@ class IPWEstimator(MeanEstimator):
         outcomes: list[float | int] | npt.NDArray[np.float64 | np.int64],
         population_size: int,
         estimand: Estimand | None = None,
-        estimand_class: Type[SimpleEstimand] | None = None,
+        estimand_class: type[SimpleEstimand] | None = None,
         **kwargs: Any,
     ) -> None:
         if estimand is not None and not isinstance(estimand, PopulationMean):
@@ -506,7 +505,7 @@ class AIPWEstimator(IPWEstimator):
         mean_predicted_outcome: float,
         population_size: int,
         estimand: Estimand | None = None,
-        estimand_class: Type[SimpleEstimand] | None = None,
+        estimand_class: type[SimpleEstimand] | None = None,
         **kwargs: Any,
     ) -> None:
         if len(propensity_scores) != len(predicted_outcomes):
@@ -635,7 +634,7 @@ class SIPWEstimator(MeanEstimator):
      - Zhao, Qingyuan, Dylan S Small, and Bhaswar B Bhattacharya. 2019. "Sensitivity
        Analysis for Inverse Probability Weighting Estimators via the Percentile
        Bootstrap." Journal of the Royal Statistical Society Series B: Statistical
-       Methodology 81 (4). Oxford University Press: pg. 735–61.
+       Methodology 81 (4). Oxford University Press: pg. 735--61.
 
     """
 
@@ -644,7 +643,7 @@ class SIPWEstimator(MeanEstimator):
         propensity_scores: list[float] | npt.NDArray[np.float64],
         outcomes: list[float | int] | npt.NDArray[np.float64 | np.int64],
         estimand: Estimand | None = None,
-        estimand_class: Type[SimpleEstimand] | None = None,
+        estimand_class: type[SimpleEstimand] | None = None,
         binary_outcomes: bool = True,
         **kwargs: Any,
     ) -> None:
@@ -721,7 +720,7 @@ class SIPWEstimator(MeanEstimator):
          - Zhao, Qingyuan, Dylan S Small, and Bhaswar B Bhattacharya. 2019. "Sensitivity
            Analysis for Inverse Probability Weighting Estimators via the Percentile
            Bootstrap." Journal of the Royal Statistical Society Series B: Statistical
-           Methodology 81 (4). Oxford University Press: pg. 735–61.
+           Methodology 81 (4). Oxford University Press: pg. 735--61.
 
         """
         if gamma < 1.0:
@@ -804,7 +803,7 @@ class SAIPWEstimator(SIPWEstimator):
         predicted_outcomes: list[float | int] | npt.NDArray[np.float64 | np.int64],
         mean_predicted_outcome: float,
         estimand: Estimand | None = None,
-        estimand_class: Type[SimpleEstimand] | None = None,
+        estimand_class: type[SimpleEstimand] | None = None,
         binary_outcomes: bool = True,
         **kwargs: Any,
     ) -> None:
@@ -910,7 +909,7 @@ class RatioEstimator(WeightingEstimator):
         numerator_outcomes: list[float | int] | npt.NDArray[np.float64 | np.int64],
         denominator_outcomes: list[float | int] | npt.NDArray[np.float64 | np.int64],
         estimand: Estimand | None = None,
-        estimand_class: Type[SimpleEstimand] | None = None,
+        estimand_class: type[SimpleEstimand] | None = None,
         estimator_class: Literal["IPW", "AIPW", "SIPW", "SAIPW"] = "SIPW",
         numerator_estimator_class: (
             Literal["IPW", "AIPW", "SIPW", "SAIPW"] | None
