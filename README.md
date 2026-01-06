@@ -1,5 +1,7 @@
 # PyRake
 
+[![CI](https://github.com/rwilson4/PyRake/actions/workflows/ci.yml/badge.svg)](https://github.com/rwilson4/PyRake/actions/workflows/ci.yml)
+
 PyRake is a Python library for calculating balancing weights to adjust
 surveys for non-response bias. Balancing weights try to accomplish
 three things:
