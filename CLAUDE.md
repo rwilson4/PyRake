@@ -28,28 +28,37 @@ poetry install --no-root
 ### Testing
 ```bash
 # Run all tests
-python -m pytest
+poetry run python -m pytest
 
 # Run specific test file
-python -m pytest test/test_rake.py
+poetry run python -m pytest test/test_rake.py
 
 # Run specific test function
-python -m pytest test/test_rake.py::test_rake_solve_kl_divergence
+poetry run python -m pytest test/test_rake.py::test_rake_solve_kl_divergence
 
 # Run tests with verbose output
-python -m pytest -v
+poetry run python -m pytest -v
 ```
 
 ### Linting
 ```bash
 # Check code formatting with ruff
-python -m ruff check pyrake test
+poetry run python -m ruff check pyrake test
+
+# Check types
+poetry run mypy
 
 # Check code formatting with black
-python -m black --check pyrake/ test/
+poetry run python -m black --check pyrake/ test/
 
 # Auto-format with black (if needed)
-python -m black pyrake/ test/
+poetry run python -m black pyrake/ test/
+
+# Run all quality checks together
+poetry run black pyrake/ test/ && \
+poetry run ruff check pyrake/ test/ --fix && \
+poetry run mypy && \\
+poetry run pytest
 ```
 
 ### Installation
@@ -61,16 +70,14 @@ pip install .
 
 ### Core Components
 
-**Optimization Framework** (`pyrake/optimization.py`):
-- Base classes for optimization problems: `Optimizer`,
-  `InteriorPointMethodSolver`,
-  `EqualityConstrainedInteriorPointMethodSolver`
+**Optimization** (`pyrake/optimization/`)
+- Implements solvers for convex optimization problems.
 - Uses interior point methods with Newton's method for solving
   constrained optimization
 - Custom KKT system solvers for equality-constrained problems
 - Settings managed via `OptimizationSettings` dataclass
 
-**Rake Solver** (`pyrake/rake.py`):
+**Calibration** (`pyrake/calibration/`):
 - `Rake`: Main class for solving weight calibration problems with
   exact covariate balance constraints (equality), approximate balance
   constraints (l∞ norm), variance constraints (l2 norm), and lower
@@ -80,29 +87,11 @@ pip install .
   between groups) and external validity (balance with population)
 - Solves: minimize D(w, v) subject to (1/M)X^T w = μ, constraints on
   covariate imbalance, mean squared weight, and positivity
-
-**Distance Metrics** (`pyrake/distance_metrics.py`):
-- Abstract base class `Distance` with three implementations:
-  - `SquaredL2`: Euclidean distance, corresponds to Stable Balancing
-    Weights
-  - `KLDivergence`: Kullback-Leibler divergence, corresponds to Raking
-    and Entropy Balancing
-  - `Huber`: Huber penalty for robustness to outliers
-
-**Phase I Solvers** (`pyrake/phase1solvers.py`):
-- Find strictly feasible starting points for interior point methods
-- Three variants: `EqualityWithBoundsSolver`,
-  `EqualityWithBoundsAndNormConstraintSolver`,
-  `EqualityWithBoundsAndImbalanceConstraintSolver`
-
-**Efficient Frontier** (`pyrake/frontier.py`):
 - `EfficientFrontier`: Traces out the bias-variance tradeoff by
   solving optimization problems for a range of variance constraints
   (φ)
-- `EfficientFrontierResults`: Stores and visualizes the tradeoff
-  curve, identifies "knee" point using max chord distance method
 
-**Estimators** (`pyrake/estimators.py`):
+**Estimation** (`pyrake/estimation/`):
 - Hierarchy of estimator classes for population means and treatment
   effects:
   - Base: `MeanEstimator`, `WeightingEstimator`
@@ -114,16 +103,6 @@ pip install .
 - Compute point estimates, variance, confidence intervals, p-values
 - Include sensitivity analysis methods for hidden bias (from Zhao,
   Small, and Bhattacharya, 2019)
-
-**Numerical Helpers** (`pyrake/numerical_helpers.py`):
-- Efficient solvers for KKT systems with special structure
-- Rank-one and rank-p updates to diagonal matrices
-- Exploits problem structure for O(p³ + p²M) complexity instead of O(M³)
-
-**Visualizations** (`pyrake/visualizations.py`):
-- `plot_balance`: Visualize covariate balance before/after weighting
-- `plot_balance_2_sample`: Compare balance between two samples
-- `meta_analysis`: Meta-analysis visualization for multiple studies
 
 ### Key Design Patterns
 
