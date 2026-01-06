@@ -21,44 +21,43 @@ treatment effects.
 ### Environment Setup
 ```bash
 # Create virtual environment and install dependencies
-poetry shell
-poetry install --no-root
+uv sync
 ```
 
 ### Testing
 ```bash
 # Run all tests
-poetry run python -m pytest
+uv run python -m pytest
 
 # Run specific test file
-poetry run python -m pytest test/test_rake.py
+uv run python -m pytest test/test_rake.py
 
 # Run specific test function
-poetry run python -m pytest test/test_rake.py::test_rake_solve_kl_divergence
+uv run python -m pytest test/test_rake.py::test_rake_solve_kl_divergence
 
 # Run tests with verbose output
-poetry run python -m pytest -v
+uv run python -m pytest -v
 ```
 
 ### Linting
 ```bash
 # Check code formatting with ruff
-poetry run python -m ruff check pyrake test
-
-# Check types
-poetry run mypy
+uv run python -m ruff check pyrake test
 
 # Check code formatting with black
-poetry run python -m black --check pyrake/ test/
+uv run python -m black --check pyrake/ test/
 
 # Auto-format with black (if needed)
-poetry run python -m black pyrake/ test/
+uv run python -m black pyrake/ test/
+
+# Check types
+uv run python -m mypy
 
 # Run all quality checks together
-poetry run black pyrake/ test/ && \
-poetry run ruff check pyrake/ test/ --fix && \
-poetry run mypy && \\
-poetry run pytest
+uv run python -m black pyrake/ test/ && \
+uv run python -m ruff check pyrake/ test/ --fix && \
+uv run python -m mypy && \\
+uv run python -m pytest
 ```
 
 ### Installation

@@ -295,22 +295,22 @@ I used ChatGPT to write the original commit (it did a pretty good
 job!)
 
 ### Architecture
-We use [poetry](https://python-poetry.org/) to manage dependencies.
-Test cases use [pytest](https://docs.pytest.org/en/latest/). We use
-[black](https://github.com/python/black) and
-[ruff](https://docs.astral.sh/ruff/) for formatting.
+We use [uv](https://docs.astral.sh/uv/) to manage dependencies. Test
+cases use [pytest](https://docs.pytest.org/en/latest/). We use
+[black](https://github.com/python/black),
+[ruff](https://docs.astral.sh/ruff/), and
+[mypy](https://mypy-lang.org/) for formatting and linting.
 
 ### Running the test cases
-After cloning the repository, run `poetry shell`. That will create a
-virtual environment. Then run `poetry install --no-root`. That will
-install all the libraries needed to run the test cases (and the
-package itself). Finally, run `python -m pytest` to run the test
-cases.
+After cloning the repository, run `uv sync`. That will create a
+virtual environment and install all the libraries needed to run the
+test cases (and the package itself). Finally, run `uv run python -m pytest`
+to run the test cases.
 
 ### Linting
-We use both black and ruff as python linters. To check if the code is
-properly formatted, use: `python -m ruff check pyrake test` and
-`python -m black --check pyrake/ test/`.
+We use black, ruff, and mypy as python linters. To check if the code
+is properly formatted, use: `uv run python -m ruff check pyrake/ test/`,
+`uv run python -m black --check pyrake/ test/`, and `uv run python -m mypy`
 
 ## License
 Apache
