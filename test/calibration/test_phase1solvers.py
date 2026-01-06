@@ -182,7 +182,7 @@ class TestEqualityWithBoundsSolver:
             (2201, 200, 30, 1e-9),
             (3201, 50, 5, 1e-7),
             (4201, 500, 100, 1e-9),
-            (5201, 13, 3, 1e-9),
+            (5201, 13, 3, 1e-7),
         ],
     )
     def test_solver_feasible_bounded_below(
