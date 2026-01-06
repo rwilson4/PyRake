@@ -259,7 +259,7 @@ pip install .
 ### Calibration
 
 ```python
-from pyrake import Rake, KLDivergence, EfficientFrontier
+from pyrake.calibration import Rake, KLDivergence, EfficientFrontier
 
 # Inputs: X (M x p), mu (p,), v (M,)
 rake = Rake(
@@ -276,7 +276,7 @@ res.plot()
 ### Estimation
 ```python
 import pandas as pd
-from pyrake import SIPWEstimator
+from pyrake.estimation import SIPWEstimator
 
 df = pd.DataFrame(...)
 
