@@ -1252,11 +1252,10 @@ class UnconstrainedNewtonSolver(BaseInteriorPointMethodSolver):
     Usage
     -----
     Subclass this and implement:
-    - calculate_newton_step: solve H * delta_x = -grad_f0, return (delta_x, np.zeros(0))
+    - newton_step: solve H * delta_x = -grad_f0, return delta_x
     - evaluate_objective: f0(x)
     - gradient: grad f0(x)
-    - hessian_multiply: H(x) @ y
-    - evaluate_dual: for an unconstrained problem, return evaluate_objective(x_star)
+    - hessian_vector_product: H(x) @ y
 
     """
 
@@ -1321,3 +1320,39 @@ class UnconstrainedNewtonSolver(BaseInteriorPointMethodSolver):
     ) -> float:
         """No constraints to maintain feasibility for; any step size is valid."""
         return np.inf
+
+    @abstractmethod
+    def newton_step(self, x: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+        """Solve H(x) * delta_x = -grad_f0(x) and return delta_x."""
+
+    @abstractmethod
+    def hessian_vector_product(
+        self, x: npt.NDArray[np.float64], y: npt.NDArray[np.float64]
+    ) -> npt.NDArray[np.float64]:
+        """Compute H(x) @ y."""
+
+    def calculate_newton_step(
+        self,
+        x: npt.NDArray[np.float64],
+        t: float,
+    ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
+        """Newton step; t is unused (always 1, no barrier)."""
+        return self.newton_step(x), np.zeros(0)
+
+    def hessian_multiply(
+        self,
+        x: npt.NDArray[np.float64],
+        t: float,
+        y: npt.NDArray[np.float64],
+    ) -> npt.NDArray[np.float64]:
+        """Compute H(x) @ y; t is unused (always 1, no barrier)."""
+        return self.hessian_vector_product(x, y)
+
+    def evaluate_dual(
+        self,
+        lmbda: npt.NDArray[np.float64],
+        nu: npt.NDArray[np.float64],
+        x_star: npt.NDArray[np.float64],
+    ) -> float:
+        """Dual equals primal for unconstrained problems."""
+        return self.evaluate_objective(x_star)

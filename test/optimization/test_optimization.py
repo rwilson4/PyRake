@@ -29,13 +29,9 @@ class QuadraticNewtonSolver(UnconstrainedNewtonSolver):
         self.c = c
         self._Q_factor = linalg.cho_factor(Q)
 
-    def calculate_newton_step(
-        self, x: npt.NDArray[np.float64], t: float
-    ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
-        """H = t*Q; solve t*Q * delta_x = -grad_ft = -(t*Q*x + t*c)."""
-        g = self.gradient_barrier(x, t)
-        delta_x = linalg.cho_solve(self._Q_factor, -g / t)
-        return delta_x, np.zeros(0)
+    def newton_step(self, x: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+        """Solve Q * delta_x = -grad_f0 = -(Q*x + c)."""
+        return linalg.cho_solve(self._Q_factor, -(self.Q @ x + self.c))
 
     def evaluate_objective(self, x: npt.NDArray[np.float64]) -> float:
         return float(0.5 * x @ self.Q @ x + self.c @ x)
@@ -43,19 +39,10 @@ class QuadraticNewtonSolver(UnconstrainedNewtonSolver):
     def gradient(self, x: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
         return self.Q @ x + self.c
 
-    def hessian_multiply(
-        self, x: npt.NDArray[np.float64], t: float, y: npt.NDArray[np.float64]
+    def hessian_vector_product(
+        self, x: npt.NDArray[np.float64], y: npt.NDArray[np.float64]
     ) -> npt.NDArray[np.float64]:
-        return t * (self.Q @ y)
-
-    def evaluate_dual(
-        self,
-        lmbda: npt.NDArray[np.float64],
-        nu: npt.NDArray[np.float64],
-        x_star: npt.NDArray[np.float64],
-    ) -> float:
-        # Unconstrained: dual equals primal at optimum.
-        return self.evaluate_objective(x_star)
+        return self.Q @ y
 
 
 @pytest.mark.parametrize(
