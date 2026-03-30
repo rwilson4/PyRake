@@ -217,13 +217,27 @@ class QuadraticProgramEqualityBoundsSolver(
     def grad_constraints_multiply(
         self, x: npt.NDArray[np.float64], y: npt.NDArray[np.float64]
     ) -> npt.NDArray[np.float64]:
-        """G @ y = -I @ y = -y."""
+        r"""Compute G @ y in O(n) time, where G is the constraint-gradient matrix.
+
+        The n inequality constraints are fi(x) = xl_i - x_i, so
+
+            grad fi(x) = -e_i   (i-th standard basis vector),
+
+        giving the n-by-n gradient matrix G = -I. Thus G @ y = -y.
+        This avoids forming the n-by-n identity and doing a full matrix-vector
+        multiply (which would be O(n²)).
+
+        """
         return -y
 
     def grad_constraints_transpose_multiply(
         self, x: npt.NDArray[np.float64], y: npt.NDArray[np.float64]
     ) -> npt.NDArray[np.float64]:
-        """G^T @ y = -I^T @ y = -y."""
+        r"""Compute G^T @ y in O(n) time.
+
+        Since G = -I we have G^T = -I, so G^T @ y = -y.
+
+        """
         return -y
 
     # ------------------------------------------------------------------
@@ -285,12 +299,35 @@ class QuadraticProgramEqualityBoundsSolver(
     def btls_keep_feasible(
         self, x: npt.NDArray[np.float64], delta_x: npt.NDArray[np.float64]
     ) -> float:
-        r"""Return largest step keeping x + s * delta_x strictly feasible.
+        r"""Return the largest step s keeping x + s * delta_x strictly feasible.
 
-        We need x_j + s * delta_x_j > xl_j for all j. For entries where
-        delta_x_j < 0, the binding constraint is:
+        Strict feasibility requires fi(x + s * delta_x) < 0 for all i, i.e.
 
-            s < (x_j - xl_j) / (-delta_x_j).
+            xl_j - (x_j + s * delta_x_j) < 0
+            ⟺  s * delta_x_j > xl_j - x_j    for all j.
+
+        Three cases:
+
+        * delta_x_j > 0: the left side grows with s, and since x_j > xl_j
+          (strict feasibility of the current iterate) the inequality already
+          holds at s = 0 and remains satisfied for all s > 0. No constraint.
+
+        * delta_x_j = 0: reduces to 0 > xl_j - x_j, which holds by strict
+          feasibility. No constraint.
+
+        * delta_x_j < 0: dividing by delta_x_j flips the inequality:
+
+              s < (xl_j - x_j) / delta_x_j
+                = (x_j - xl_j) / (-delta_x_j).
+
+          Both numerator and denominator are positive, giving a positive
+          upper bound on s.
+
+        The tightest bound is therefore
+
+            s_max = min_{j : delta_x_j < 0}  (x_j - xl_j) / (-delta_x_j).
+
+        This is computed in O(n) time with a single masked minimum.
 
         """
         mask = delta_x < 0
