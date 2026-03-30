@@ -1400,4 +1400,3 @@ class EqualityWithBoundsAndImbalanceConstraintSolver(
             + np.dot(self.c - self.psi, lmbda2)
             - np.dot(self.c + self.psi, lmbda3)
         )
-

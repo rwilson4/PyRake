@@ -11,6 +11,7 @@ from pyrake.optimization.optimization import (
     ProblemCertifiablyInfeasibleError,
 )
 
+
 class TestEqualityWithBoundsAndNormConstraintSolver:
     """Test EqualityWithBoundsAndNormConstraintSolver."""
 

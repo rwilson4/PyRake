@@ -6,14 +6,14 @@ import numpy as np
 import pytest
 from scipy import linalg, optimize
 
+from pyrake.optimization.exceptions import (
+    InteriorPointMethodError,
+    ProblemInfeasibleError,
+)
 from pyrake.optimization.linear_programs import (
     EqualitySolver,
     EqualityWithBoundsAndImbalanceConstraintSolver,
     EqualityWithBoundsSolver,
-)
-from pyrake.optimization.exceptions import (
-    InteriorPointMethodError,
-    ProblemInfeasibleError,
 )
 from pyrake.optimization.optimization import (
     InteriorPointMethodResult,
@@ -765,4 +765,3 @@ class TestEqualityWithBoundsAndImbalanceConstraintSolver:
         )
         with pytest.raises(ProblemCertifiablyInfeasibleError):
             solver.solve()
-
