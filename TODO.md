@@ -2,7 +2,7 @@
 
 ## QuadraticProgramEqualityBoundsSolver
 
-### Exploit low-rank structure of Q in Newton step (O(n³) → O(r²n))
+### ~~Exploit low-rank structure of Q in Newton step (O(n³) → O(r²n))~~ DONE
 
 Currently `calculate_newton_step` forms `H_ft = 2t Q + D` explicitly and
 Cholesky-factors it at every Newton step, costing O(n³) per step.

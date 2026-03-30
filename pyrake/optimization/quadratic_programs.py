@@ -5,7 +5,11 @@ import numpy.typing as npt
 from scipy import linalg
 
 from .linear_programs import EqualityWithBoundsSolver
-from .numerical_helpers import solve_kkt_system
+from .numerical_helpers import (
+    solve_diagonal_eta_inverse,
+    solve_kkt_system,
+    solve_rank_p_update,
+)
 from .optimization import (
     EqualityConstrainedInteriorPointMethodSolver,
     InteriorPointMethodResult,
@@ -126,8 +130,22 @@ class QuadraticProgramEqualityBoundsSolver(
        | H_ft   A^T | | delta_x |   | -grad_ft |
        |  A      0  | |   nu    | = |    0     |
 
-    We form H_ft = 2t Q + D at each step (an n x n dense matrix), compute
-    its Cholesky factorization, and call `solve_kkt_system`.
+    Writing Q = U_r S_r U_r^T (precomputed rank-r SVD) and defining the
+    cached factor kappa_cache = U_r * sqrt(S_r) (n-by-r, computed once),
+    we have Q = kappa_cache @ kappa_cache^T.  Setting kappa = sqrt(2t) *
+    kappa_cache (recomputed cheaply at each step, O(rn)) gives
+
+       H_ft = D + kappa @ kappa^T.
+
+    The Hessian system (D + kappa kappa^T) y = z is then solved via the
+    Woodbury identity using `solve_rank_p_update`:
+
+       H_ft^{-1} z = D^{-1} z
+                     - D^{-1} kappa (I_r + kappa^T D^{-1} kappa)^{-1} kappa^T D^{-1} z
+
+    Cost per Newton step: O(r^2 n + r^3).  For full-rank PD Q (r = n) this
+    is the same O(n^3) as a direct Cholesky of H_ft.  For low-rank PSD Q
+    (r << n) it is substantially cheaper.
 
     **Phase I**
 
@@ -154,13 +172,20 @@ class QuadraticProgramEqualityBoundsSolver(
         self.xl = xl
         self._n = Q.shape[0]
 
-        # Precompute the economy SVD of Q for use in evaluate_dual.
-        # Q is PSD so U == V; we retain only the rank-r subspace.
+        # Precompute the economy SVD of Q (Q is PSD so U == V).
+        # We retain only the rank-r subspace, which also handles PSD Q where
+        # some singular values are numerically zero.
         U, s, _ = linalg.svd(Q, full_matrices=False)
         rank_tol = max(Q.shape) * np.finfo(float).eps * (s[0] if len(s) else 0.0)
         rank = int(np.sum(s > rank_tol))
         self._Q_svd_U_r: npt.NDArray[np.float64] = U[:, :rank]
         self._Q_svd_s_r: npt.NDArray[np.float64] = s[:rank]
+
+        # Cached square-root factor: kappa_cache @ kappa_cache^T == Q.
+        # Shape: n-by-r.  Used in hessian_multiply and calculate_newton_step
+        # so that we never re-process Q at runtime; only a cheap O(r*n) scalar
+        # multiply (to absorb sqrt(2t)) is needed per Newton step.
+        self._kappa_cache: npt.NDArray[np.float64] = U[:, :rank] * np.sqrt(s[:rank])
 
     # ------------------------------------------------------------------
     # Properties required by EqualityConstrainedInteriorPointMethodSolver
@@ -249,12 +274,18 @@ class QuadraticProgramEqualityBoundsSolver(
     ) -> npt.NDArray[np.float64]:
         r"""Multiply H_ft * y.
 
-        H_ft = 2t Q + D,   D = diag(1 / (x - xl)^2).
+        H_ft = 2t Q + D = D + kappa @ kappa^T,
+        where kappa = sqrt(2t) * kappa_cache and D = diag(1 / (x - xl)^2).
 
-        So H_ft * y = 2t Q y + y / (x - xl)^2.
+        Using Q = kappa_cache @ kappa_cache^T:
+
+            H_ft y = 2t * kappa_cache @ (kappa_cache^T @ y) + d * y,
+
+        which costs O(rn) instead of the O(n^2) dense matrix-vector product
+        2t Q y for low-rank Q (r << n).
         """
         d = 1.0 / np.square(x - self.xl)
-        return 2.0 * t * (self.Q @ y) + d * y
+        return 2.0 * t * (self._kappa_cache @ (self._kappa_cache.T @ y)) + d * y
 
     # ------------------------------------------------------------------
     # Newton step
@@ -280,11 +311,25 @@ class QuadraticProgramEqualityBoundsSolver(
 
         """
         d = 1.0 / np.square(x - self.xl)
-        H = 2.0 * t * self.Q + np.diag(d)
-        H_factor = linalg.cho_factor(H)
+        r = self._kappa_cache.shape[1]
 
-        def hessian_solve(rhs: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
-            return linalg.cho_solve(H_factor, rhs)
+        if r < self._n:
+            # Low-rank Q (r << n): use Woodbury identity.  O(r^2 n + r^3) per step.
+            eta_inverse = 1.0 / d  # (x_j - xl_j)^2; diagonal D^{-1}
+            kappa = np.sqrt(2.0 * t) * self._kappa_cache  # n-by-r, O(rn) per step
+
+            def hessian_solve(rhs: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+                return solve_rank_p_update(
+                    rhs, kappa, solve_diagonal_eta_inverse, eta_inverse=eta_inverse
+                )
+
+        else:
+            # Full-rank Q: form H explicitly and Cholesky-factor.  O(n^3) per step.
+            H = 2.0 * t * self.Q + np.diag(d)
+            H_factor = linalg.cho_factor(H)
+
+            def hessian_solve(rhs: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+                return linalg.cho_solve(H_factor, rhs)
 
         return solve_kkt_system(
             A=self.A,
