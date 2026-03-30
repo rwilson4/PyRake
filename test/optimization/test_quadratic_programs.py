@@ -1,5 +1,7 @@
 """Tests for quadratic program solvers."""
 
+import time
+
 import numpy as np
 import pytest
 from scipy import linalg, optimize
@@ -85,6 +87,7 @@ class TestQuadraticProgramEqualityBoundsSolver:
         b = A @ x0_feas
 
         # --- scipy ground truth (trust-constr handles equality + bounds robustly) ---
+        t0 = time.perf_counter()
         scipy_result = optimize.minimize(
             fun=lambda x: float(x @ Q @ x + c @ x),
             x0=x0_feas,
@@ -95,12 +98,23 @@ class TestQuadraticProgramEqualityBoundsSolver:
             bounds=optimize.Bounds(lb=xl),
             options={"gtol": 1e-10, "maxiter": 2000},
         )
+        scipy_ms = 1000.0 * (time.perf_counter() - t0)
         if not scipy_result.success:
             pytest.skip(f"scipy reference solver failed: {scipy_result.message}")
 
         # --- our solver ---
+        t0 = time.perf_counter()
         solver = QuadraticProgramEqualityBoundsSolver(Q=Q, c=c, A=A, b=b, xl=xl)
         result = solver.solve()
+        pyrake_ms = 1000.0 * (time.perf_counter() - t0)
+
+        print(
+            f"\n  n={n:3d}, p={p:2d} | "
+            f"scipy: {scipy_ms:7.2f} ms ({scipy_result.nit} iters) | "
+            f"PyRake: {pyrake_ms:7.2f} ms ({result.nits} outer, "
+            f"{sum(result.inner_nits)} inner Newton) | "
+            f"ratio: {pyrake_ms / scipy_ms:.2f}x"
+        )
 
         np.testing.assert_allclose(
             result.solution,
