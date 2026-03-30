@@ -1,4 +1,4 @@
-"""Test Phase I Solvers."""
+"""Test linear program solvers."""
 
 import time
 
@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 from scipy import linalg, optimize
 
-from pyrake.calibration.phase1solvers import (
+from pyrake.optimization.linear_programs import (
     EqualitySolver,
     EqualityWithBoundsAndImbalanceConstraintSolver,
     EqualityWithBoundsAndNormConstraintSolver,

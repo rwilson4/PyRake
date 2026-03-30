@@ -127,6 +127,12 @@ from .exceptions import (
     ProblemInfeasibleError,
     SevereCurvatureError,
 )
+from .linear_programs import (
+    EqualitySolver,
+    EqualityWithBoundsAndImbalanceConstraintSolver,
+    EqualityWithBoundsAndNormConstraintSolver,
+    EqualityWithBoundsSolver,
+)
 from .numerical_helpers import (
     solve_arrow_sparsity_pattern,
     solve_block_plus_one,
@@ -157,6 +163,10 @@ __all__ = [
     "CenteringStepError",
     "ConstraintBoundaryError",
     "EqualityConstrainedInteriorPointMethodSolver",
+    "EqualitySolver",
+    "EqualityWithBoundsAndImbalanceConstraintSolver",
+    "EqualityWithBoundsAndNormConstraintSolver",
+    "EqualityWithBoundsSolver",
     "InteriorPointMethodError",
     "InteriorPointMethodResult",
     "InteriorPointMethodSolver",
