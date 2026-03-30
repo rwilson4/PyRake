@@ -1240,3 +1240,119 @@ class EqualityConstrainedInteriorPointMethodSolver(BaseInteriorPointMethodSolver
                 t_star_s / max(schur_complement, 1e-16),
             ),
         )
+
+
+class UnconstrainedNewtonSolver(BaseInteriorPointMethodSolver):
+    """Newton's method for unconstrained problems (no equality or inequality constraints).
+
+    The barrier parameter is irrelevant without inequality constraints, so the outer IPM
+    loop is skipped entirely. Instead, Newton's method is applied directly to f0(x),
+    which is equivalent to a single centering step with t=1.
+
+    Usage
+    -----
+    Subclass this and implement:
+    - newton_step: solve H * delta_x = -grad_f0, return delta_x
+    - evaluate_objective: f0(x)
+    - gradient: grad f0(x)
+    - hessian_vector_product: H(x) @ y
+
+    """
+
+    def __init__(
+        self,
+        settings: OptimizationSettings | None = None,
+        **kwargs: Any,
+    ) -> None:
+        """Initialize solver."""
+        super().__init__(phase1_solver=None, settings=settings, **kwargs)
+
+    @property
+    def num_eq_constraints(self) -> int:
+        """No equality constraints."""
+        return 0
+
+    @property
+    def num_ineq_constraints(self) -> int:
+        """No inequality constraints."""
+        return 0
+
+    def solve(
+        self,
+        x0: npt.NDArray[np.float64] | None = None,
+        fully_optimize: bool = False,
+        **kwargs: Any,
+    ) -> NewtonResult:
+        """Solve unconstrained problem using Newton's method.
+
+        Skips the outer barrier loop entirely and runs Newton's method once.
+
+        Parameters
+        ----------
+         x0 : vector
+            Initial guess.
+         fully_optimize : bool
+            Unused; present for API compatibility with base class.
+
+        Returns
+        -------
+         res : NewtonResult
+
+        """
+        if x0 is None:
+            raise ValueError("Initial guess x0 is required.")
+        return self.centering_step(x0, t=1.0, last_step=True, fully_optimize=True)
+
+    def is_feasible(self, x: npt.NDArray[np.float64]) -> bool:
+        """All points are feasible (no constraints)."""
+        return True
+
+    def constraints(self, x: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+        """No inequality constraints."""
+        return np.zeros(0)
+
+    def grad_constraints(self, x: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+        """No inequality constraints."""
+        return np.zeros((0, x.size))
+
+    def btls_keep_feasible(
+        self, x: npt.NDArray[np.float64], delta_x: npt.NDArray[np.float64]
+    ) -> float:
+        """No constraints to maintain feasibility for; any step size is valid."""
+        return np.inf
+
+    @abstractmethod
+    def newton_step(self, x: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+        """Solve H(x) * delta_x = -grad_f0(x) and return delta_x."""
+
+    @abstractmethod
+    def hessian_vector_product(
+        self, x: npt.NDArray[np.float64], y: npt.NDArray[np.float64]
+    ) -> npt.NDArray[np.float64]:
+        """Compute H(x) @ y."""
+
+    def calculate_newton_step(
+        self,
+        x: npt.NDArray[np.float64],
+        t: float,
+    ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
+        """Newton step; t is unused (always 1, no barrier)."""
+        return self.newton_step(x), np.zeros(0)
+
+    def hessian_multiply(
+        self,
+        x: npt.NDArray[np.float64],
+        t: float,
+        y: npt.NDArray[np.float64],
+    ) -> npt.NDArray[np.float64]:
+        """Compute H(x) @ y; t is unused (always 1, no barrier)."""
+        return self.hessian_vector_product(x, y)
+
+    def evaluate_dual(
+        self,
+        lmbda: npt.NDArray[np.float64],
+        nu: npt.NDArray[np.float64],
+        x_star: npt.NDArray[np.float64],
+    ) -> float:
+        """Dual equals primal for unconstrained problems."""
+        return self.evaluate_objective(x_star)

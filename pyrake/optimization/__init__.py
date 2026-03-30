@@ -149,6 +149,7 @@ from .optimization import (
     PhaseISolver,
     ProblemCertifiablyInfeasibleError,
     ProblemMarginallyFeasibleError,
+    UnconstrainedNewtonSolver,
 )
 
 __all__ = [
@@ -172,6 +173,7 @@ __all__ = [
     "ProblemInfeasibleError",
     "ProblemMarginallyFeasibleError",
     "SevereCurvatureError",
+    "UnconstrainedNewtonSolver",
     "solve_arrow_sparsity_pattern",
     "solve_block_plus_one",
     "solve_diagonal",
