@@ -156,7 +156,7 @@ from .optimization import (
     ProblemMarginallyFeasibleError,
     UnconstrainedNewtonSolver,
 )
-from .quadratic_programs import QuadraticNewtonSolver
+from .quadratic_programs import QuadraticNewtonSolver, QuadraticProgramEqualityBoundsSolver
 
 __all__ = [
     "BacktrackingLineSearchError",
@@ -182,6 +182,7 @@ __all__ = [
     "ProblemInfeasibleError",
     "ProblemMarginallyFeasibleError",
     "QuadraticNewtonSolver",
+    "QuadraticProgramEqualityBoundsSolver",
     "SevereCurvatureError",
     "UnconstrainedNewtonSolver",
     "solve_arrow_sparsity_pattern",
