@@ -224,3 +224,31 @@ class TestQuadraticProgramEqualityBoundsSolver:
         assert (
             result.dual_value <= result.objective_value + 1e-6
         ), f"Dual {result.dual_value} > primal {result.objective_value}: weak duality violated."
+
+    @pytest.mark.parametrize(
+        "seed,n,p,rank",
+        [
+            (1006, 10, 3, 7),
+            (2006, 15, 4, 10),
+        ],
+    )
+    def test_psd_q(self, seed: int, n: int, p: int, rank: int) -> None:
+        """Solver works when Q is PSD (rank-deficient) rather than PD."""
+        rng = np.random.default_rng(seed)
+
+        # Build a rank-deficient PSD Q: Q = B^T B where B is rank x n.
+        B = rng.standard_normal((rank, n))
+        Q = B.T @ B  # PSD, rank = rank < n
+
+        c = rng.standard_normal(n)
+        xl = np.zeros(n)
+
+        A = rng.standard_normal((p, n))
+        x0_feas = np.abs(rng.standard_normal(n)) + 1.0
+        b = A @ x0_feas
+
+        solver = QuadraticProgramEqualityBoundsSolver(Q=Q, c=c, A=A, b=b, xl=xl)
+        result = solver.solve()
+
+        np.testing.assert_allclose(A @ result.solution, b, atol=1e-5)
+        assert np.all(result.solution >= xl - 1e-6)

@@ -58,12 +58,12 @@ class QuadraticProgramEqualityBoundsSolver(
       subject to A x = b
                  x >= xl
 
-    where Q is strictly positive definite.
+    where Q is positive semi-definite (PSD).
 
     Parameters
     ----------
      Q : (n, n) array
-        Strictly positive definite quadratic cost matrix.
+        Positive semi-definite quadratic cost matrix.
      c : (n,) array
         Linear cost vector.
      A : (p, n) array
@@ -92,12 +92,15 @@ class QuadraticProgramEqualityBoundsSolver(
        2 Q x + c - lmbda + A^T nu = 0
        => x* = -(1/2) Q^{-1} (c - lmbda + A^T nu)
 
-    Let v = c - lmbda + A^T nu. Since Q is strictly PD, this minimizer is
-    unique. Substituting back:
+    Let v = c - lmbda + A^T nu. Since Q is PSD, the infimum over x is
+    finite only when v lies in the range of Q; otherwise g = -inf.
+    When v is in range(Q) the minimizer is unique along the row space of Q
+    and:
 
-       g(lmbda, nu) = -(1/4) v^T Q^{-1} v + lmbda^T xl - nu^T b
+       g(lmbda, nu) = -(1/4) v^T Q^+ v + lmbda^T xl - nu^T b
 
-    which is finite for all lmbda >= 0 (the dual is -inf if any lmbda_i < 0).
+    where Q^+ is the Moore-Penrose pseudoinverse of Q. The dual is also
+    -inf when any lmbda_i < 0.
 
     **Barrier problem**
 
@@ -113,7 +116,8 @@ class QuadraticProgramEqualityBoundsSolver(
        H_ft = 2t Q + D,   D = diag(1 / (x - xl)^2)
 
     The Hessian is strictly positive definite whenever x is strictly feasible
-    (x > xl) and Q is PD.
+    (x > xl), regardless of whether Q is PD or only PSD, because D alone is
+    already strictly positive definite.
 
     **Newton step**
 
@@ -149,10 +153,14 @@ class QuadraticProgramEqualityBoundsSolver(
         self._b = b
         self.xl = xl
         self._n = Q.shape[0]
-        try:
-            self._Q_factor = linalg.cho_factor(Q)
-        except np.linalg.LinAlgError:
-            raise ValueError("Q must be strictly positive definite.") from None
+
+        # Precompute the economy SVD of Q for use in evaluate_dual.
+        # Q is PSD so U == V; we retain only the rank-r subspace.
+        U, s, _ = linalg.svd(Q, full_matrices=False)
+        rank_tol = max(Q.shape) * np.finfo(float).eps * (s[0] if len(s) else 0.0)
+        rank = int(np.sum(s > rank_tol))
+        self._Q_svd_U_r: npt.NDArray[np.float64] = U[:, :rank]
+        self._Q_svd_s_r: npt.NDArray[np.float64] = s[:rank]
 
     # ------------------------------------------------------------------
     # Properties required by EqualityConstrainedInteriorPointMethodSolver
@@ -307,20 +315,29 @@ class QuadraticProgramEqualityBoundsSolver(
 
         The dual function (derived by minimizing the Lagrangian over x) is:
 
-            g(lmbda, nu) = -(1/4) v^T Q^{-1} v + lmbda^T xl - nu^T b
+            g(lmbda, nu) = -(1/4) v^T Q^+ v + lmbda^T xl - nu^T b
 
-        where v = c - lmbda + A^T nu. The dual is -infinity when any
-        lmbda_i < 0.
+        where v = c - lmbda + A^T nu and Q^+ is the Moore-Penrose pseudoinverse
+        of Q. The dual is -infinity when any lmbda_i < 0, or when v does not
+        lie in the range of Q (so the infimum over x is -infinity).
 
         """
         if np.any(lmbda < 0):
             return -np.inf
 
         v = self.c - lmbda + self.A.T @ nu
-        Q_inv_v = linalg.cho_solve(self._Q_factor, v)
+
+        # Project v onto the range of Q.  If v has a non-trivial component in
+        # the null space of Q, the Lagrangian is unbounded below and g = -inf.
+        v_proj = self._Q_svd_U_r @ (self._Q_svd_U_r.T @ v)
+        if not np.allclose(v_proj, v, atol=1e-6):
+            return -np.inf
+
+        # Q^+ v = U_r diag(1/s_r) U_r^T v  (Q is symmetric so U == V)
+        Q_pinv_v = self._Q_svd_U_r @ ((self._Q_svd_U_r.T @ v) / self._Q_svd_s_r)
 
         return float(
-            -0.25 * np.dot(v, Q_inv_v) + np.sum(lmbda * self.xl) - np.dot(self.b, nu)
+            -0.25 * np.dot(v, Q_pinv_v) + np.sum(lmbda * self.xl) - np.dot(self.b, nu)
         )
 
     # ------------------------------------------------------------------
