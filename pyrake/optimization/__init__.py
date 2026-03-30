@@ -127,6 +127,11 @@ from .exceptions import (
     ProblemInfeasibleError,
     SevereCurvatureError,
 )
+from .linear_programs import (
+    EqualitySolver,
+    EqualityWithBoundsAndImbalanceConstraintSolver,
+    EqualityWithBoundsSolver,
+)
 from .numerical_helpers import (
     solve_arrow_sparsity_pattern,
     solve_block_plus_one,
@@ -151,12 +156,16 @@ from .optimization import (
     ProblemMarginallyFeasibleError,
     UnconstrainedNewtonSolver,
 )
+from .quadratic_programs import QuadraticNewtonSolver
 
 __all__ = [
     "BacktrackingLineSearchError",
     "CenteringStepError",
     "ConstraintBoundaryError",
     "EqualityConstrainedInteriorPointMethodSolver",
+    "EqualitySolver",
+    "EqualityWithBoundsAndImbalanceConstraintSolver",
+    "EqualityWithBoundsSolver",
     "InteriorPointMethodError",
     "InteriorPointMethodResult",
     "InteriorPointMethodSolver",
@@ -172,6 +181,7 @@ __all__ = [
     "ProblemCertifiablyInfeasibleError",
     "ProblemInfeasibleError",
     "ProblemMarginallyFeasibleError",
+    "QuadraticNewtonSolver",
     "SevereCurvatureError",
     "UnconstrainedNewtonSolver",
     "solve_arrow_sparsity_pattern",
