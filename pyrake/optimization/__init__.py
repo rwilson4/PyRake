@@ -130,7 +130,6 @@ from .exceptions import (
 from .linear_programs import (
     EqualitySolver,
     EqualityWithBoundsAndImbalanceConstraintSolver,
-    EqualityWithBoundsAndNormConstraintSolver,
     EqualityWithBoundsSolver,
 )
 from .numerical_helpers import (
@@ -165,7 +164,6 @@ __all__ = [
     "EqualityConstrainedInteriorPointMethodSolver",
     "EqualitySolver",
     "EqualityWithBoundsAndImbalanceConstraintSolver",
-    "EqualityWithBoundsAndNormConstraintSolver",
     "EqualityWithBoundsSolver",
     "InteriorPointMethodError",
     "InteriorPointMethodResult",
