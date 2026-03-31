@@ -1,5 +1,7 @@
 """Quadratic program solvers."""
 
+from collections.abc import Callable
+
 import numpy as np
 import numpy.typing as npt
 from scipy import linalg
@@ -78,6 +80,23 @@ class QuadraticProgramEqualityBoundsSolver(
         Lower bounds on x. Defaults to 0.
      settings : OptimizationSettings, optional
         Optimization settings.
+     Q_vector_multiply : callable, optional
+        If provided, called as ``Q_vector_multiply(v)`` and must return ``Q @ v``
+        for any 1-D or 2-D array ``v``.  Replaces the dense matrix-vector product
+        ``Q @ v`` in the gradient, objective, and barrier Hessian-vector product,
+        enabling O(n) cost when Q has exploitable structure (e.g. diagonal).
+        When supplied together with ``Q_solve`` the O(n³) SVD precomputation is
+        skipped entirely.
+     Q_solve : callable, optional
+        If provided, called as ``Q_solve(v)`` and must return ``Q^{-1} v`` for
+        any 1-D or 2-D array ``v``.  Implies Q is positive definite.  Used in
+        ``evaluate_dual`` (replaces the SVD pseudoinverse) and in
+        ``calculate_newton_step`` via the identity
+
+            H_ft^{-1} z = (I + Q^{-1} D / (2t))^{-1} Q^{-1} z / (2t),
+
+        where D = diag(1/(x - xl)^2).  For diagonal Q the inner factor reduces
+        to a scalar elementwise divide, giving an O(n) Newton step.
 
     Notes
     -----
@@ -162,6 +181,12 @@ class QuadraticProgramEqualityBoundsSolver(
         b: npt.NDArray[np.float64],
         xl: float | list[float] | npt.NDArray[np.float64] = 0.0,
         settings: OptimizationSettings | None = None,
+        Q_vector_multiply: (
+            Callable[[npt.NDArray[np.float64]], npt.NDArray[np.float64]] | None
+        ) = None,
+        Q_solve: (
+            Callable[[npt.NDArray[np.float64]], npt.NDArray[np.float64]] | None
+        ) = None,
     ) -> None:
         phase1_solver = EqualityWithBoundsSolver(A=A, b=b, lb=xl, settings=settings)
         super().__init__(phase1_solver=phase1_solver, settings=settings)
@@ -171,21 +196,48 @@ class QuadraticProgramEqualityBoundsSolver(
         self._b = b
         self.xl = xl
         self._n = Q.shape[0]
+        self._Q_vector_multiply = Q_vector_multiply
+        self._Q_solve = Q_solve
+        self._Q_solve_is_diagonal = False
 
-        # Precompute the economy SVD of Q (Q is PSD so U == V).
-        # We retain only the rank-r subspace, which also handles PSD Q where
-        # some singular values are numerically zero.
-        U, s, _ = linalg.svd(Q, full_matrices=False)
-        rank_tol = max(Q.shape) * np.finfo(float).eps * (s[0] if len(s) else 0.0)
-        rank = int(np.sum(s > rank_tol))
-        self._Q_svd_U_r: npt.NDArray[np.float64] = U[:, :rank]
-        self._Q_svd_s_r: npt.NDArray[np.float64] = s[:rank]
+        if Q_vector_multiply is not None and Q_solve is not None:
+            # Both callables supplied: skip the O(n³) SVD entirely.
+            # Q_solve implies Q is PD, so every v is in range(Q) and the
+            # pseudoinverse equals the true inverse — no range-check needed.
+            self._Q_svd_U_r: npt.NDArray[np.float64] | None = None
+            self._Q_svd_s_r: npt.NDArray[np.float64] | None = None
+            self._kappa_cache: npt.NDArray[np.float64] | None = None
 
-        # Cached square-root factor: kappa_cache @ kappa_cache^T == Q.
-        # Shape: n-by-r.  Used in hessian_multiply and calculate_newton_step
-        # so that we never re-process Q at runtime; only a cheap O(r*n) scalar
-        # multiply (to absorb sqrt(2t)) is needed per Newton step.
-        self._kappa_cache: npt.NDArray[np.float64] = U[:, :rank] * np.sqrt(s[:rank])
+            # Probe Q_solve with e₀ to detect diagonal structure (one O(n) call).
+            # For diagonal Q, Q_solve(e₀) = e₀/q₀, which is proportional to e₀.
+            e0 = np.zeros(self._n)
+            e0[0] = 1.0
+            probe = Q_solve(e0)
+            self._Q_solve_is_diagonal = bool(np.allclose(probe[1:], 0.0, atol=1e-10))
+        else:
+            # Precompute the economy SVD of Q (Q is PSD so U == V).
+            # We retain only the rank-r subspace, which also handles PSD Q where
+            # some singular values are numerically zero.
+            U, s, _ = linalg.svd(Q, full_matrices=False)
+            rank_tol = max(Q.shape) * np.finfo(float).eps * (s[0] if len(s) else 0.0)
+            rank = int(np.sum(s > rank_tol))
+            self._Q_svd_U_r = U[:, :rank]
+            self._Q_svd_s_r = s[:rank]
+
+            # Cached square-root factor: kappa_cache @ kappa_cache^T == Q.
+            # Shape: n-by-r.  Used in hessian_multiply and calculate_newton_step
+            # so that we never re-process Q at runtime; only a cheap O(r*n) scalar
+            # multiply (to absorb sqrt(2t)) is needed per Newton step.
+            self._kappa_cache = U[:, :rank] * np.sqrt(s[:rank])
+
+            if Q_solve is not None:
+                # Q_solve without Q_vector_multiply: probe once for diagonal detection.
+                e0 = np.zeros(self._n)
+                e0[0] = 1.0
+                probe = Q_solve(e0)
+                self._Q_solve_is_diagonal = bool(
+                    np.allclose(probe[1:], 0.0, atol=1e-10)
+                )
 
     # ------------------------------------------------------------------
     # Properties required by EqualityConstrainedInteriorPointMethodSolver
@@ -219,13 +271,19 @@ class QuadraticProgramEqualityBoundsSolver(
     # Objective
     # ------------------------------------------------------------------
 
+    def _q_multiply(self, v: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+        """Return Q @ v, using the callable when available."""
+        if self._Q_vector_multiply is not None:
+            return self._Q_vector_multiply(v)
+        return self.Q @ v
+
     def evaluate_objective(self, x: npt.NDArray[np.float64]) -> float:
         """Evaluate f0(x) = x^T Q x + c^T x."""
-        return float(x @ self.Q @ x + self.c @ x)
+        return float(x @ self._q_multiply(x) + self.c @ x)
 
     def gradient(self, x: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
         """Gradient of f0: grad_f0 = 2 Q x + c."""
-        return 2.0 * (self.Q @ x) + self.c
+        return 2.0 * self._q_multiply(x) + self.c
 
     # ------------------------------------------------------------------
     # Constraints: fi(x) = xl_i - x_i <= 0
@@ -272,20 +330,22 @@ class QuadraticProgramEqualityBoundsSolver(
     def hessian_multiply(
         self, x: npt.NDArray[np.float64], t: float, y: npt.NDArray[np.float64]
     ) -> npt.NDArray[np.float64]:
-        r"""Multiply H_ft * y.
+        r"""Multiply H_ft * y = (2t Q + D) y.
 
-        H_ft = 2t Q + D = D + kappa @ kappa^T,
-        where kappa = sqrt(2t) * kappa_cache and D = diag(1 / (x - xl)^2).
+        Three paths, in priority order:
 
-        Using Q = kappa_cache @ kappa_cache^T:
-
-            H_ft y = 2t * kappa_cache @ (kappa_cache^T @ y) + d * y,
-
-        which costs O(rn) instead of the O(n^2) dense matrix-vector product
-        2t Q y for low-rank Q (r << n).
+        1. ``Q_vector_multiply`` provided → ``2t * Q_vector_multiply(y) + d * y``.
+           O(n) when Q_vector_multiply is O(n) (e.g. diagonal Q).
+        2. kappa_cache available → ``2t * kappa_cache @ (kappa_cache^T @ y) + d * y``.
+           O(rn) for rank-r Q.
+        3. Fallback → ``2t * Q @ y + d * y``.  O(n^2).
         """
         d = 1.0 / np.square(x - self.xl)
-        return 2.0 * t * (self._kappa_cache @ (self._kappa_cache.T @ y)) + d * y
+        if self._Q_vector_multiply is not None:
+            return 2.0 * t * self._Q_vector_multiply(y) + d * y
+        if self._kappa_cache is not None:
+            return 2.0 * t * (self._kappa_cache @ (self._kappa_cache.T @ y)) + d * y
+        return 2.0 * t * (self.Q @ y) + d * y
 
     # ------------------------------------------------------------------
     # Newton step
@@ -305,30 +365,66 @@ class QuadraticProgramEqualityBoundsSolver(
 
         where H_ft = 2t Q + D, D = diag(1 / (x - xl)^2).
 
-        We form H_ft explicitly and use Cholesky to solve H_ft * y = z.
-        This is re-factored at every Newton step, which is correct but
-        O(n^3) per step.
+        Four solve paths, in priority order:
+
+        **Q_solve provided AND diagonal Q**
+            H_ft = 2t Q + D = diag(2t q + d), so the Hessian system reduces to
+            elementwise division.  Using the identity
+
+                H_ft^{-1} z = (I + M)^{-1} Q^{-1}(z) / (2t),
+                M = Q^{-1} D / (2t),
+
+            and the fact that M = diag(Q_solve(d) / (2t)) when Q is diagonal,
+            (I + M)^{-1} is also diagonal → O(n) solve.
+
+            For non-diagonal Q, Q^{-1}D is non-symmetric so (I+M) cannot be
+            Cholesky-factored.  Those cases fall through to the existing paths.
+
+        **Low-rank Q (r < n)**
+            Woodbury identity with kappa_cache.  O(r^2 n + r^3) per step.
+
+        **Full-rank Q (r = n) or non-diagonal Q_solve**
+            Form H_ft explicitly and Cholesky-factor.  O(n^3) per step.
 
         """
         d = 1.0 / np.square(x - self.xl)
-        r = self._kappa_cache.shape[1]
 
-        if r < self._n:
-            # Low-rank Q (r << n): use Woodbury identity.  O(r^2 n + r^3) per step.
+        _q_solve = self._Q_solve  # local alias so mypy can narrow the type
+        if _q_solve is not None and self._Q_solve_is_diagonal:
+            # Q is diagonal → H_ft = diag(2tq + d).  O(n) solve.
+            # From H_ft^{-1} z = (I+M)^{-1} Q_solve(z)/(2t) with M diagonal:
+            #   (I+M)^{-1}_{ii} = 1 / (1 + Q_solve(d)_i / (2t))
+            #   H_ft^{-1} z = Q_solve(z) / (2t + Q_solve(d))  (elementwise)
+            inv_2t_plus_m = 1.0 / (2.0 * t + _q_solve(d))
+
+            def hessian_solve(
+                rhs: npt.NDArray[np.float64],
+            ) -> npt.NDArray[np.float64]:
+                q_solved = _q_solve(rhs)
+                if q_solved.ndim == 1:
+                    return q_solved * inv_2t_plus_m
+                return q_solved * inv_2t_plus_m[:, np.newaxis]
+
+        elif self._kappa_cache is not None and self._kappa_cache.shape[1] < self._n:
+            # Low-rank Q (r < n): Woodbury identity.  O(r^2 n + r^3) per step.
             eta_inverse = 1.0 / d  # (x_j - xl_j)^2; diagonal D^{-1}
-            kappa = np.sqrt(2.0 * t) * self._kappa_cache  # n-by-r, O(rn) per step
+            kappa = np.sqrt(2.0 * t) * self._kappa_cache  # n-by-r
 
-            def hessian_solve(rhs: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+            def hessian_solve(
+                rhs: npt.NDArray[np.float64],
+            ) -> npt.NDArray[np.float64]:
                 return solve_rank_p_update(
                     rhs, kappa, solve_diagonal_eta_inverse, eta_inverse=eta_inverse
                 )
 
         else:
-            # Full-rank Q: form H explicitly and Cholesky-factor.  O(n^3) per step.
+            # Full-rank Q: form H_ft explicitly and Cholesky-factor.  O(n^3).
             H = 2.0 * t * self.Q + np.diag(d)
             H_factor = linalg.cho_factor(H)
 
-            def hessian_solve(rhs: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+            def hessian_solve(
+                rhs: npt.NDArray[np.float64],
+            ) -> npt.NDArray[np.float64]:
                 return linalg.cho_solve(H_factor, rhs)
 
         return solve_kkt_system(
@@ -403,24 +499,32 @@ class QuadraticProgramEqualityBoundsSolver(
         of Q. The dual is -infinity when any lmbda_i < 0, or when v does not
         lie in the range of Q (so the infimum over x is -infinity).
 
+        When ``Q_solve`` is provided Q is PD so Q^+ = Q^{-1} and every v is in
+        range(Q); the range check and SVD pseudoinverse are both skipped.
+
         """
         if np.any(lmbda < 0):
             return -np.inf
 
         v = self.c - lmbda + self.A.T @ nu
+        base = np.sum(lmbda * self.xl) - np.dot(self.b, nu)
 
+        if self._Q_solve is not None:
+            # Q is PD: Q^+ = Q^{-1}, every v is in range(Q).
+            Q_inv_v = self._Q_solve(v)
+            return float(-0.25 * np.dot(v, Q_inv_v) + base)
+
+        # General PSD path: check range and use SVD pseudoinverse.
         # Project v onto the range of Q.  If v has a non-trivial component in
         # the null space of Q, the Lagrangian is unbounded below and g = -inf.
+        assert self._Q_svd_U_r is not None and self._Q_svd_s_r is not None
         v_proj = self._Q_svd_U_r @ (self._Q_svd_U_r.T @ v)
         if not np.allclose(v_proj, v, atol=1e-6):
             return -np.inf
 
         # Q^+ v = U_r diag(1/s_r) U_r^T v  (Q is symmetric so U == V)
         Q_pinv_v = self._Q_svd_U_r @ ((self._Q_svd_U_r.T @ v) / self._Q_svd_s_r)
-
-        return float(
-            -0.25 * np.dot(v, Q_pinv_v) + np.sum(lmbda * self.xl) - np.dot(self.b, nu)
-        )
+        return float(-0.25 * np.dot(v, Q_pinv_v) + base)
 
     # ------------------------------------------------------------------
     # solve: force fully_optimize=True (inherited from InteriorPointMethodSolver)

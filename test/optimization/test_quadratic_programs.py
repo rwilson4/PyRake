@@ -266,3 +266,201 @@ class TestQuadraticProgramEqualityBoundsSolver:
 
         np.testing.assert_allclose(A @ result.solution, b, atol=1e-5)
         assert np.all(result.solution >= xl - 1e-6)
+
+
+class TestStructuredQCallables:
+    r"""Timing tests for Q_vector_multiply / Q_solve callables.
+
+    Three variants are compared for each structured Q:
+      * scipy trust-constr (ground truth / reference)
+      * PyRake without callables (baseline: O(n²) gradient, O(n³) Newton)
+      * PyRake with callables   (target:   O(n)  gradient, O(n)  Newton)
+    """
+
+    @pytest.mark.parametrize(
+        "seed,n,p",
+        [
+            (7001, 50, 5),
+            (7002, 100, 8),
+            (7003, 200, 10),
+        ],
+    )
+    def test_diagonal_q(self, seed: int, n: int, p: int) -> None:
+        """Diagonal Q: callables enable O(n) gradient and O(n) Newton step."""
+        rng = np.random.default_rng(seed)
+
+        # Q = diag(q) with positive entries.
+        q = rng.uniform(0.5, 3.0, n)
+        Q = np.diag(q)
+
+        c = rng.standard_normal(n)
+        xl = np.zeros(n)
+
+        A = rng.standard_normal((p, n))
+        x0_feas = xl + np.abs(rng.standard_normal(n)) + 1.0
+        b = A @ x0_feas
+
+        # Callables: O(n) multiply and solve for diagonal Q.
+        def q_multiply(v: np.ndarray) -> np.ndarray:
+            if v.ndim == 1:
+                return q * v
+            return q[:, np.newaxis] * v
+
+        def q_solve(v: np.ndarray) -> np.ndarray:
+            if v.ndim == 1:
+                return v / q
+            return v / q[:, np.newaxis]
+
+        # --- scipy ground truth ---
+        t0 = time.perf_counter()
+        scipy_result = optimize.minimize(
+            fun=lambda x: float(x @ Q @ x + c @ x),
+            x0=x0_feas,
+            method="trust-constr",
+            jac=lambda x: 2.0 * Q @ x + c,
+            hess=lambda x: 2.0 * Q,
+            constraints=optimize.LinearConstraint(A, b, b),
+            bounds=optimize.Bounds(lb=xl),
+            options={"gtol": 1e-10, "maxiter": 2000},
+        )
+        scipy_ms = 1000.0 * (time.perf_counter() - t0)
+        if not scipy_result.success:
+            pytest.skip(f"scipy reference solver failed: {scipy_result.message}")
+
+        # --- PyRake without callables ---
+        t0 = time.perf_counter()
+        solver_naive = QuadraticProgramEqualityBoundsSolver(Q=Q, c=c, A=A, b=b, xl=xl)
+        result_naive = solver_naive.solve()
+        pyrake_naive_ms = 1000.0 * (time.perf_counter() - t0)
+
+        # --- PyRake with callables ---
+        t0 = time.perf_counter()
+        solver_fast = QuadraticProgramEqualityBoundsSolver(
+            Q=Q,
+            c=c,
+            A=A,
+            b=b,
+            xl=xl,
+            Q_vector_multiply=q_multiply,
+            Q_solve=q_solve,
+        )
+        result_fast = solver_fast.solve()
+        pyrake_fast_ms = 1000.0 * (time.perf_counter() - t0)
+
+        speedup = (
+            pyrake_naive_ms / pyrake_fast_ms if pyrake_fast_ms > 0 else float("inf")
+        )
+        print(
+            f"\n  diagonal Q | n={n:3d}, p={p:2d} | "
+            f"scipy: {scipy_ms:7.2f} ms | "
+            f"PyRake naive: {pyrake_naive_ms:7.2f} ms | "
+            f"PyRake fast: {pyrake_fast_ms:7.2f} ms | "
+            f"speedup: {speedup:.1f}x"
+        )
+
+        # Both variants must match scipy.
+        np.testing.assert_allclose(
+            result_naive.solution, scipy_result.x, rtol=1e-3, atol=1e-3
+        )
+        np.testing.assert_allclose(
+            result_fast.solution, scipy_result.x, rtol=1e-3, atol=1e-3
+        )
+        # Constraints satisfied.
+        np.testing.assert_allclose(A @ result_fast.solution, b, atol=1e-5)
+        assert np.all(result_fast.solution >= xl - 1e-6)
+
+    @pytest.mark.parametrize(
+        "seed,n,p",
+        [
+            (8001, 50, 5),
+            (8002, 100, 8),
+            (8003, 200, 10),
+        ],
+    )
+    def test_diagonal_plus_rank_one_q(self, seed: int, n: int, p: int) -> None:
+        """Q = diag(q) + u u^T: O(n) multiply/solve via Sherman-Morrison."""
+        rng = np.random.default_rng(seed)
+
+        q = rng.uniform(0.5, 3.0, n)
+        u = rng.standard_normal(n)
+        Q = np.diag(q) + np.outer(u, u)
+
+        c = rng.standard_normal(n)
+        xl = np.zeros(n)
+
+        A = rng.standard_normal((p, n))
+        x0_feas = xl + np.abs(rng.standard_normal(n)) + 1.0
+        b = A @ x0_feas
+
+        # Sherman-Morrison constant: a = 1 / (1 + u^T Q_diag^{-1} u)
+        alpha = 1.0 / (1.0 + float(np.dot(u, u / q)))
+
+        def q_multiply(v: np.ndarray) -> np.ndarray:
+            """Q v = diag(q) v + (u^T v) u."""
+            if v.ndim == 1:
+                return q * v + np.dot(u, v) * u
+            return q[:, np.newaxis] * v + np.outer(u, u @ v)
+
+        def q_solve(v: np.ndarray) -> np.ndarray:
+            """Q^{-1} v via Sherman-Morrison: v/q - a*(u^T(v/q))*u/q."""
+            if v.ndim == 1:
+                v_over_q = v / q
+                return v_over_q - alpha * np.dot(u, v_over_q) * (u / q)
+            v_over_q = v / q[:, np.newaxis]
+            return v_over_q - alpha * np.outer(u / q, u @ v_over_q)
+
+        # --- scipy ground truth ---
+        t0 = time.perf_counter()
+        scipy_result = optimize.minimize(
+            fun=lambda x: float(x @ Q @ x + c @ x),
+            x0=x0_feas,
+            method="trust-constr",
+            jac=lambda x: 2.0 * Q @ x + c,
+            hess=lambda x: 2.0 * Q,
+            constraints=optimize.LinearConstraint(A, b, b),
+            bounds=optimize.Bounds(lb=xl),
+            options={"gtol": 1e-10, "maxiter": 2000},
+        )
+        scipy_ms = 1000.0 * (time.perf_counter() - t0)
+        if not scipy_result.success:
+            pytest.skip(f"scipy reference solver failed: {scipy_result.message}")
+
+        # --- PyRake without callables ---
+        t0 = time.perf_counter()
+        solver_naive = QuadraticProgramEqualityBoundsSolver(Q=Q, c=c, A=A, b=b, xl=xl)
+        result_naive = solver_naive.solve()
+        pyrake_naive_ms = 1000.0 * (time.perf_counter() - t0)
+
+        # --- PyRake with callables ---
+        t0 = time.perf_counter()
+        solver_fast = QuadraticProgramEqualityBoundsSolver(
+            Q=Q,
+            c=c,
+            A=A,
+            b=b,
+            xl=xl,
+            Q_vector_multiply=q_multiply,
+            Q_solve=q_solve,
+        )
+        result_fast = solver_fast.solve()
+        pyrake_fast_ms = 1000.0 * (time.perf_counter() - t0)
+
+        speedup = (
+            pyrake_naive_ms / pyrake_fast_ms if pyrake_fast_ms > 0 else float("inf")
+        )
+        print(
+            f"\n  diag+rank-1 Q | n={n:3d}, p={p:2d} | "
+            f"scipy: {scipy_ms:7.2f} ms | "
+            f"PyRake naive: {pyrake_naive_ms:7.2f} ms | "
+            f"PyRake fast: {pyrake_fast_ms:7.2f} ms | "
+            f"speedup: {speedup:.1f}x"
+        )
+
+        np.testing.assert_allclose(
+            result_naive.solution, scipy_result.x, rtol=1e-3, atol=1e-3
+        )
+        np.testing.assert_allclose(
+            result_fast.solution, scipy_result.x, rtol=1e-3, atol=1e-3
+        )
+        np.testing.assert_allclose(A @ result_fast.solution, b, atol=1e-5)
+        assert np.all(result_fast.solution >= xl - 1e-6)
