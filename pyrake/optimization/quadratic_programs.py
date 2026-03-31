@@ -1,6 +1,8 @@
 """Quadratic program solvers."""
 
+import inspect
 from collections.abc import Callable
+from typing import Any
 
 import numpy as np
 import numpy.typing as npt
@@ -52,6 +54,20 @@ class QuadraticNewtonSolver(UnconstrainedNewtonSolver):
         self, x: npt.NDArray[np.float64], y: npt.NDArray[np.float64]
     ) -> npt.NDArray[np.float64]:
         return self.Q @ y
+
+
+def _callable_has_structured_params(fn: Callable[..., Any] | None) -> bool:
+    """Return True if *fn* declares both ``scale`` and ``diag_add`` parameters.
+
+    Used to detect whether a user-supplied Q_solve or Q_vector_multiply
+    supports the structured ``(scale * Q + diag(diag_add))`` interface.
+    When both parameters are present the Newton step can call the callable
+    directly with the barrier diagonal, avoiding any separate treatment of D.
+    """
+    if fn is None:
+        return False
+    sig = inspect.signature(fn)
+    return "scale" in sig.parameters and "diag_add" in sig.parameters
 
 
 class QuadraticProgramEqualityBoundsSolver(
@@ -199,6 +215,10 @@ class QuadraticProgramEqualityBoundsSolver(
         self._Q_vector_multiply = Q_vector_multiply
         self._Q_solve = Q_solve
         self._Q_solve_is_diagonal = False
+        self._Q_solve_has_structured_params = _callable_has_structured_params(Q_solve)
+        self._Q_vector_multiply_has_structured_params = _callable_has_structured_params(
+            Q_vector_multiply
+        )
 
         if Q_vector_multiply is not None and Q_solve is not None:
             # Both callables supplied: skip the O(n³) SVD entirely.
@@ -342,6 +362,10 @@ class QuadraticProgramEqualityBoundsSolver(
         """
         d = 1.0 / np.square(x - self.xl)
         if self._Q_vector_multiply is not None:
+            if self._Q_vector_multiply_has_structured_params:
+                # Q_vector_multiply handles (scale * Q + diag(diag_add)) directly.
+                # scale=2t > 0 and diag_add=d >= 0 are guaranteed by the barrier.
+                return self._Q_vector_multiply(y, scale=2.0 * t, diag_add=d)  # type: ignore[call-arg]
             return 2.0 * t * self._Q_vector_multiply(y) + d * y
         if self._kappa_cache is not None:
             return 2.0 * t * (self._kappa_cache @ (self._kappa_cache.T @ y)) + d * y
@@ -365,7 +389,14 @@ class QuadraticProgramEqualityBoundsSolver(
 
         where H_ft = 2t Q + D, D = diag(1 / (x - xl)^2).
 
-        Four solve paths, in priority order:
+        Five solve paths, in priority order:
+
+        **Q_solve supports scale + diag_add (highest priority)**
+            Solves H_ft x = b as Q_solve(b, scale=2t, diag_add=d) where
+            ``Q_solve(v, scale=s, diag_add=e)`` solves ``(s Q + diag(e)) x = v``.
+            ``scale`` is guaranteed positive; ``diag_add`` entries are guaranteed
+            non-negative.  Implementing methods may assert these preconditions.
+            Q's internal structure is entirely opaque to the solver.
 
         **Q_solve provided AND diagonal Q**
             H_ft = 2t Q + D = diag(2t q + d), so the Hessian system reduces to
@@ -390,7 +421,17 @@ class QuadraticProgramEqualityBoundsSolver(
         d = 1.0 / np.square(x - self.xl)
 
         _q_solve = self._Q_solve  # local alias so mypy can narrow the type
-        if _q_solve is not None and self._Q_solve_is_diagonal:
+        if _q_solve is not None and self._Q_solve_has_structured_params:
+            # Q_solve handles (scale * Q + diag(diag_add)) directly.
+            # scale=2t > 0 and diag_add=d >= 0 are guaranteed by the barrier.
+            two_t = 2.0 * t
+
+            def hessian_solve(
+                rhs: npt.NDArray[np.float64],
+            ) -> npt.NDArray[np.float64]:
+                return _q_solve(rhs, scale=two_t, diag_add=d)  # type: ignore[call-arg]
+
+        elif _q_solve is not None and self._Q_solve_is_diagonal:
             # Q is diagonal → H_ft = diag(2tq + d).  O(n) solve.
             # From H_ft^{-1} z = (I+M)^{-1} Q_solve(z)/(2t) with M diagonal:
             #   (I+M)^{-1}_{ii} = 1 / (1 + Q_solve(d)_i / (2t))

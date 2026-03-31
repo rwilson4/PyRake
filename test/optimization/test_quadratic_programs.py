@@ -3,6 +3,7 @@
 import time
 
 import numpy as np
+import numpy.typing as npt
 import pytest
 from scipy import linalg, optimize
 
@@ -301,12 +302,12 @@ class TestStructuredQCallables:
         b = A @ x0_feas
 
         # Callables: O(n) multiply and solve for diagonal Q.
-        def q_multiply(v: np.ndarray) -> np.ndarray:
+        def q_multiply(v: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
             if v.ndim == 1:
                 return q * v
             return q[:, np.newaxis] * v
 
-        def q_solve(v: np.ndarray) -> np.ndarray:
+        def q_solve(v: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
             if v.ndim == 1:
                 return v / q
             return v / q[:, np.newaxis]
@@ -395,13 +396,13 @@ class TestStructuredQCallables:
         # Sherman-Morrison constant: a = 1 / (1 + u^T Q_diag^{-1} u)
         alpha = 1.0 / (1.0 + float(np.dot(u, u / q)))
 
-        def q_multiply(v: np.ndarray) -> np.ndarray:
+        def q_multiply(v: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
             """Q v = diag(q) v + (u^T v) u."""
             if v.ndim == 1:
                 return q * v + np.dot(u, v) * u
             return q[:, np.newaxis] * v + np.outer(u, u @ v)
 
-        def q_solve(v: np.ndarray) -> np.ndarray:
+        def q_solve(v: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
             """Q^{-1} v via Sherman-Morrison: v/q - a*(u^T(v/q))*u/q."""
             if v.ndim == 1:
                 v_over_q = v / q
@@ -450,6 +451,126 @@ class TestStructuredQCallables:
         )
         print(
             f"\n  diag+rank-1 Q | n={n:3d}, p={p:2d} | "
+            f"scipy: {scipy_ms:7.2f} ms | "
+            f"PyRake naive: {pyrake_naive_ms:7.2f} ms | "
+            f"PyRake fast: {pyrake_fast_ms:7.2f} ms | "
+            f"speedup: {speedup:.1f}x"
+        )
+
+        np.testing.assert_allclose(
+            result_naive.solution, scipy_result.x, rtol=1e-3, atol=1e-3
+        )
+        np.testing.assert_allclose(
+            result_fast.solution, scipy_result.x, rtol=1e-3, atol=1e-3
+        )
+        np.testing.assert_allclose(A @ result_fast.solution, b, atol=1e-5)
+        assert np.all(result_fast.solution >= xl - 1e-6)
+
+    @pytest.mark.parametrize(
+        "seed,n,p",
+        [
+            (9001, 50, 5),
+            (9002, 100, 8),
+            (9003, 200, 10),
+        ],
+    )
+    def test_diagonal_plus_rank_one_q_with_scale_and_diag_add(
+        self, seed: int, n: int, p: int
+    ) -> None:
+        """Q = diag(q) + u u^T: scale+diag_add callables enable O(n) Newton step.
+
+        ``Q_solve(v, scale=s, diag_add=e)`` solves ``(s*Q + diag(e)) x = v`` using
+        Sherman-Morrison on ``diag(s*q + e) + sqrt(s)*u (sqrt(s)*u)^T``.
+        ``scale > 0`` and ``diag_add >= 0`` are guaranteed by the barrier; the
+        implementation may assert these preconditions.
+        """
+        rng = np.random.default_rng(seed)
+
+        q = rng.uniform(0.5, 3.0, n)
+        u = rng.standard_normal(n)
+        Q = np.diag(q) + np.outer(u, u)
+
+        c = rng.standard_normal(n)
+        xl = np.zeros(n)
+
+        A = rng.standard_normal((p, n))
+        x0_feas = xl + np.abs(rng.standard_normal(n)) + 1.0
+        b = A @ x0_feas
+
+        def q_multiply(
+            v: npt.NDArray[np.float64],
+            scale: float = 1.0,
+            diag_add: npt.NDArray[np.float64] | None = None,
+        ) -> npt.NDArray[np.float64]:
+            """(scale * Q + diag(diag_add)) v = (scale*q + diag_add)*v + scale*(u^T v)*u."""
+            e = diag_add if diag_add is not None else 0.0
+            if v.ndim == 1:
+                return (scale * q + e) * v + scale * np.dot(u, v) * u
+            return (scale * q + e)[:, np.newaxis] * v + scale * np.outer(u, u @ v)
+
+        def q_solve(
+            v: npt.NDArray[np.float64],
+            scale: float = 1.0,
+            diag_add: npt.NDArray[np.float64] | None = None,
+        ) -> npt.NDArray[np.float64]:
+            """Solve (scale * Q + diag(diag_add)) x = v via Sherman-Morrison.
+
+            (scale*diag(q) + scale*u u^T + diag(e)) x = (diag(scale*q+e) + w w^T) x = v
+            where w = sqrt(scale)*u.  Sherman-Morrison with D_e = diag(scale*q+e):
+                x = D_e^{-1} v - scale*(u^T D_e^{-1} v)/(1 + scale*u^T D_e^{-1} u)*D_e^{-1} u
+
+            Preconditions: scale > 0, diag_add >= 0 (entry-wise).
+            """
+            e = diag_add if diag_add is not None else 0.0
+            eff_diag = scale * q + e  # diag(D_e)
+            coeff = scale / (1.0 + scale * np.dot(u, u / eff_diag))
+            if v.ndim == 1:
+                v_over_d = v / eff_diag
+                return v_over_d - coeff * np.dot(u, v_over_d) * (u / eff_diag)
+            v_over_d = v / eff_diag[:, np.newaxis]
+            return v_over_d - coeff * np.outer(u / eff_diag, u @ v_over_d)
+
+        # --- scipy ground truth ---
+        t0 = time.perf_counter()
+        scipy_result = optimize.minimize(
+            fun=lambda x: float(x @ Q @ x + c @ x),
+            x0=x0_feas,
+            method="trust-constr",
+            jac=lambda x: 2.0 * Q @ x + c,
+            hess=lambda x: 2.0 * Q,
+            constraints=optimize.LinearConstraint(A, b, b),
+            bounds=optimize.Bounds(lb=xl),
+            options={"gtol": 1e-10, "maxiter": 2000},
+        )
+        scipy_ms = 1000.0 * (time.perf_counter() - t0)
+        if not scipy_result.success:
+            pytest.skip(f"scipy reference solver failed: {scipy_result.message}")
+
+        # --- PyRake without callables ---
+        t0 = time.perf_counter()
+        solver_naive = QuadraticProgramEqualityBoundsSolver(Q=Q, c=c, A=A, b=b, xl=xl)
+        result_naive = solver_naive.solve()
+        pyrake_naive_ms = 1000.0 * (time.perf_counter() - t0)
+
+        # --- PyRake with scale+diag_add callables ---
+        t0 = time.perf_counter()
+        solver_fast = QuadraticProgramEqualityBoundsSolver(
+            Q=Q,
+            c=c,
+            A=A,
+            b=b,
+            xl=xl,
+            Q_vector_multiply=q_multiply,
+            Q_solve=q_solve,
+        )
+        result_fast = solver_fast.solve()
+        pyrake_fast_ms = 1000.0 * (time.perf_counter() - t0)
+
+        speedup = (
+            pyrake_naive_ms / pyrake_fast_ms if pyrake_fast_ms > 0 else float("inf")
+        )
+        print(
+            f"\n  diag+rank-1 Q (scale+diag_add) | n={n:3d}, p={p:2d} | "
             f"scipy: {scipy_ms:7.2f} ms | "
             f"PyRake naive: {pyrake_naive_ms:7.2f} ms | "
             f"PyRake fast: {pyrake_fast_ms:7.2f} ms | "
