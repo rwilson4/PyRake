@@ -4,6 +4,11 @@ import time
 
 import numpy as np
 import pytest
+from cvxium import (
+    InteriorPointMethodResult,
+    OptimizationSettings,
+    ProblemCertifiablyInfeasibleError,
+)
 from scipy.special import expit, logit
 
 from pyrake.calibration.distance_metrics import (
@@ -12,11 +17,6 @@ from pyrake.calibration.distance_metrics import (
     SquaredL2,
 )
 from pyrake.calibration.rake import Rake
-from pyrake.optimization.optimization import (
-    InteriorPointMethodResult,
-    OptimizationSettings,
-    ProblemCertifiablyInfeasibleError,
-)
 
 
 @pytest.mark.parametrize(

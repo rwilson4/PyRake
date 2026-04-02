@@ -2,8 +2,7 @@
 
 import numpy as np
 import numpy.typing as npt
-
-from ..optimization import (
+from cvxium import (
     EqualityConstrainedInteriorPointMethodSolver,
     InteriorPointMethodSolver,
     OptimizationSettings,
@@ -13,6 +12,7 @@ from ..optimization import (
     solve_rank_one_update,
     solve_rank_p_update,
 )
+
 from .distance_metrics import Distance
 from .phase1solvers import (
     EqualityWithBoundsAndImbalanceConstraintSolver,

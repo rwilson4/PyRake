@@ -3,9 +3,9 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import numpy.typing as npt
+from cvxium import InteriorPointMethodResult
 from matplotlib.axes import Axes
 
-from ..optimization import InteriorPointMethodResult
 from .phase1solvers import (
     EqualityWithBoundsAndImbalanceConstraintSolver,
     EqualityWithBoundsAndNormConstraintSolver,

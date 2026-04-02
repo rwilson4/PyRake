@@ -2,14 +2,14 @@
 
 import numpy as np
 import pytest
-from scipy import linalg
-
-from pyrake.calibration.phase1solvers import EqualityWithBoundsAndNormConstraintSolver
-from pyrake.optimization.optimization import (
+from cvxium import (
     InteriorPointMethodResult,
     OptimizationSettings,
     ProblemCertifiablyInfeasibleError,
 )
+from scipy import linalg
+
+from pyrake.calibration.phase1solvers import EqualityWithBoundsAndNormConstraintSolver
 
 
 class TestEqualityWithBoundsAndNormConstraintSolver:

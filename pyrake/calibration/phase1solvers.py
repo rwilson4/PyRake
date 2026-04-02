@@ -2,8 +2,7 @@
 
 import numpy as np
 import numpy.typing as npt
-
-from ..optimization import (
+from cvxium import (
     EqualityConstrainedInteriorPointMethodSolver,
     EqualityWithBoundsAndImbalanceConstraintSolver,
     EqualityWithBoundsSolver,

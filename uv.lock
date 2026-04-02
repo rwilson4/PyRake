@@ -110,6 +110,20 @@ wheels = [
 ]
 
 [[package]]
+name = "cvxium"
+version = "0.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "matplotlib" },
+    { name = "numpy" },
+    { name = "scipy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/4a/b3/413668001d7c108a45b5d55825855be1ed5e87c7895828b4683c2d8828e8/cvxium-0.1.0.tar.gz", hash = "sha256:33b6d0b6ad828e654bd60b12338654af76748e901c3e2d4c0c953307afaa0f53", size = 127920, upload-time = "2026-04-01T14:58:58.538Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c1/6c/b9745cc034fa901177a8be1ec22555a7345d9bf4e87d74931809eff4c4e9/cvxium-0.1.0-py3-none-any.whl", hash = "sha256:e0efe5a90fa3edba47f4a0ce577e6d9d0b95b68c81d2df2eb26249dcb7761c1e", size = 57157, upload-time = "2026-04-01T14:58:57.262Z" },
+]
+
+[[package]]
 name = "cycler"
 version = "0.12.1"
 source = { registry = "https://pypi.org/simple" }
@@ -591,6 +605,7 @@ name = "pyrake"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "cvxium" },
     { name = "matplotlib" },
     { name = "numpy" },
     { name = "pandas" },
@@ -610,6 +625,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "cvxium", specifier = ">=0.1.0" },
     { name = "matplotlib", specifier = ">=3.10.1,<4" },
     { name = "numpy", specifier = ">=2.2.5,<3" },
     { name = "pandas", specifier = ">=2.3.1,<3" },
