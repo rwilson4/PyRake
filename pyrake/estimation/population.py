@@ -409,9 +409,14 @@ class IPWEstimator(MeanEstimator):
         """
         n = len(self.weights)
         n_over_N = n / self.population_size
-        return np.mean(
-            np.square(n_over_N * self.weights * self.outcomes - self.point_estimate())
-        ) / (n - 1)
+        return float(
+            np.mean(
+                np.square(
+                    n_over_N * self.weights * self.outcomes - self.point_estimate()
+                )
+            )
+            / (n - 1)
+        )
 
     def sensitivity_analysis(self, gamma: float = 6.0) -> tuple[float, float]:
         r"""Perform a sensitivity analysis.
@@ -549,11 +554,14 @@ class AIPWEstimator(IPWEstimator):
 
         """
         n_over_N = len(self.weights) / self.population_size
-        return np.mean(
-            np.square(
-                n_over_N * self.weights * self.outcomes - super().point_estimate()
+        return float(
+            np.mean(
+                np.square(
+                    n_over_N * self.weights * self.outcomes - super().point_estimate()
+                )
             )
-        ) / (len(self.weights) - 1)
+            / (len(self.weights) - 1)
+        )
 
     def sensitivity_analysis(self, gamma: float = 6.0) -> tuple[float, float]:
         r"""Perform a sensitivity analysis.
