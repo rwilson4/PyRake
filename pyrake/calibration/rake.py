@@ -4,9 +4,9 @@ import numpy as np
 import numpy.typing as npt
 from cvxium import (
     EqualityConstrainedInteriorPointMethodSolver,
+    FeasibilitySolver,
     InteriorPointMethodSolver,
     OptimizationSettings,
-    FeasibilitySolver,
     solve_diagonal_eta_inverse,
     solve_kkt_system,
     solve_rank_one_update,
