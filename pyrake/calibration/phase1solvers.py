@@ -8,7 +8,7 @@ from cvxium import (
     EqualityWithBoundsSolver,
     NewtonResult,
     OptimizationSettings,
-    PhaseIInteriorPointSolver,
+    FeasibilityInteriorPointSolver,
     ProblemCertifiablyInfeasibleError,
     solve_diagonal_eta_inverse,
     solve_kkt_system,
@@ -17,7 +17,7 @@ from cvxium import (
 
 
 class EqualityWithBoundsAndNormConstraintSolver(
-    EqualityConstrainedInteriorPointMethodSolver, PhaseIInteriorPointSolver
+    EqualityConstrainedInteriorPointMethodSolver, FeasibilityInteriorPointSolver
 ):
     r"""Find x satisfying A * x = b, x > lb, and \| x \|_2^2 < phi.
 

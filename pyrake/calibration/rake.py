@@ -6,7 +6,7 @@ from cvxium import (
     EqualityConstrainedInteriorPointMethodSolver,
     InteriorPointMethodSolver,
     OptimizationSettings,
-    PhaseISolver,
+    FeasibilitySolver,
     solve_diagonal_eta_inverse,
     solve_kkt_system,
     solve_rank_one_update,
@@ -189,7 +189,7 @@ class Rake(EqualityConstrainedInteriorPointMethodSolver, InteriorPointMethodSolv
             self.settings = settings
 
         if phi is not None:
-            self.phase1_solver: PhaseISolver = (
+            self.phase1_solver: FeasibilitySolver = (
                 EqualityWithBoundsAndNormConstraintSolver(
                     phi=M * phi,
                     A=(1 / M) * self.X.T,
