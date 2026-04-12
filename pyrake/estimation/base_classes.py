@@ -313,6 +313,7 @@ class WeightingEstimator(ABC):
         null_value: float,
         gamma: float = 6.0,
         alternative: Literal["two-sided", "less", "greater"] = "two-sided",
+        bootstrap: bool = True,
         B: int = 1_000,
         seed: None | (
             int
@@ -322,7 +323,7 @@ class WeightingEstimator(ABC):
             | np.random.Generator
         ) = None,
     ) -> float:
-        r"""Calculate a p-value adjusted for hidden bias via the percentile bootstrap.
+        r"""Calculate a p-value adjusted for hidden bias.
 
         The adjusted p-value accounts for both sampling uncertainty and
         uncertainty from propensity scores estimated with error. It is the
@@ -343,10 +344,19 @@ class WeightingEstimator(ABC):
               - "greater": H0: theta <= `null_value` vs Halt: theta > `null_value`.
               - "less": H0: theta >= `null_value` vs Halt: theta < `null_value`.
             Defaults to "two-sided".
+         bootstrap : bool, optional
+            If True (default), use the percentile bootstrap to account for
+            sampling variability in the sensitivity bounds. If False, use the
+            normal approximation: the adjusted p-value is computed from the
+            sensitivity interval bounds expanded by the standard error, analogous
+            to how `pvalue` uses the normal approximation. The fast path requires
+            no replications and is exact in the same sense as `pvalue`.
          B : int, optional
-            Number of bootstrap replications to run. Defaults to 1_000.
+            Number of bootstrap replications to run. Ignored when
+            ``bootstrap=False``. Defaults to 1_000.
          seed : int, list_like, etc
-            A seed for numpy.random.default_rng. See that documentation for details.
+            A seed for numpy.random.default_rng. Ignored when
+            ``bootstrap=False``. See that documentation for details.
 
         Returns
         -------
@@ -355,10 +365,11 @@ class WeightingEstimator(ABC):
 
         Notes
         -----
-        B bootstrap replicates are drawn. For each replicate, `sensitivity_analysis`
-        computes the range of point estimates consistent with gamma-level hidden bias.
-        The adjusted p-value is then the fraction of bootstrap replicates whose
-        sensitivity interval does not rule out `null_value`:
+        When ``bootstrap=True``, B bootstrap replicates are drawn. For each
+        replicate, `sensitivity_analysis` computes the range of point estimates
+        consistent with gamma-level hidden bias. The adjusted p-value is then
+        the fraction of bootstrap replicates whose sensitivity interval does not
+        rule out `null_value`:
 
           - "greater": fraction of bootstrap lower bounds that do not exceed
             `null_value`, i.e. mean(lb_bootstrap <= null_value).
@@ -366,6 +377,10 @@ class WeightingEstimator(ABC):
             `null_value`, i.e. mean(ub_bootstrap > null_value).
           - "two-sided": twice the minimum of the two one-sided adjusted
             p-values, capped at 1.
+
+        When ``bootstrap=False``, the normal approximation is used instead:
+        the sensitivity bounds replace the point estimate when computing the
+        test statistic, with the standard error computed from `variance`.
 
         When gamma=1 the sensitivity interval collapses to the point estimate,
         and the adjusted p-value reduces to the standard p-value.
@@ -383,6 +398,25 @@ class WeightingEstimator(ABC):
 
         if gamma == 1.0:
             return self.pvalue(null_value=null_value, alternative=alternative)
+
+        if not bootstrap:
+            se = math.sqrt(self.variance())
+            sen_lb, sen_ub = self.sensitivity_analysis(gamma=gamma)
+
+            if alternative == "greater" or alternative == "two-sided":
+                p_greater = float(stats.norm.sf((sen_lb - null_value) / se))
+                if alternative == "greater":
+                    return p_greater
+
+            if alternative == "less" or alternative == "two-sided":
+                p_less = float(stats.norm.sf((null_value - sen_ub) / se))
+                if alternative == "less":
+                    return p_less
+
+            if alternative == "two-sided":
+                return min(1.0, 2.0 * min(p_greater, p_less))
+
+            raise ValueError(f"Unrecognized input {alternative=:}")
 
         lb_bootstrap = np.zeros(B)
         ub_bootstrap = np.zeros(B)
