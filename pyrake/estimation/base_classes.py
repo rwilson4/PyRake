@@ -610,6 +610,7 @@ class WeightingEstimator(ABC):
         alternative: Literal["two-sided", "less", "greater"] = "two-sided",
         bootstrap: bool = True,
         B: int = 1_000,
+        null_value: float | None = None,
         title: str | None = None,
         ylabel: str = "Sensitivity Interval",
         ytick_format: str = ".0%",
@@ -643,6 +644,12 @@ class WeightingEstimator(ABC):
          B : int, optional
             Number of bootstrap replications per gamma value. Ignored when
             ``bootstrap=False``. Defaults to 1_000.
+         null_value : float, optional
+            If specified, compute ``gamma_star`` (the smallest Gamma at which
+            the result is no longer significant against this null) and annotate
+            the plot with a vertical line at that point. No annotation is added
+            if the result is already non-significant at Gamma=1 (``gamma_star``
+            == 1) or if ``gamma_star`` exceeds ``gamma_upper``.
          title, ylabel : str, optional
             Title/ylabel for plot. If not specified, no title is included.
          ytick_format : str, optional
@@ -871,6 +878,28 @@ class WeightingEstimator(ABC):
             loc=legend_placement,
             fontsize=legend_label_size,
         )
+
+        if null_value is not None:
+            gs = self.gamma_star(
+                null_value=null_value,
+                alpha=alpha,
+                alternative=alternative,
+                bootstrap=bootstrap,
+                B=B,
+                gamma_upper=gamma_upper,
+            )
+            if gs > 1.0 and gs <= gamma_upper:
+                ax.axvline(x=gs, color="red", linestyle="--")
+                ax.annotate(
+                    f"$\\Gamma^* = {gs:.2f}$",
+                    xy=(gs, ax.get_ylim()[1]),
+                    xytext=(4, -4),
+                    textcoords="offset points",
+                    ha="left",
+                    va="top",
+                    color="red",
+                    fontsize=tick_label_size,
+                )
 
         plt.tight_layout()
         return df, ax
