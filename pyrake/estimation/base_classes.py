@@ -480,8 +480,9 @@ class WeightingEstimator(ABC):
             it ensures the adjusted p-value is monotone in Gamma, which makes
             the binary search more reliable.
          gamma_upper : float, optional
-            Upper bound on the search range. If the adjusted p-value is still
-            significant at this Gamma, ``math.inf`` is returned. Defaults to
+            Initial upper bound for the exponential search phase. If the
+            adjusted p-value is still significant here, the search doubles
+            this value repeatedly until a bracket is found. Defaults to
             1_000.
          tol : float, optional
             Convergence tolerance on Gamma. The returned value is accurate to
@@ -492,16 +493,19 @@ class WeightingEstimator(ABC):
          gamma_star : float
             The smallest Gamma >= 1 at which the result is not statistically
             significant. Returns 1.0 if the result is already not significant
-            at Gamma=1. Returns ``math.inf`` if the result remains significant
-            at ``gamma_upper``.
+            at Gamma=1.
 
         Notes
         -----
         The adjusted p-value is monotonically non-decreasing in Gamma: larger
         Gamma widens the sensitivity interval, making it harder to reject the
-        null hypothesis. This monotonicity guarantees that a unique crossing
-        point exists (if one exists within the search range), and that binary
-        search converges reliably.
+        null hypothesis. This guarantees that a unique crossing point exists
+        and that binary search converges reliably.
+
+        The search proceeds in two phases. First, an exponential search
+        starting at ``gamma_upper`` doubles the candidate until a Gamma is
+        found where the adjusted p-value exceeds ``alpha``. Then bisection
+        narrows the bracket to within ``tol``.
 
         When ``bootstrap=True``, pass a fixed ``seed`` to ensure reproducible
         results and to preserve monotonicity across binary search iterations.
@@ -530,10 +534,13 @@ class WeightingEstimator(ABC):
         if self.pvalue(null_value=null_value, alternative=alternative) >= alpha:
             return 1.0
 
-        if apvalue(gamma_upper) < alpha:
-            return math.inf
-
+        # Exponential search: double gamma_upper until adjusted p-value >= alpha.
         lo, hi = 1.0, gamma_upper
+        while apvalue(hi) < alpha:
+            lo = hi
+            hi *= 2
+
+        # Bisect to find the crossing within tol.
         while hi - lo > tol:
             mid = (lo + hi) / 2.0
             if apvalue(mid) < alpha:

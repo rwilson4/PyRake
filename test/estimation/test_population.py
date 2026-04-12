@@ -756,7 +756,6 @@ class TestSIPWEstimator:
         # Non-bootstrap path is deterministic.
         gs = estimator.gamma_star(null_value=null_value, bootstrap=False)
         assert gs > 1.0
-        assert gs < math.inf
 
         # Adjusted p-value at gamma_star is not significant (>= alpha).
         assert (
@@ -779,11 +778,13 @@ class TestSIPWEstimator:
         )
         assert gs_not_sig == 1.0
 
-        # When result stays significant even at gamma_upper, return math.inf.
-        gs_inf = estimator.gamma_star(
+        # A tiny gamma_upper triggers the exponential search phase but still
+        # finds the correct crossing (gamma_star is the same regardless of
+        # the initial gamma_upper).
+        gs_small_upper = estimator.gamma_star(
             null_value=null_value, bootstrap=False, gamma_upper=1.001
         )
-        assert gs_inf == math.inf
+        assert gs_small_upper == pytest.approx(gs, abs=1e-2)
 
         # One-sided tests.
         # H1: theta < 0.5 is significant (point estimate < null), so gamma_star > 1.
