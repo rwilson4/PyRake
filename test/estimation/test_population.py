@@ -744,6 +744,82 @@ class TestSIPWEstimator:
         assert actual == pytest.approx(0.982)
 
     @staticmethod
+    def test_gamma_star() -> None:
+        """Test gamma_star method."""
+        propensities, outcomes = TestSIPWEstimator.get_data()
+        estimator = SIPWEstimator(propensities, outcomes)
+        null_value = 0.50
+
+        # Standard p-value is significant, so gamma_star > 1.
+        assert estimator.pvalue(null_value=null_value) < 0.05
+
+        # Non-bootstrap path is deterministic.
+        gs = estimator.gamma_star(null_value=null_value, bootstrap=False)
+        assert gs > 1.0
+
+        # Adjusted p-value at gamma_star is not significant (>= alpha).
+        assert (
+            estimator.adjusted_pvalue(null_value=null_value, gamma=gs, bootstrap=False)
+            >= 0.05
+        )
+
+        # Adjusted p-value just below gamma_star is still significant (< alpha).
+        if gs > 1.0 + 2e-3:
+            assert (
+                estimator.adjusted_pvalue(
+                    null_value=null_value, gamma=gs - 2e-3, bootstrap=False
+                )
+                < 0.05
+            )
+
+        # When already not significant at gamma=1, gamma_star returns 1.0.
+        gs_not_sig = estimator.gamma_star(
+            null_value=estimator.point_estimate(), bootstrap=False
+        )
+        assert gs_not_sig == 1.0
+
+        # A tiny gamma_upper triggers the exponential search phase but still
+        # finds the correct crossing (gamma_star is the same regardless of
+        # the initial gamma_upper).
+        gs_small_upper = estimator.gamma_star(
+            null_value=null_value, bootstrap=False, gamma_upper=1.001
+        )
+        assert gs_small_upper == pytest.approx(gs, abs=1e-2)
+
+        # One-sided tests.
+        # H1: theta < 0.5 is significant (point estimate < null), so gamma_star > 1.
+        gs_less = estimator.gamma_star(
+            null_value=null_value, alternative="less", bootstrap=False
+        )
+        assert gs_less > 1.0
+
+        # H1: theta > 0.5 is not significant (point estimate < null), so gamma_star = 1.
+        gs_greater = estimator.gamma_star(
+            null_value=null_value, alternative="greater", bootstrap=False
+        )
+        assert gs_greater == 1.0
+
+        # Bootstrap path: gamma_star > 1 and adjusted p-value at gamma_star >= alpha.
+        gs_boot = estimator.gamma_star(null_value=null_value, B=500, seed=42, tol=0.05)
+        assert gs_boot > 1.0
+        assert (
+            estimator.adjusted_pvalue(
+                null_value=null_value, gamma=gs_boot, B=500, seed=42
+            )
+            >= 0.05
+        )
+
+        # A more lenient alpha is harder to reach, so it requires a larger gamma_star.
+        # (adjusted_pvalue=0.01 is crossed at a smaller gamma than adjusted_pvalue=0.10)
+        gs_strict = estimator.gamma_star(
+            null_value=null_value, alpha=0.01, bootstrap=False
+        )
+        gs_lenient = estimator.gamma_star(
+            null_value=null_value, alpha=0.10, bootstrap=False
+        )
+        assert gs_lenient >= gs_strict
+
+    @staticmethod
     def test_confidence_interval() -> None:
         """Test confidence interval."""
         propensities, outcomes = TestSIPWEstimator.get_data()
