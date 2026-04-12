@@ -1,7 +1,7 @@
 """Treatment effect estimators."""
 
 from collections.abc import Generator
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import numpy as np
 import numpy.typing as npt
@@ -185,7 +185,7 @@ class TreatmentEffectEstimator(WeightingEstimator):
             | np.random.BitGenerator
             | np.random.Generator
         ) = None,
-    ) -> Generator[tuple[WeightingEstimator, WeightingEstimator], None, None]:
+    ) -> Generator["TreatmentEffectEstimator", None, None]:
         """Yield a sequence of resampled estimators.
 
         Parameters
@@ -196,11 +196,15 @@ class TreatmentEffectEstimator(WeightingEstimator):
             A seed for numpy.random.default_rng. See that documentation for details.
 
         """
-        yield from zip(
+        for control_est, treated_est in zip(
             self.control_estimator.resample(B, seed=seed),
             self.treated_estimator.resample(B, seed=seed),
             strict=False,
-        )
+        ):
+            yield TreatmentEffectEstimator(
+                control_estimator=cast("MeanEstimator | RatioEstimator", control_est),
+                treated_estimator=cast("MeanEstimator | RatioEstimator", treated_est),
+            )
 
     def expanded_confidence_interval(
         self,
@@ -270,14 +274,8 @@ class TreatmentEffectEstimator(WeightingEstimator):
 
         lb_bootstrap = np.zeros(B)
         ub_bootstrap = np.zeros(B)
-        for b, (control_estimator, treated_estimator) in enumerate(
-            self.resample(B, seed)
-        ):
-            # Calculate sensitivity interval for this bootstrap sample
-            control_lb, control_ub = control_estimator.sensitivity_analysis(gamma=gamma)
-            treated_lb, treated_ub = treated_estimator.sensitivity_analysis(gamma=gamma)
-            lb_bootstrap[b] = treated_lb - control_ub
-            ub_bootstrap[b] = treated_ub - control_lb
+        for b, te_est in enumerate(self.resample(B, seed)):
+            lb_bootstrap[b], ub_bootstrap[b] = te_est.sensitivity_analysis(gamma=gamma)
 
         # Calculate the expanded confidence interval as percentiles of the bootstrap estimates
         if alternative == "two-sided":
@@ -1146,6 +1144,22 @@ class TreatmentEffectRatioEstimator(WeightingEstimator):
         """Not implemented."""
         raise NotImplementedError(
             "Sensitivity analysis is not implemented for TreatmentEffectRatioEstimator."
+        )
+
+    def resample(
+        self,
+        B: int,
+        seed: None | (
+            int
+            | list[int]
+            | np.random.SeedSequence
+            | np.random.BitGenerator
+            | np.random.Generator
+        ) = None,
+    ) -> Generator["TreatmentEffectRatioEstimator", None, None]:
+        """Not implemented."""
+        raise NotImplementedError(
+            "resample is not implemented for TreatmentEffectRatioEstimator."
         )
 
     def expanded_confidence_interval(

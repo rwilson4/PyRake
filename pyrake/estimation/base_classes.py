@@ -2,6 +2,7 @@
 
 import math
 from abc import ABC, abstractmethod, abstractproperty
+from collections.abc import Generator
 from typing import Literal, Self
 
 import matplotlib.pyplot as plt
@@ -123,6 +124,29 @@ class WeightingEstimator(ABC):
          - Fogarty, Colin. 2023. "Sensitivity Analysis." In Handbook of Matching and
            Weighting Adjustments for Causal Inference, , pg. 553--82. Chapman and
            Hall/CRC.
+
+        """
+
+    @abstractmethod
+    def resample(
+        self,
+        B: int,
+        seed: None | (
+            int
+            | list[int]
+            | np.random.SeedSequence
+            | np.random.BitGenerator
+            | np.random.Generator
+        ) = None,
+    ) -> Generator["WeightingEstimator", None, None]:
+        """Yield a sequence of B bootstrap-resampled estimators.
+
+        Parameters
+        ----------
+         B : int
+            Number of bootstrap replications.
+         seed : int, list_like, etc
+            A seed for numpy.random.default_rng.
 
         """
 

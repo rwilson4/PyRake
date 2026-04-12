@@ -1,6 +1,7 @@
 """Estimation utilities."""
 
 from .base_classes import Estimand, SimpleEstimand, WeightingEstimator
+from .linear_combination import LinearCombinationEstimator
 from .population import (
     AIPWEstimator,
     IPWEstimator,
@@ -31,6 +32,7 @@ __all__ = [
     "DoubleSamplingEstimand",
     "Estimand",
     "IPWEstimator",
+    "LinearCombinationEstimator",
     "MeanEstimator",
     "NonRespondentMean",
     "PopulationMean",
