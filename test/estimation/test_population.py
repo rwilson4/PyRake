@@ -712,6 +712,38 @@ class TestSIPWEstimator:
         assert actual == pytest.approx(expected)
 
     @staticmethod
+    def test_adjusted_pvalue() -> None:
+        """Test adjusted p-value calculation."""
+        propensities, outcomes = TestSIPWEstimator.get_data()
+        estimator = SIPWEstimator(propensities, outcomes)
+
+        # gamma=1 reduces to the standard p-value
+        std_pvalue = estimator.pvalue(null_value=0.50)
+        actual = estimator.adjusted_pvalue(null_value=0.50, gamma=1.0)
+        assert actual == pytest.approx(std_pvalue)
+
+        # For gamma > 1, null values inside the sensitivity interval inflate the
+        # p-value toward 1 (adjusted >= standard).
+        actual = estimator.adjusted_pvalue(null_value=0.50, gamma=2.0, seed=42)
+        assert actual >= std_pvalue
+
+        # One-sided tests with null values near the bootstrap sensitivity-bound
+        # medians return adjusted p-values near 0.5.
+        actual = estimator.adjusted_pvalue(
+            null_value=0.295, gamma=2.0, alternative="greater", seed=42
+        )
+        assert actual == pytest.approx(0.491)
+
+        actual = estimator.adjusted_pvalue(
+            null_value=0.626, gamma=2.0, alternative="less", seed=42
+        )
+        assert actual == pytest.approx(0.505)
+
+        # Two-sided combines both one-sided adjusted p-values.
+        actual = estimator.adjusted_pvalue(null_value=0.295, gamma=2.0, seed=42)
+        assert actual == pytest.approx(0.982)
+
+    @staticmethod
     def test_confidence_interval() -> None:
         """Test confidence interval."""
         propensities, outcomes = TestSIPWEstimator.get_data()
