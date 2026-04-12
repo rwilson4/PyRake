@@ -151,6 +151,7 @@ class LinearCombinationEstimator(WeightingEstimator):
         null_value: float,
         gamma: float = 6.0,
         alternative: Literal["two-sided", "less", "greater"] = "two-sided",
+        bootstrap: bool = True,
         B: int = 1_000,
         seed: None | (
             int
@@ -160,7 +161,7 @@ class LinearCombinationEstimator(WeightingEstimator):
             | np.random.Generator
         ) = None,
     ) -> float:
-        r"""Calculate a p-value adjusted for hidden bias via the percentile bootstrap.
+        r"""Calculate a p-value adjusted for hidden bias.
 
         See `WeightingEstimator.adjusted_pvalue` for full documentation.
 
@@ -180,6 +181,7 @@ class LinearCombinationEstimator(WeightingEstimator):
             null_value=null_value,
             gamma=gamma,
             alternative=alternative,
+            bootstrap=bootstrap,
             B=B,
             seed=seed,
         )
