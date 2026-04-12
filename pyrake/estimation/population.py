@@ -243,7 +243,6 @@ class MeanEstimator(WeightingEstimator):
             )
 
 
-
 class IPWEstimator(MeanEstimator):
     r"""Inverse Propensity Weighted Estimator.
 
@@ -1045,4 +1044,3 @@ class RatioEstimator(WeightingEstimator):
                 numerator_kwargs=self.numerator_estimator.extra_args,
                 denominator_kwargs=self.denominator_estimator.extra_args,
             )
-

@@ -252,7 +252,6 @@ class TreatmentEffectEstimator(WeightingEstimator):
             )
 
 
-
 class SimpleDifferenceEstimator(TreatmentEffectEstimator):
     """Simple difference in means.
 
