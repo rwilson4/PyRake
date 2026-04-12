@@ -117,6 +117,7 @@ class TreatmentEffectEstimator(WeightingEstimator):
         null_value: float = 0.0,
         gamma: float = 6.0,
         alternative: Literal["two-sided", "less", "greater"] = "two-sided",
+        bootstrap: bool = True,
         B: int = 1_000,
         seed: None | (
             int
@@ -126,7 +127,7 @@ class TreatmentEffectEstimator(WeightingEstimator):
             | np.random.Generator
         ) = None,
     ) -> float:
-        r"""Calculate a p-value adjusted for hidden bias via the percentile bootstrap.
+        r"""Calculate a p-value adjusted for hidden bias.
 
         See `WeightingEstimator.adjusted_pvalue` for full documentation.
 
@@ -138,10 +139,14 @@ class TreatmentEffectEstimator(WeightingEstimator):
             The Gamma factor. Must be >= 1.0. Defaults to 6.
          alternative : ["two-sided", "less", "greater"], optional
             Defaults to "two-sided".
+         bootstrap : bool, optional
+            If True (default), use the percentile bootstrap. If False, use
+            the normal approximation (no resampling).
          B : int, optional
-            Number of bootstrap replications. Defaults to 1_000.
+            Number of bootstrap replications. Ignored when ``bootstrap=False``.
+            Defaults to 1_000.
          seed : int, list_like, etc
-            A seed for numpy.random.default_rng.
+            A seed for numpy.random.default_rng. Ignored when ``bootstrap=False``.
 
         Returns
         -------
@@ -153,6 +158,7 @@ class TreatmentEffectEstimator(WeightingEstimator):
             null_value=null_value,
             gamma=gamma,
             alternative=alternative,
+            bootstrap=bootstrap,
             B=B,
             seed=seed,
         )
