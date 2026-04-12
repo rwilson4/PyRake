@@ -263,3 +263,44 @@ class TestLinearCombinationEstimator:
             alpha=0.10, gamma=2.0, B=100, seed=42
         )
         assert lb < ub
+
+    @staticmethod
+    def test_adjusted_pvalue_gamma_1_fallback() -> None:
+        """gamma=1 adjusted p-value equals the standard p-value."""
+        est1, _, _ = make_estimator(n=400, seed=15)
+        est2, _, _ = make_estimator(n=400, seed=16)
+        lce = LinearCombinationEstimator(terms=[(1.0, est1), (-1.0, est2)])
+
+        null_value = lce.point_estimate() + 0.1
+        std_p = lce.pvalue(null_value=null_value)
+        adj_p = lce.adjusted_pvalue(null_value=null_value, gamma=1.0)
+        assert adj_p == pytest.approx(std_p)
+
+    @staticmethod
+    def test_adjusted_pvalue_ge_standard() -> None:
+        """Adjusted p-value with gamma > 1 is >= the standard p-value."""
+        est1, _, _ = make_estimator(n=400, seed=15)
+        est2, _, _ = make_estimator(n=400, seed=16)
+        lce = LinearCombinationEstimator(terms=[(1.0, est1), (-1.0, est2)])
+
+        null_value = lce.point_estimate() + 0.1
+        std_p = lce.pvalue(null_value=null_value)
+        adj_p = lce.adjusted_pvalue(null_value=null_value, gamma=2.0, B=200, seed=42)
+        assert adj_p >= std_p
+
+    @staticmethod
+    def test_adjusted_pvalue_affine_only() -> None:
+        """Affine-only LCE: adjusted p-value is determined entirely by the point estimate."""
+        lce = LinearCombinationEstimator(terms=[], affine=0.42)
+
+        # null above the point estimate: bootstrap lb=pe <= null, so p=1 for "greater"
+        p_greater = lce.adjusted_pvalue(
+            null_value=0.50, gamma=3.0, alternative="greater", B=50, seed=42
+        )
+        assert p_greater == pytest.approx(1.0)
+
+        # null below the point estimate: bootstrap lb=pe > null, so p=0 for "greater"
+        p_greater_below = lce.adjusted_pvalue(
+            null_value=0.30, gamma=3.0, alternative="greater", B=50, seed=42
+        )
+        assert p_greater_below == pytest.approx(0.0)

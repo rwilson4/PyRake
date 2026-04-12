@@ -112,6 +112,51 @@ class TreatmentEffectEstimator(WeightingEstimator):
         """
         return super().pvalue(null_value=null_value, alternative=alternative)
 
+    def adjusted_pvalue(
+        self,
+        null_value: float = 0.0,
+        gamma: float = 6.0,
+        alternative: Literal["two-sided", "less", "greater"] = "two-sided",
+        B: int = 1_000,
+        seed: None | (
+            int
+            | list[int]
+            | np.random.SeedSequence
+            | np.random.BitGenerator
+            | np.random.Generator
+        ) = None,
+    ) -> float:
+        r"""Calculate a p-value adjusted for hidden bias via the percentile bootstrap.
+
+        See `WeightingEstimator.adjusted_pvalue` for full documentation.
+
+        Parameters
+        ----------
+         null_value : float, optional
+            The hypothesized treatment effect. Defaults to 0.0.
+         gamma : float, optional
+            The Gamma factor. Must be >= 1.0. Defaults to 6.
+         alternative : ["two-sided", "less", "greater"], optional
+            Defaults to "two-sided".
+         B : int, optional
+            Number of bootstrap replications. Defaults to 1_000.
+         seed : int, list_like, etc
+            A seed for numpy.random.default_rng.
+
+        Returns
+        -------
+         p : float
+            Adjusted p-value.
+
+        """
+        return super().adjusted_pvalue(
+            null_value=null_value,
+            gamma=gamma,
+            alternative=alternative,
+            B=B,
+            seed=seed,
+        )
+
     def confidence_interval(
         self,
         alpha: float = 0.10,

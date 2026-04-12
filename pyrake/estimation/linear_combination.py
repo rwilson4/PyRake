@@ -146,6 +146,44 @@ class LinearCombinationEstimator(WeightingEstimator):
                 affine=self.affine,
             )
 
+    def adjusted_pvalue(
+        self,
+        null_value: float,
+        gamma: float = 6.0,
+        alternative: Literal["two-sided", "less", "greater"] = "two-sided",
+        B: int = 1_000,
+        seed: None | (
+            int
+            | list[int]
+            | np.random.SeedSequence
+            | np.random.BitGenerator
+            | np.random.Generator
+        ) = None,
+    ) -> float:
+        r"""Calculate a p-value adjusted for hidden bias via the percentile bootstrap.
+
+        See `WeightingEstimator.adjusted_pvalue` for full documentation.
+
+        When gamma=1, returns the standard p-value. When there are no stochastic
+        components, the bootstrap produces a degenerate distribution concentrated
+        at the point estimate, and the adjusted p-value is 1 if the null value is
+        within the sensitivity interval and 0 otherwise.
+
+        """
+        if gamma < 1.0:
+            raise ValueError("`gamma` must be >= 1")
+
+        if gamma == 1.0:
+            return self.pvalue(null_value=null_value, alternative=alternative)
+
+        return super().adjusted_pvalue(
+            null_value=null_value,
+            gamma=gamma,
+            alternative=alternative,
+            B=B,
+            seed=seed,
+        )
+
     def expanded_confidence_interval(
         self,
         alpha: float = 0.10,

@@ -348,6 +348,38 @@ class TestSimpleDifferenceEstimator:
         assert actual_ub == pytest.approx(expected_ub)
         assert actual_ub == pytest.approx(expected_ub)
 
+    @staticmethod
+    def test_adjusted_pvalue() -> None:
+        """Test adjusted p-value for treatment effect estimators."""
+
+        (
+            control_propensities,
+            control_outcomes,
+            treated_propensities,
+            treated_outcomes,
+        ) = TestSimpleDifferenceEstimator.get_data()
+
+        pate_estimator = TreatmentEffectEstimator(
+            control_estimator=SIPWEstimator(
+                propensity_scores=control_propensities,
+                outcomes=control_outcomes,
+            ),
+            treated_estimator=SIPWEstimator(
+                propensity_scores=treated_propensities,
+                outcomes=treated_outcomes,
+            ),
+        )
+
+        # gamma=1 reduces to the standard p-value (default null_value=0.0)
+        std_pvalue = pate_estimator.pvalue()
+        actual = pate_estimator.adjusted_pvalue(gamma=1.0)
+        assert actual == pytest.approx(std_pvalue)
+
+        # For gamma > 1, adjusted p-value is >= standard p-value
+        actual = pate_estimator.adjusted_pvalue(null_value=0.05, gamma=2.0, seed=42)
+        std_at_05 = pate_estimator.pvalue(null_value=0.05)
+        assert actual >= std_at_05
+
 
 class TestATEEstimator:
     @staticmethod
