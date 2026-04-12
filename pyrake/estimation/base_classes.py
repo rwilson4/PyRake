@@ -434,6 +434,115 @@ class WeightingEstimator(ABC):
         else:
             raise ValueError(f"Unrecognized input {alternative=:}")
 
+    def gamma_star(
+        self,
+        null_value: float,
+        alpha: float = 0.05,
+        alternative: Literal["two-sided", "less", "greater"] = "two-sided",
+        bootstrap: bool = True,
+        B: int = 1_000,
+        seed: None | (
+            int
+            | list[int]
+            | np.random.SeedSequence
+            | np.random.BitGenerator
+            | np.random.Generator
+        ) = None,
+        gamma_upper: float = 1_000.0,
+        tol: float = 1e-3,
+    ) -> float:
+        r"""Find the smallest Gamma at which the result is no longer significant.
+
+        Searches for the smallest Gamma >= 1 such that the adjusted p-value is
+        >= ``alpha`` (i.e., the result is no longer statistically significant).
+
+        Parameters
+        ----------
+         null_value : float
+            The hypothesized theta.
+         alpha : float, optional
+            Significance threshold. Defaults to 0.05.
+         alternative : ["two-sided", "less", "greater"], optional
+            What kind of test:
+              - "two-sided": H0: theta = `null_value` vs Halt: theta <> `null_value`.
+              - "greater": H0: theta <= `null_value` vs Halt: theta > `null_value`.
+              - "less": H0: theta >= `null_value` vs Halt: theta < `null_value`.
+            Defaults to "two-sided".
+         bootstrap : bool, optional
+            If True (default), use the percentile bootstrap. If False, use the
+            normal approximation. See `adjusted_pvalue` for details.
+         B : int, optional
+            Number of bootstrap replications. Ignored when ``bootstrap=False``.
+            Defaults to 1_000.
+         seed : int, list_like, etc, optional
+            A seed for numpy.random.default_rng. Ignored when ``bootstrap=False``.
+            Passing a fixed seed is recommended when ``bootstrap=True`` because
+            it ensures the adjusted p-value is monotone in Gamma, which makes
+            the binary search more reliable.
+         gamma_upper : float, optional
+            Upper bound on the search range. If the adjusted p-value is still
+            significant at this Gamma, ``math.inf`` is returned. Defaults to
+            1_000.
+         tol : float, optional
+            Convergence tolerance on Gamma. The returned value is accurate to
+            within ``tol``. Defaults to 1e-3.
+
+        Returns
+        -------
+         gamma_star : float
+            The smallest Gamma >= 1 at which the result is not statistically
+            significant. Returns 1.0 if the result is already not significant
+            at Gamma=1. Returns ``math.inf`` if the result remains significant
+            at ``gamma_upper``.
+
+        Notes
+        -----
+        The adjusted p-value is monotonically non-decreasing in Gamma: larger
+        Gamma widens the sensitivity interval, making it harder to reject the
+        null hypothesis. This monotonicity guarantees that a unique crossing
+        point exists (if one exists within the search range), and that binary
+        search converges reliably.
+
+        When ``bootstrap=True``, pass a fixed ``seed`` to ensure reproducible
+        results and to preserve monotonicity across binary search iterations.
+
+        References
+        ----------
+         - Zhao, Qingyuan, Dylan S Small, and Bhaswar B Bhattacharya. 2019.
+           "Sensitivity Analysis for Inverse Probability Weighting Estimators
+           via the Percentile Bootstrap." Journal of the Royal Statistical
+           Society Series B: Statistical Methodology 81 (4): 735--61.
+
+        """
+        if gamma_upper < 1.0:
+            raise ValueError("`gamma_upper` must be >= 1")
+
+        def apvalue(gamma: float) -> float:
+            return self.adjusted_pvalue(
+                null_value=null_value,
+                gamma=gamma,
+                alternative=alternative,
+                bootstrap=bootstrap,
+                B=B,
+                seed=seed,
+            )
+
+        if apvalue(1.0) >= alpha:
+            return 1.0
+
+        if apvalue(gamma_upper) < alpha:
+            return math.inf
+
+        lo, hi = 1.0, gamma_upper
+        while hi - lo > tol:
+            mid = (lo + hi) / 2.0
+            if apvalue(mid) < alpha:
+                lo = mid
+            else:
+                hi = mid
+
+        return hi
+
     def confidence_interval(
         self,
         alpha: float = 0.10,
