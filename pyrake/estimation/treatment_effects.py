@@ -1126,6 +1126,7 @@ class TreatmentEffectRatioEstimator(WeightingEstimator):
         alpha: float = 0.10,
         gamma: float = 6.0,
         alternative: Literal["two-sided", "less", "greater"] = "two-sided",
+        bootstrap: bool = True,
         B: int = 1_000,
         seed: (
             int
