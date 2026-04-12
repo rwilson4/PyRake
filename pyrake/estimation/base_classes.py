@@ -527,7 +527,7 @@ class WeightingEstimator(ABC):
                 seed=seed,
             )
 
-        if apvalue(1.0) >= alpha:
+        if self.pvalue(null_value=null_value, alternative=alternative) >= alpha:
             return 1.0
 
         if apvalue(gamma_upper) < alpha:
