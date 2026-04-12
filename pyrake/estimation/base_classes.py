@@ -458,6 +458,7 @@ class WeightingEstimator(ABC):
         num_points: int = 50,
         alpha: float = 0.10,
         alternative: Literal["two-sided", "less", "greater"] = "two-sided",
+        bootstrap: bool = True,
         B: int = 1_000,
         title: str | None = None,
         ylabel: str = "Sensitivity Interval",
@@ -485,8 +486,13 @@ class WeightingEstimator(ABC):
                 `null_value`.
               - "greater": H0: \bar{Y} <= `null_value` vs Halt: \bar{Y} > `null_value`.
               - "less": H0: \bar{Y} >= `null_value` vs Halt: \bar{Y} < `null_value`.
+         bootstrap : bool, optional
+            Passed to `expanded_confidence_interval`. If True (default), use
+            the percentile bootstrap. If False, use the normal approximation
+            (much faster, especially when plotting many gamma values).
          B : int, optional
-            Number of bootstrap replications to run. Defaults to 1_000.
+            Number of bootstrap replications per gamma value. Ignored when
+            ``bootstrap=False``. Defaults to 1_000.
          title, ylabel : str, optional
             Title/ylabel for plot. If not specified, no title is included.
          ytick_format : str, optional
@@ -528,7 +534,12 @@ class WeightingEstimator(ABC):
                 eci_lb[ii],
                 eci_ub[ii],
             ) = self.expanded_confidence_interval(
-                alpha=alpha, gamma=gamma, alternative=alternative, B=B, seed=42
+                alpha=alpha,
+                gamma=gamma,
+                alternative=alternative,
+                bootstrap=bootstrap,
+                B=B,
+                seed=42,
             )
 
         # Create a dataframe for plotting
