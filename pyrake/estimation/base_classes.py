@@ -150,12 +150,12 @@ class WeightingEstimator(ABC):
 
         """
 
-    @abstractmethod
     def expanded_confidence_interval(
         self,
         alpha: float = 0.10,
         gamma: float = 6.0,
         alternative: Literal["two-sided", "less", "greater"] = "two-sided",
+        bootstrap: bool = True,
         B: int = 1_000,
         seed: None | (
             int
@@ -184,10 +184,20 @@ class WeightingEstimator(ABC):
               - "greater": H0: theta <= `null_value` vs Halt: theta > `null_value`.
               - "less": H0: theta >= `null_value` vs Halt: theta < `null_value`.
             Defaults to "two-sided".
+         bootstrap : bool, optional
+            If True (default), use the percentile bootstrap to account for
+            sampling variability in the sensitivity bounds. If False, use the
+            normal approximation: the ECI is the sensitivity interval expanded
+            by :math:`z \cdot \text{se}` on each side, analogous to how
+            `confidence_interval` expands the point estimate. The fast path
+            requires no replications and is exact in the same sense as
+            `confidence_interval`.
          B : int, optional
-            Number of bootstrap replications to run. Defaults to 1_000.
+            Number of bootstrap replications to run. Ignored when
+            ``bootstrap=False``. Defaults to 1_000.
          seed : int, list_like, etc
-            A seed for numpy.random.default_rng. See that documentation for details.
+            A seed for numpy.random.default_rng. Ignored when
+            ``bootstrap=False``. See that documentation for details.
 
         Returns
         -------
@@ -199,6 +209,53 @@ class WeightingEstimator(ABC):
               - "less": lb = -np.inf, ub finite
 
         """
+        if gamma < 1.0:
+            raise ValueError("`gamma` must be >= 1")
+
+        if gamma == 1.0:
+            return self.confidence_interval(alpha=alpha, alternative=alternative)
+
+        if not bootstrap:
+            se = math.sqrt(self.variance())
+            sen_lb, sen_ub = self.sensitivity_analysis(gamma=gamma)
+            if alternative == "two-sided":
+                zcrit = stats.norm.isf(alpha / 2)
+            else:
+                zcrit = stats.norm.isf(alpha)
+
+            if alternative == "greater" or alternative == "two-sided":
+                lb = float(sen_lb - zcrit * se)
+                if alternative == "greater":
+                    return lb, np.inf
+
+            if alternative == "less" or alternative == "two-sided":
+                ub = float(sen_ub + zcrit * se)
+                if alternative == "less":
+                    return -np.inf, ub
+
+            if alternative == "two-sided":
+                return lb, ub
+
+            raise ValueError(f"Unrecognized input {alternative=:}")
+
+        lb_bootstrap = np.zeros(B)
+        ub_bootstrap = np.zeros(B)
+        for b, est in enumerate(self.resample(B, seed)):
+            lb_bootstrap[b], ub_bootstrap[b] = est.sensitivity_analysis(gamma=gamma)
+
+        if alternative == "two-sided":
+            lb = float(np.percentile(lb_bootstrap, 100 * alpha / 2))
+            ub = float(np.percentile(ub_bootstrap, 100 * (1 - alpha / 2)))
+        elif alternative == "less":
+            lb = -np.inf
+            ub = float(np.percentile(ub_bootstrap, 100 * (1 - alpha)))
+        elif alternative == "greater":
+            lb = float(np.percentile(lb_bootstrap, 100 * alpha))
+            ub = np.inf
+        else:
+            raise ValueError(f"Unrecognized input {alternative=:}")
+
+        return lb, ub
 
     def pvalue(
         self,

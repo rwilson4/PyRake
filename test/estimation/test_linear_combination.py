@@ -304,3 +304,82 @@ class TestLinearCombinationEstimator:
             null_value=0.30, gamma=3.0, alternative="greater", B=50, seed=42
         )
         assert p_greater_below == pytest.approx(0.0)
+
+    @staticmethod
+    def test_expanded_confidence_interval_no_bootstrap_gamma_1() -> None:
+        """bootstrap=False, gamma=1 falls back to the standard CI."""
+        est, _, _ = make_estimator(n=400, seed=17)
+        lce = LinearCombinationEstimator(terms=[(1.0, est)])
+
+        ci = lce.confidence_interval(alpha=0.10)
+        eci = lce.expanded_confidence_interval(alpha=0.10, gamma=1.0, bootstrap=False)
+
+        assert eci[0] == pytest.approx(ci[0])
+        assert eci[1] == pytest.approx(ci[1])
+
+    @staticmethod
+    def test_expanded_confidence_interval_no_bootstrap_wider_than_ci() -> None:
+        """bootstrap=False ECI with gamma > 1 is wider than the standard CI."""
+        est1, _, _ = make_estimator(n=400, seed=15)
+        est2, _, _ = make_estimator(n=400, seed=16)
+        lce = LinearCombinationEstimator(terms=[(1.0, est1), (-1.0, est2)])
+
+        ci_lb, ci_ub = lce.confidence_interval(alpha=0.10)
+        eci_lb, eci_ub = lce.expanded_confidence_interval(
+            alpha=0.10, gamma=2.0, bootstrap=False
+        )
+
+        assert eci_lb <= ci_lb + 1e-6
+        assert eci_ub >= ci_ub - 1e-6
+        assert eci_lb < eci_ub
+
+    @staticmethod
+    def test_expanded_confidence_interval_no_bootstrap_formula() -> None:
+        """bootstrap=False ECI equals sensitivity bounds +/- z * se."""
+        import math
+
+        from scipy import stats
+
+        est1, _, _ = make_estimator(n=400, seed=15)
+        est2, _, _ = make_estimator(n=400, seed=16)
+        lce = LinearCombinationEstimator(terms=[(1.0, est1), (-1.0, est2)])
+
+        alpha, gamma = 0.10, 2.0
+        se = math.sqrt(lce.variance())
+        zcrit = stats.norm.isf(alpha / 2)
+        sen_lb, sen_ub = lce.sensitivity_analysis(gamma=gamma)
+
+        eci_lb, eci_ub = lce.expanded_confidence_interval(
+            alpha=alpha, gamma=gamma, bootstrap=False
+        )
+
+        assert eci_lb == pytest.approx(sen_lb - zcrit * se)
+        assert eci_ub == pytest.approx(sen_ub + zcrit * se)
+
+    @staticmethod
+    def test_expanded_confidence_interval_no_bootstrap_one_sided() -> None:
+        """bootstrap=False one-sided ECI has exactly one finite bound."""
+        est, _, _ = make_estimator(n=400, seed=23)
+        lce = LinearCombinationEstimator(terms=[(1.0, est)])
+
+        lb, ub = lce.expanded_confidence_interval(
+            alpha=0.10, gamma=2.0, alternative="greater", bootstrap=False
+        )
+        assert np.isfinite(lb)
+        assert ub == np.inf
+
+        lb, ub = lce.expanded_confidence_interval(
+            alpha=0.10, gamma=2.0, alternative="less", bootstrap=False
+        )
+        assert lb == -np.inf
+        assert np.isfinite(ub)
+
+    @staticmethod
+    def test_expanded_confidence_interval_no_bootstrap_no_terms() -> None:
+        """Affine-only LCE bootstrap=False ECI collapses to the point estimate."""
+        lce = LinearCombinationEstimator(terms=[], affine=0.5)
+        eci_lb, eci_ub = lce.expanded_confidence_interval(
+            alpha=0.10, gamma=3.0, bootstrap=False
+        )
+        assert eci_lb == pytest.approx(0.5)
+        assert eci_ub == pytest.approx(0.5)

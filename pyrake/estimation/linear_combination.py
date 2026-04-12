@@ -189,6 +189,7 @@ class LinearCombinationEstimator(WeightingEstimator):
         alpha: float = 0.10,
         gamma: float = 6.0,
         alternative: Literal["two-sided", "less", "greater"] = "two-sided",
+        bootstrap: bool = True,
         B: int = 1_000,
         seed: None | (
             int
@@ -200,10 +201,13 @@ class LinearCombinationEstimator(WeightingEstimator):
     ) -> tuple[float, float]:
         r"""Calculate an expanded confidence interval.
 
-        For each bootstrap replicate, the sensitivity interval is computed for
-        the resampled linear combination (itself using the separability
-        property), and then percentiles of those bootstrap sensitivity bounds
-        are returned as the expanded confidence interval.
+        Each bootstrap replicate independently resamples every component
+        estimator and recomputes the sensitivity interval for the resulting
+        linear combination (exploiting the separability property). Percentiles
+        of those bootstrap sensitivity bounds are returned as the expanded
+        confidence interval. With ``bootstrap=False`` the normal approximation
+        is used instead: the sensitivity interval is expanded by
+        :math:`z \cdot \text{se}` on each side, with no resampling required.
 
         Parameters
         ----------
@@ -213,10 +217,15 @@ class LinearCombinationEstimator(WeightingEstimator):
             The Gamma factor. Must be >= 1.0. Defaults to 6.
          alternative : ["two-sided", "less", "greater"], optional
             Defaults to "two-sided".
+         bootstrap : bool, optional
+            If True (default), use the percentile bootstrap. If False, use
+            the normal approximation (no resampling).
          B : int, optional
-            Number of bootstrap replications. Defaults to 1_000.
+            Number of bootstrap replications. Ignored when
+            ``bootstrap=False``. Defaults to 1_000.
          seed : int, list_like, etc
-            A seed for numpy.random.default_rng.
+            A seed for numpy.random.default_rng. Ignored when
+            ``bootstrap=False``.
 
         Returns
         -------
@@ -230,6 +239,14 @@ class LinearCombinationEstimator(WeightingEstimator):
 
         if gamma == 1.0 or not self.terms:
             return self.confidence_interval(alpha=alpha, alternative=alternative)
+
+        if not bootstrap:
+            return super().expanded_confidence_interval(
+                alpha=alpha,
+                gamma=gamma,
+                alternative=alternative,
+                bootstrap=False,
+            )
 
         lb_bootstrap = np.zeros(B)
         ub_bootstrap = np.zeros(B)
