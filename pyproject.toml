@@ -12,7 +12,7 @@ dependencies = [
     "pandas>=2.3.1,<3",
     "seaborn>=0.13.2,<0.14",
     "typing-extensions>=4.15.0,<5",
-    "cvxium>=0.4.1",
+    "cvxium>=0.4.2",
 ]
 
 [dependency-groups]

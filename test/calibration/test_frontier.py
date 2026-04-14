@@ -65,20 +65,26 @@ def test_frontier(seed: int, M: int, p: int) -> None:
     # efr.plot()
     # plt.show()
 
+    # Convenience properties are sorted by variance ascending.
     assert efr.variances[0] <= efr.variances[-1]
     assert efr.distances[-1] <= efr.distances[0]
 
-    variance_reduction = (
-        efr.variances[-1] - efr.variances[efr.max_chord_distance()]
-    ) / (efr.variances[-1] - efr.variances[0])
+    # corners[0] minimizes distance; corners[1] minimizes variance.
+    assert efr.corners[1].objectives[1] <= efr.corners[0].objectives[1]
+    assert efr.corners[1].objectives[0] >= efr.corners[0].objectives[0]
 
-    bias_increase = (efr.distances[efr.max_chord_distance()] - efr.distances[-1]) / (
-        efr.distances[0] - efr.distances[-1]
-    )
-
-    weights = efr.weights[efr.max_chord_distance()]
+    # knee() replaces max_chord_distance().
+    knee = efr.knee()
+    weights = knee.solution
     np.testing.assert_allclose((1 / M) * (X.T @ weights), mu)
     assert np.all(weights >= 0)
+
+    variance_reduction = (efr.variances[-1] - knee.objectives[1]) / (
+        efr.variances[-1] - efr.variances[0]
+    )
+    bias_increase = (knee.objectives[0] - efr.distances[-1]) / (
+        efr.distances[0] - efr.distances[-1]
+    )
 
     # 80/20 rule -- more like 70/30 in our case
     assert variance_reduction > 0.7

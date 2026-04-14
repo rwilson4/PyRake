@@ -148,16 +148,16 @@ wheels = [
 
 [[package]]
 name = "cvxium"
-version = "0.4.1"
+version = "0.4.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "matplotlib" },
     { name = "numpy" },
     { name = "scipy" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a0/1f/e7f19c6fc8ddb4815acfa7f4fe47d5f10ca44dec14112cfc711fdb616cef/cvxium-0.4.1.tar.gz", hash = "sha256:440c6266d8a6a6d2162f7a9d98f63c8b268ec8c1e2c26dc9f33f766de9c00022", size = 61877, upload-time = "2026-04-14T17:31:31.053Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/0d/45/b2e6862e0d0bff8581b1142168a05905f9d982284b583f502840f43cc944/cvxium-0.4.2.tar.gz", hash = "sha256:73f30b032dcd5cba90bfb007512c7288ea94ebb7ec902efb412411336c30cef8", size = 63005, upload-time = "2026-04-14T23:09:47.887Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/82/23/cf719836d910c8a6541ddd072dfdc1fedf7e9b2af8b149857c210789ddb3/cvxium-0.4.1-py3-none-any.whl", hash = "sha256:fe8209800eb3cea74d04272008ade39580f575a3347111973257c85228651f54", size = 70093, upload-time = "2026-04-14T17:31:29.747Z" },
+    { url = "https://files.pythonhosted.org/packages/5d/a7/69731ccb54622030bb9bdb2946931db2d7c4e99af6f60906d42879733634/cvxium-0.4.2-py3-none-any.whl", hash = "sha256:0d9537c7f3ab9c4f655a2bd7352f37872350be3ba864dcb3698ca706cba32228", size = 71214, upload-time = "2026-04-14T23:09:46.396Z" },
 ]
 
 [[package]]
@@ -841,7 +841,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "cvxium", specifier = ">=0.4.1" },
+    { name = "cvxium", specifier = ">=0.4.2" },
     { name = "matplotlib", specifier = ">=3.10.1,<4" },
     { name = "numpy", specifier = ">=2.2.5,<3" },
     { name = "pandas", specifier = ">=2.3.1,<3" },

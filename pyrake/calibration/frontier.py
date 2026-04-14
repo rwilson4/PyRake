@@ -3,8 +3,12 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import numpy.typing as npt
-from cvxium import InteriorPointMethodResult
-from matplotlib.axes import Axes
+from cvxium import (
+    FrontierPoint,
+    FrontierResults,
+    InteriorPointMethodResult,
+    MultiObjectiveOptimizer,
+)
 
 from .phase1solvers import (
     EqualityWithBoundsAndImbalanceConstraintSolver,
@@ -14,226 +18,202 @@ from .phase1solvers import (
 from .rake import Rake
 
 
-class EfficientFrontierResults:
-    """Wrapper for bias/variance tradeoff."""
+class EfficientFrontierResults(FrontierResults):
+    r"""Pareto frontier results with PyRake-specific convenience properties.
 
-    def __init__(
-        self,
-        weights: list[npt.NDArray[np.float64]],
-        distances: list[float],
-        variances: list[float],
-        lagrange_multipliers: list[float],
-        ipm_results: list[InteriorPointMethodResult],
-    ) -> None:
-        self.weights = weights
-        self.distances = distances
-        self.variances = variances
-        self.lagrange_multipliers = lagrange_multipliers
-        self.ipm_results = ipm_results
+    Subclasses ``FrontierResults``; inherits ``knee()``.
+
+    The ``.weights``, ``.distances``, and ``.variances`` properties all return
+    lists sorted by variance ascending (low variance first), so that
+    ``weights[i]``, ``distances[i]``, and ``variances[i]`` correspond to the
+    same frontier point.
+
+    """
+
+    @property
+    def _points_by_variance(self) -> list[FrontierPoint]:
+        return sorted(self.points, key=lambda p: float(p.objectives[1]))
+
+    @property
+    def weights(self) -> list[npt.NDArray[np.float64]]:
+        """Weights at each frontier point, sorted by variance ascending."""
+        return [p.solution for p in self._points_by_variance]
+
+    @property
+    def distances(self) -> list[float]:
+        r"""Distance D(w, v) at each frontier point, sorted by variance ascending."""
+        return [float(p.objectives[0]) for p in self._points_by_variance]
+
+    @property
+    def variances(self) -> list[float]:
+        r"""Variance (1/M)\|w\|_2^2 at each frontier point, sorted ascending."""
+        return [float(p.objectives[1]) for p in self._points_by_variance]
 
     def plot(
         self,
         annotate_knee: bool = True,
-        annotate_index: int | None = None,
-        ax: Axes | None = None,
-    ) -> Axes:
-        """Plot bias/variance tradeoff.
+        ax: plt.Axes | None = None,
+        x_label: str = "Distance from Baseline Weights",
+        y_label: str = "Variance Inflation Factor",
+        title: str = "Bias-Variance Tradeoff",
+    ) -> plt.Axes:
+        """Plot the bias/variance tradeoff frontier.
 
         Parameters
         ----------
-         annotate_knee : bool, optional
-            If True, indicate the "knee in the curve" on the plot. See Notes.
-         annotate_index : int, optional
-            Indicate the tangent to the frontier at the point corresponding to
-            `annotate_index`. If specified, `annotate_knee` is ignored. By default, no
-            annotation is shown.
-         ax : matplotlib Axes, optional
-            If specified, plot frontier on `ax`.
+        annotate_knee : bool, default=True
+            If True, mark the knee point and draw a tangent line.
+        ax : matplotlib Axes, optional
+            If provided, plot onto this Axes; otherwise create a new figure.
+        x_label : str, default="Distance from Baseline Weights"
+        y_label : str, default="Variance Inflation Factor"
+        title : str, default="Bias-Variance Tradeoff"
 
         Returns
         -------
-         ax : matplotlib Axes
-
-        Notes
-        -----
-        Programmatically identifying the knee in the curve is still experimental. We use
-        the "max chord distance" method, which imagines a chord connecting the edges of
-        the frontier: the minimum distance/max variance to maximum distance/min
-        variance. Whichever point on the curve is farthest from this chord (as measured
-        by perpendicular distance) is selected as the knee. Note that only points
-        explicitly calculated during EfficientFrontier.trace() are considered, so the
-        true knee may be between two of the points considered.
+        matplotlib Axes
 
         """
-        if ax is None:
-            _, ax = plt.subplots()
-        else:
-            plt.sca(ax)
-
-        ax.plot(self.distances, self.variances)
-        plt.fill_between(
-            self.distances,
-            self.variances,
-            max(self.variances),
-            color="lightblue",
-            alpha=0.5,
+        ax = super().plot(
+            annotate_knee=annotate_knee, ax=ax, x_label=x_label, y_label=y_label
         )
-
-        if annotate_index is None and annotate_knee:
-            annotate_index = self.max_chord_distance()
-
-        if annotate_index is not None:
-            if not 0 <= annotate_index <= len(self.distances):
-                raise ValueError(f"Invalid {annotate_index=:}")
-
-            distance = self.distances[annotate_index]
-            phi = self.variances[annotate_index]
-
-            # The slope involves phi since under the hood, we're translating the
-            # constraint (1/M) * \| w \|_2^2 <= \phi to:
-            # (1 / (M * \phi)) * \| w \|_2^2 <= 1.
-            slope = -phi / self.lagrange_multipliers[annotate_index]
-
-            # This is an attempt to control the length of the tangent line when the
-            # tangent point is close to the left or right of the plot.
-            width = max(
-                min(
-                    0.5 * (distance - min(self.distances)),
-                    0.5 * (max(self.distances) - distance),
-                ),
-                0,
-            )
-            x_vals = np.linspace(distance - width, distance + width)
-            ax.plot(x_vals, phi + slope * (x_vals - distance), color="orange")
-
-            # Note the current plot boundaries so we don't move them.
-            xlim = plt.xlim()
-            ylim = plt.ylim()
-
-            # Draw dashed lines connecting point to axes.
-            ax.hlines(
-                y=phi,
-                xmin=xlim[0],
-                xmax=distance,
-                colors="orange",
-                linestyles="dashed",
-            )
-
-            ax.vlines(
-                x=distance,
-                ymin=ylim[0],
-                ymax=phi,
-                colors="orange",
-                linestyles="dashed",
-            )
-            # Reset plot boundaries.
-            ax.set_xlim(xlim[0], xlim[1])
-            ax.set_ylim(ylim[0], ylim[1])
-
-        ax.set_xlabel("Distance from Baseline Weights")
-        ax.set_ylabel("Variance Inflation Factor")
-        ax.set_title("Bias-Variance Tradeoff")
+        ax.set_title(title)
         return ax
 
-    def max_chord_distance(self) -> int:
-        """Find the point of maximum chord distance."""
-        x1 = self.distances[0]
-        x2 = self.distances[-1]
-        y1 = self.variances[0]
-        y2 = self.variances[-1]
-        dy = y2 - y1
-        dx = x2 - x1
-        x2y1_y2x1 = x2 * y1 - y2 * x1
-        distances = np.array(
-            [
-                abs(dy * x - dx * y + x2y1_y2x1)
-                for x, y in zip(self.distances, self.variances, strict=False)
-            ]
-        )
-        return int(distances.argmax())
 
-
-class EfficientFrontier:
-    r"""Class for tracing out the bias/variance tradeoff.
+class EfficientFrontier(MultiObjectiveOptimizer):
+    r"""Trace the bias/variance Pareto frontier.
 
     Solves:
            minimize    D(w, v)
            subject to  (1/M) * X^T * w = \mu
                        (1/M) * \| w \|_2^2 <= \phi
                         w >= 0,
-    for a sequence of values for \phi. Increasing \phi involves more variance,
-    but potentially less bias.
+    for a range of \phi values spanning from the minimum achievable variance to the
+    variance at the minimum-distance solution. Increasing \phi allows more variance but
+    potentially less bias.
+
+    Parameters
+    ----------
+    rake : Rake
+        Configured calibration solver.
 
     """
 
     def __init__(self, rake: Rake) -> None:
+        super().__init__(primary_objective=0)
         self.rake = rake
 
-    def trace(
-        self, phi_max: float | None = None, num_points: int = 50
-    ) -> EfficientFrontierResults:
-        """Trace bias/variance tradeoff."""
-        if self.rake.phase1_solver is None:
-            raise ValueError("Must specify a Phase I solver")
+    def solve_with_bounds(
+        self, bounds: npt.NDArray[np.float64]
+    ) -> InteriorPointMethodResult:
+        """Minimize D(w, v) subject to variance <= bounds[0].
 
-        # Find the minimum variance weights, regardless of distance from baseline
-        if isinstance(
-            self.rake.phase1_solver, EqualityWithBoundsAndNormConstraintSolver
-        ):
-            res_min = self.rake.phase1_solver.solve(fully_optimize=True)
-        elif isinstance(
-            self.rake.phase1_solver,
-            EqualityWithBoundsSolver | EqualityWithBoundsAndImbalanceConstraintSolver,
-        ):
-            res_min = EqualityWithBoundsAndNormConstraintSolver(
-                phi=np.inf,
-                phase1_solver=self.rake.phase1_solver,
-                settings=self.rake.settings,
-            ).solve(fully_optimize=True)
+        Parameters
+        ----------
+        bounds : array of shape (1,)
+            ``bounds[0]`` is the upper bound on variance (1/M)||w||².
+
+        Returns
+        -------
+        InteriorPointMethodResult
+
+        """
+        self.rake.update_phi(float(bounds[0]))
+        return self.rake.solve()
+
+    def minimize_objective(self, objective_index: int) -> InteriorPointMethodResult:
+        """Minimize a single objective with no bounds on the other.
+
+        Parameters
+        ----------
+        objective_index : int
+            0 to minimize D(w, v); 1 to minimize (1/M)||w||².
+
+        Returns
+        -------
+        InteriorPointMethodResult
+
+        Raises
+        ------
+        ValueError
+            If ``objective_index`` is not 0 or 1, or if the Phase I solver type is
+            unrecognized when minimizing variance.
+
+        """
+        if objective_index == 0:
+            # Corner 0: minimize D(w, v) with no variance constraint.
+            self.rake.update_phi(None)
+            return self.rake.solve()
+        elif objective_index == 1:
+            # Corner 1: minimize (1/M)||w||² subject to balance constraints.
+            # Use the Phase I solver with phi=inf to find the minimum-norm
+            # feasible point.
+            if isinstance(
+                self.rake.phase1_solver, EqualityWithBoundsAndNormConstraintSolver
+            ):
+                res = self.rake.phase1_solver.solve(fully_optimize=True)
+            elif isinstance(
+                self.rake.phase1_solver,
+                EqualityWithBoundsSolver
+                | EqualityWithBoundsAndImbalanceConstraintSolver,
+            ):
+                res = EqualityWithBoundsAndNormConstraintSolver(
+                    phi=np.inf,
+                    phase1_solver=self.rake.phase1_solver,
+                    settings=self.rake.settings,
+                ).solve(fully_optimize=True)
+            else:
+                raise ValueError("Unrecognized phase1_solver type.")
+            assert isinstance(res, InteriorPointMethodResult)  # Satisfy type-checker.
+            return res
         else:
-            raise ValueError("Unrecognized Phase I Solver")
+            raise ValueError(f"Unknown objective_index: {objective_index}")
 
-        w0 = res_min.solution
-        phi_min = np.mean(w0 * w0)
-        weights = [w0]
-        variances = [float(phi_min)]
-        lagrange_multipliers = [0.0]
-        distances = [self.rake.distance.evaluate(w0)]
+    def evaluate_objectives(
+        self, x: npt.NDArray[np.float64]
+    ) -> npt.NDArray[np.float64]:
+        r"""Return [D(w, v), (1/M)||w||²] at x.
 
-        # This is just a hack to tell the type checker that res_min has the desired type. By
-        # construction, it always will.
-        assert isinstance(res_min, InteriorPointMethodResult)
+        Parameters
+        ----------
+        x : array
+            Weight vector.
 
-        ipm_results: list[InteriorPointMethodResult] = [res_min]
+        Returns
+        -------
+        array of shape (2,)
 
-        # Find the feasible weights that most closely match baseline, regardless of
-        # variance.
-        self.rake.update_phi(phi_max)
-        res_max = self.rake.solve()
-        phi_max_nn = np.dot(res_max.solution, res_max.solution) / self.rake.dimension
+        """
+        distance = self.rake.distance.evaluate(x)
+        variance = float(np.dot(x, x)) / self.rake.dimension
+        return np.array([distance, variance])
 
-        # Calculate a range of optimal weights between phi_min and phi_max
-        phi_grid = np.linspace(phi_min, phi_max_nn, num=num_points)[1:-1]
-        for phi in phi_grid:
-            self.rake.update_phi(phi)
-            ipm_res = self.rake.solve()
+    def trace(self, num_points: int = 50) -> EfficientFrontierResults:
+        r"""Trace the bias/variance tradeoff.
 
-            weights.append(ipm_res.solution)
-            variances.append(float(phi))
-            lagrange_multipliers.append(ipm_res.inequality_multipliers[-1])
-            distances.append(ipm_res.objective_value)
-            ipm_results.append(ipm_res)
+        Solves the optimization problem for ``num_points`` values of \phi between the
+        two Pareto corners. Corner 0 minimizes D(w, v) (no variance constraint); corner
+        1 minimizes (1/M)\|w\|_2^2 (no distance constraint).
 
-        weights.append(res_max.solution)
-        variances.append(phi_max_nn)
-        lagrange_multipliers.append(res_max.inequality_multipliers[-1])
-        distances.append(res_max.objective_value)
-        ipm_results.append(res_max)
+        Parameters
+        ----------
+        num_points : int, default=50
+            Number of grid points along the \phi dimension.
 
+        Returns
+        -------
+        EfficientFrontierResults
+            ``corners[0]`` minimizes D(w, v); ``corners[1]`` minimizes variance. The
+            ``.weights``, ``.distances``, and ``.variances`` convenience properties are
+            sorted by variance ascending.
+
+        """
+        fr = super().trace(num_points=num_points)
         return EfficientFrontierResults(
-            weights=weights,
-            distances=distances,
-            variances=variances,
-            lagrange_multipliers=lagrange_multipliers,
-            ipm_results=ipm_results,
+            points=fr.points,
+            corners=fr.corners,
+            primary_objective=fr.primary_objective,
+            n_attempted=fr.n_attempted,
+            n_skipped=fr.n_skipped,
         )
