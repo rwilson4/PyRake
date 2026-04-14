@@ -65,6 +65,38 @@ class WeightingEstimator(ABC):
     def variance(self) -> float:
         """Calculate the variance."""
 
+    def _sensitivity_variance(self, gamma: float) -> tuple[float, float]:
+        """Return variance evaluated at the worst-case sensitivity weights.
+
+        Returns ``(lb_var, ub_var)`` where ``lb_var`` is the variance at
+        the weights that achieve the lower sensitivity bound and ``ub_var``
+        is the variance at the weights that achieve the upper bound.
+
+        The default falls back to the nominal variance for both bounds.
+        Subclasses that can identify the worst-case weight vectors override
+        this to implement the heuristic from (Wilson 2025, §3): minimize
+        the test-statistic numerator and use those same weights in the
+        denominator.
+
+        Parameters
+        ----------
+         gamma : float
+            The Gamma factor. Must be >= 1.0.
+
+        Returns
+        -------
+         lb_var, ub_var : float
+            Variance at the lower- and upper-bound sensitivity weights.
+
+        References
+        ----------
+        - Wilson, Bob. 2025. "Design-Based Inference and Sensitivity Analysis for Survey
+          Sampling." https://adventuresinwhy.com/post/survey_sampling/
+
+        """
+        v = self.variance()
+        return v, v
+
     @abstractmethod
     def sensitivity_analysis(self, gamma: float = 6.0) -> tuple[float, float]:
         r"""Perform a sensitivity analysis.
@@ -185,19 +217,18 @@ class WeightingEstimator(ABC):
               - "less": H0: theta >= `null_value` vs Halt: theta < `null_value`.
             Defaults to "two-sided".
          bootstrap : bool, optional
-            If True (default), use the percentile bootstrap to account for
-            sampling variability in the sensitivity bounds. If False, use the
-            normal approximation: the ECI is the sensitivity interval expanded
-            by :math:`z \cdot \text{se}` on each side, analogous to how
-            `confidence_interval` expands the point estimate. The fast path
-            requires no replications and is exact in the same sense as
-            `confidence_interval`.
+            If True (default), use the percentile bootstrap (Zhao, Small, and
+            Bhattacharya, 2019) to account for sampling variability in the sensitivity
+            bounds. If False, use the normal approximation: the ECI is the sensitivity
+            interval expanded by a multiple of the standard error on each side, where
+            the standard error is evaluated at the worst-case sensitivity weights (the
+            heuristic from Wilson 2025, §3). See `adjusted_pvalue` for additional notes.
          B : int, optional
-            Number of bootstrap replications to run. Ignored when
-            ``bootstrap=False``. Defaults to 1_000.
+            Number of bootstrap replications to run. Ignored when ``bootstrap=False``.
+            Defaults to 1_000.
          seed : int, list_like, etc
-            A seed for numpy.random.default_rng. Ignored when
-            ``bootstrap=False``. See that documentation for details.
+            A seed for numpy.random.default_rng. Ignored when ``bootstrap=False``. See
+            that documentation for details.
 
         Returns
         -------
@@ -208,6 +239,15 @@ class WeightingEstimator(ABC):
               - "greater": lb finite, ub = np.inf
               - "less": lb = -np.inf, ub finite
 
+        References
+        ----------
+         - Wilson, Bob. 2025. "Design-Based Inference and Sensitivity Analysis for
+           Survey Sampling." https://adventuresinwhy.com/post/survey_sampling/
+         - Zhao, Qingyuan, Dylan S Small, and Bhaswar B Bhattacharya. 2019. "Sensitivity
+           Analysis for Inverse Probability Weighting Estimators via the Percentile
+           Bootstrap." Journal of the Royal Statistical Society Series B: Statistical
+           Methodology 81 (4). Oxford University Press: pg. 735--61.
+
         """
         if gamma < 1.0:
             raise ValueError("`gamma` must be >= 1")
@@ -216,20 +256,20 @@ class WeightingEstimator(ABC):
             return self.confidence_interval(alpha=alpha, alternative=alternative)
 
         if not bootstrap:
-            se = math.sqrt(self.variance())
             sen_lb, sen_ub = self.sensitivity_analysis(gamma=gamma)
+            lb_var, ub_var = self._sensitivity_variance(gamma)
             if alternative == "two-sided":
                 zcrit = stats.norm.isf(alpha / 2)
             else:
                 zcrit = stats.norm.isf(alpha)
 
             if alternative == "greater" or alternative == "two-sided":
-                lb = float(sen_lb - zcrit * se)
+                lb = float(sen_lb - zcrit * math.sqrt(lb_var))
                 if alternative == "greater":
                     return lb, np.inf
 
             if alternative == "less" or alternative == "two-sided":
-                ub = float(sen_ub + zcrit * se)
+                ub = float(sen_ub + zcrit * math.sqrt(ub_var))
                 if alternative == "less":
                     return -np.inf, ub
 
@@ -325,19 +365,19 @@ class WeightingEstimator(ABC):
     ) -> float:
         r"""Calculate a p-value adjusted for hidden bias.
 
-        The adjusted p-value accounts for both sampling uncertainty and
-        uncertainty from propensity scores estimated with error. It is the
-        smallest alpha for which the expanded confidence interval at level alpha
-        excludes `null_value`, making it the dual of `expanded_confidence_interval`
-        in the same sense that `pvalue` is the dual of `confidence_interval`.
+        The adjusted p-value accounts for both sampling uncertainty and uncertainty from
+        propensity scores estimated with error. It is the smallest alpha for which the
+        expanded confidence interval at level alpha excludes `null_value`, making it the
+        dual of `expanded_confidence_interval` in the same sense that `pvalue` is the
+        dual of `confidence_interval`.
 
         Parameters
         ----------
          null_value : float
             The hypothesized theta.
          gamma : float, optional
-            The Gamma factor. Must be >= 1.0, with 1.0 indicating perfect
-            propensity scores. Defaults to 6. See Notes in `sensitivity_analysis`.
+            The Gamma factor. Must be >= 1.0, with 1.0 indicating perfect propensity
+            scores. Defaults to 6. See Notes in `sensitivity_analysis`.
          alternative : ["two-sided", "less", "greater"], optional
             What kind of test:
               - "two-sided": H0: theta = `null_value` vs Halt: theta <> `null_value`.
@@ -345,18 +385,18 @@ class WeightingEstimator(ABC):
               - "less": H0: theta >= `null_value` vs Halt: theta < `null_value`.
             Defaults to "two-sided".
          bootstrap : bool, optional
-            If True (default), use the percentile bootstrap to account for
-            sampling variability in the sensitivity bounds. If False, use the
-            normal approximation: the adjusted p-value is computed from the
-            sensitivity interval bounds expanded by the standard error, analogous
-            to how `pvalue` uses the normal approximation. The fast path requires
-            no replications and is exact in the same sense as `pvalue`.
+            If True (default), use the percentile bootstrap to account for sampling
+            variability in the sensitivity bounds. If False, use the normal
+            approximation: the test statistic is formed from the sensitivity bound and
+            the standard error evaluated at the worst-case sensitivity weights (the
+            heuristic from Wilson 2025, §3). This provides a lower bound on the adjusted
+            p-value, but simulations suggest it's tight enough to be practically useful.
          B : int, optional
-            Number of bootstrap replications to run. Ignored when
-            ``bootstrap=False``. Defaults to 1_000.
+            Number of bootstrap replications to run. Ignored when ``bootstrap=False``.
+            Defaults to 1_000.
          seed : int, list_like, etc
-            A seed for numpy.random.default_rng. Ignored when
-            ``bootstrap=False``. See that documentation for details.
+            A seed for numpy.random.default_rng. Ignored when ``bootstrap=False``. See
+            that documentation for details.
 
         Returns
         -------
@@ -365,32 +405,37 @@ class WeightingEstimator(ABC):
 
         Notes
         -----
-        When ``bootstrap=True``, B bootstrap replicates are drawn. For each
-        replicate, `sensitivity_analysis` computes the range of point estimates
-        consistent with gamma-level hidden bias. The adjusted p-value is then
-        the fraction of bootstrap replicates whose sensitivity interval does not
-        rule out `null_value`:
+        When ``bootstrap=True``, B bootstrap replicates are drawn. For each replicate,
+        `sensitivity_analysis` computes the range of point estimates consistent with
+        gamma-level hidden bias. The adjusted p-value is then the fraction of bootstrap
+        replicates whose sensitivity interval does not rule out `null_value`:
 
           - "greater": fraction of bootstrap lower bounds that do not exceed
             `null_value`, i.e. mean(lb_bootstrap <= null_value).
-          - "less": fraction of bootstrap upper bounds that are not below
-            `null_value`, i.e. mean(ub_bootstrap > null_value).
-          - "two-sided": twice the minimum of the two one-sided adjusted
-            p-values, capped at 1.
+          - "less": fraction of bootstrap upper bounds that are not below `null_value`,
+            i.e. mean(ub_bootstrap > null_value).
+          - "two-sided": twice the minimum of the two one-sided adjusted p-values,
+            capped at 1.
 
-        When ``bootstrap=False``, the normal approximation is used instead:
-        the sensitivity bounds replace the point estimate when computing the
-        test statistic, with the standard error computed from `variance`.
+        When ``bootstrap=False``, the normal approximation is used instead: the test
+        statistic is formed from the sensitivity bound in the numerator and the standard
+        error at the worst-case weights in the denominator. Because the true infimum of
+        the test statistic is intractable (the statistic is not convex in the weights),
+        this uses the heuristic from (Wilson 2025, §3): find the weights that minimize
+        the numerator, then evaluate the standard error at those same weights.
+        Simulations show this closely tracks the bootstrap-based adjusted p-value.
 
-        When gamma=1 the sensitivity interval collapses to the point estimate,
-        and the adjusted p-value reduces to the standard p-value.
+        When gamma=1 the sensitivity interval collapses to the point estimate, and the
+        adjusted p-value reduces to the standard p-value.
 
         References
         ----------
-         - Zhao, Qingyuan, Dylan S Small, and Bhaswar B Bhattacharya. 2019.
-           "Sensitivity Analysis for Inverse Probability Weighting Estimators
-           via the Percentile Bootstrap." Journal of the Royal Statistical
-           Society Series B: Statistical Methodology 81 (4): 735--61.
+         - Wilson, Bob. 2025. "Design-Based Inference and Sensitivity Analysis for
+           Survey Sampling." https://adventuresinwhy.com/post/survey_sampling/
+         - Zhao, Qingyuan, Dylan S Small, and Bhaswar B Bhattacharya. 2019. "Sensitivity
+           Analysis for Inverse Probability Weighting Estimators via the Percentile
+           Bootstrap." Journal of the Royal Statistical Society Series B: Statistical
+           Methodology 81 (4): 735--61.
 
         """
         if gamma < 1.0:
@@ -400,16 +445,18 @@ class WeightingEstimator(ABC):
             return self.pvalue(null_value=null_value, alternative=alternative)
 
         if not bootstrap:
-            se = math.sqrt(self.variance())
             sen_lb, sen_ub = self.sensitivity_analysis(gamma=gamma)
+            lb_var, ub_var = self._sensitivity_variance(gamma)
 
             if alternative == "greater" or alternative == "two-sided":
-                p_greater = float(stats.norm.sf((sen_lb - null_value) / se))
+                p_greater = float(
+                    stats.norm.sf((sen_lb - null_value) / math.sqrt(lb_var))
+                )
                 if alternative == "greater":
                     return p_greater
 
             if alternative == "less" or alternative == "two-sided":
-                p_less = float(stats.norm.sf((null_value - sen_ub) / se))
+                p_less = float(stats.norm.sf((null_value - sen_ub) / math.sqrt(ub_var)))
                 if alternative == "less":
                     return p_less
 
@@ -448,13 +495,13 @@ class WeightingEstimator(ABC):
             | np.random.BitGenerator
             | np.random.Generator
         ) = None,
-        gamma_upper: float = 1_000.0,
+        gamma_upper: float = 6.0,
         tol: float = 1e-3,
     ) -> float:
         r"""Find the smallest Gamma at which the result is no longer significant.
 
-        Searches for the smallest Gamma >= 1 such that the adjusted p-value is
-        >= ``alpha`` (i.e., the result is no longer statistically significant).
+        Searches for the smallest Gamma >= 1 such that the adjusted p-value is >=
+        ``alpha`` (i.e., the result is no longer statistically significant).
 
         Parameters
         ----------
@@ -469,55 +516,55 @@ class WeightingEstimator(ABC):
               - "less": H0: theta >= `null_value` vs Halt: theta < `null_value`.
             Defaults to "two-sided".
          bootstrap : bool, optional
-            If True (default), use the percentile bootstrap. If False, use the
-            normal approximation. See `adjusted_pvalue` for details.
+            If True (default), use the percentile bootstrap. If False, use the normal
+            approximation. See `adjusted_pvalue` for details.
          B : int, optional
-            Number of bootstrap replications. Ignored when ``bootstrap=False``.
-            Defaults to 1_000.
+            Number of bootstrap replications. Ignored when ``bootstrap=False``. Defaults
+            to 1_000.
          seed : int, list_like, etc, optional
             A seed for numpy.random.default_rng. Ignored when ``bootstrap=False``.
-            Passing a fixed seed is recommended when ``bootstrap=True`` because
-            it ensures the adjusted p-value is monotone in Gamma, which makes
-            the binary search more reliable.
+            Passing a fixed seed is recommended when ``bootstrap=True`` because it
+            ensures the adjusted p-value is monotone in Gamma, which makes the binary
+            search more reliable.
          gamma_upper : float, optional
-            Initial upper bound for the exponential search phase. If the
-            adjusted p-value is still significant here, the search doubles
-            this value repeatedly until a bracket is found. Defaults to
-            1_000.
+            Initial upper bound for the exponential search phase. If the adjusted
+            p-value is still significant here, the search doubles this value repeatedly
+            until a bracket is found. Defaults to 6.
          tol : float, optional
-            Convergence tolerance on Gamma. The returned value is accurate to
-            within ``tol``. Defaults to 1e-3.
+            Convergence tolerance on Gamma. The returned value is accurate to within
+            ``tol``. Defaults to 1e-3.
 
         Returns
         -------
          gamma_star : float
             The smallest Gamma >= 1 at which the result is not statistically
-            significant. Returns 1.0 if the result is already not significant
-            at Gamma=1.
+            significant. Returns 1.0 if the result is already not significant at
+            Gamma=1.
 
         Notes
         -----
-        The adjusted p-value is monotonically non-decreasing in Gamma: larger
-        Gamma widens the sensitivity interval, making it harder to reject the
-        null hypothesis. This guarantees that a unique crossing point exists
-        and that binary search converges reliably.
+        The adjusted p-value is monotonically non-decreasing in Gamma: larger Gamma
+        widens the sensitivity interval, making it harder to reject the null hypothesis.
+        This guarantees that a unique crossing point exists and that binary search
+        converges reliably.
 
-        The search proceeds in two phases. First, an exponential search
-        starting at ``gamma_upper`` doubles the candidate until a Gamma is
-        found where the adjusted p-value exceeds ``alpha``. Then bisection
-        narrows the bracket to within ``tol``.
+        The search proceeds in two phases. First, an exponential search starting at
+        ``gamma_upper`` doubles the candidate until a Gamma is found where the adjusted
+        p-value exceeds ``alpha``. Then bisection narrows the bracket to within ``tol``.
 
-        When ``bootstrap=True``, pass a fixed ``seed`` to ensure reproducible
-        results and to preserve monotonicity across binary search iterations.
+        When ``bootstrap=True``, pass a fixed ``seed`` to ensure reproducible results
+        and to preserve monotonicity across binary search iterations.
 
         References
         ----------
-         - Zhao, Qingyuan, Dylan S Small, and Bhaswar B Bhattacharya. 2019.
-           "Sensitivity Analysis for Inverse Probability Weighting Estimators
-           via the Percentile Bootstrap." Journal of the Royal Statistical
-           Society Series B: Statistical Methodology 81 (4): 735--61.
+         - Zhao, Qingyuan, Dylan S Small, and Bhaswar B Bhattacharya. 2019. "Sensitivity
+           Analysis for Inverse Probability Weighting Estimators via the Percentile
+           Bootstrap." Journal of the Royal Statistical Society Series B: Statistical
+           Methodology 81 (4): 735--61.
 
         """
+        gamma_max = 1_000.0
+
         if gamma_upper < 1.0:
             raise ValueError("`gamma_upper` must be >= 1")
 
@@ -537,6 +584,10 @@ class WeightingEstimator(ABC):
         # Exponential search: double gamma_upper until adjusted p-value >= alpha.
         lo, hi = 1.0, gamma_upper
         while apvalue(hi) < alpha:
+            if hi > gamma_max:
+                # The result is robust enough that no finite Gamma explains it
+                # away; return inf to signal no crossing was found.
+                return math.inf
             lo = hi
             hi *= 2
 
@@ -638,18 +689,18 @@ class WeightingEstimator(ABC):
               - "greater": H0: \bar{Y} <= `null_value` vs Halt: \bar{Y} > `null_value`.
               - "less": H0: \bar{Y} >= `null_value` vs Halt: \bar{Y} < `null_value`.
          bootstrap : bool, optional
-            Passed to `expanded_confidence_interval`. If True (default), use
-            the percentile bootstrap. If False, use the normal approximation
-            (much faster, especially when plotting many gamma values).
+            Passed to `expanded_confidence_interval`. If True (default), use the
+            percentile bootstrap. If False, use the normal approximation (much faster,
+            especially when plotting many gamma values).
          B : int, optional
             Number of bootstrap replications per gamma value. Ignored when
             ``bootstrap=False``. Defaults to 1_000.
          null_value : float, optional
-            If specified, compute ``gamma_star`` (the smallest Gamma at which
-            the result is no longer significant against this null) and annotate
-            the plot with a vertical line at that point. No annotation is added
-            if the result is already non-significant at Gamma=1 (``gamma_star``
-            == 1) or if ``gamma_star`` exceeds ``gamma_upper``.
+            If specified, compute ``gamma_star`` (the smallest Gamma at which the result
+            is no longer significant against this null) and annotate the plot with a
+            vertical line at that point. No annotation is added if the result is already
+            non-significant at Gamma=1 (``gamma_star`` == 1) or if ``gamma_star``
+            exceeds ``gamma_upper``.
          title, ylabel : str, optional
             Title/ylabel for plot. If not specified, no title is included.
          ytick_format : str, optional
@@ -889,15 +940,15 @@ class WeightingEstimator(ABC):
                 gamma_upper=gamma_upper,
             )
             if gs > 1.0 and gs <= gamma_upper:
-                ax.axvline(x=gs, color="red", linestyle="--")
+                ax.axvline(x=gs, color="black", linestyle=":")
                 ax.annotate(
                     f"$\\Gamma^* = {gs:.2f}$",
-                    xy=(gs, ax.get_ylim()[1]),
-                    xytext=(4, -4),
+                    xy=(gs, ax.get_ylim()[0]),
+                    xytext=(4, 4),
                     textcoords="offset points",
                     ha="left",
-                    va="top",
-                    color="red",
+                    va="bottom",
+                    color="black",
                     fontsize=tick_label_size,
                 )
 

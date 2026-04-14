@@ -335,7 +335,7 @@ class TestLinearCombinationEstimator:
 
     @staticmethod
     def test_expanded_confidence_interval_no_bootstrap_formula() -> None:
-        """bootstrap=False ECI equals sensitivity bounds +/- z * se."""
+        """bootstrap=False ECI equals sensitivity bounds +/- z * se_at_worst_case_weights."""
         import math
 
         from scipy import stats
@@ -345,7 +345,7 @@ class TestLinearCombinationEstimator:
         lce = LinearCombinationEstimator(terms=[(1.0, est1), (-1.0, est2)])
 
         alpha, gamma = 0.10, 2.0
-        se = math.sqrt(lce.variance())
+        lb_var, ub_var = lce._sensitivity_variance(gamma)
         zcrit = stats.norm.isf(alpha / 2)
         sen_lb, sen_ub = lce.sensitivity_analysis(gamma=gamma)
 
@@ -353,8 +353,8 @@ class TestLinearCombinationEstimator:
             alpha=alpha, gamma=gamma, bootstrap=False
         )
 
-        assert eci_lb == pytest.approx(sen_lb - zcrit * se)
-        assert eci_ub == pytest.approx(sen_ub + zcrit * se)
+        assert eci_lb == pytest.approx(sen_lb - zcrit * math.sqrt(lb_var))
+        assert eci_ub == pytest.approx(sen_ub + zcrit * math.sqrt(ub_var))
 
     @staticmethod
     def test_expanded_confidence_interval_no_bootstrap_one_sided() -> None:

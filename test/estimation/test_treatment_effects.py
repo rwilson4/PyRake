@@ -376,9 +376,23 @@ class TestSimpleDifferenceEstimator:
         assert actual == pytest.approx(std_pvalue)
 
         # For gamma > 1, adjusted p-value is >= standard p-value
-        actual = pate_estimator.adjusted_pvalue(null_value=0.05, gamma=2.0, seed=42)
-        std_at_05 = pate_estimator.pvalue(null_value=0.05)
-        assert actual >= std_at_05
+        print("Point Estimate:", pate_estimator.point_estimate())
+        print("P-values")
+        print(f"Unadjusted: {std_pvalue:.05f}")
+        st = time.time()
+        bootstrap = pate_estimator.adjusted_pvalue(gamma=1.05, seed=42)
+        print(
+            f"Bootstrap:  {bootstrap:.05f} (calculated in {1000 * (time.time()-st):.03f} ms)"
+        )
+        assert bootstrap >= std_pvalue
+
+        st = time.time()
+        heuristic = pate_estimator.adjusted_pvalue(gamma=1.05, bootstrap=False)
+        print(
+            f"Heuristic:  {heuristic:.05f} (calculated in {1000 * (time.time()-st):.03f} ms)"
+        )
+        assert heuristic >= std_pvalue
+        assert heuristic == pytest.approx(bootstrap, abs=0.02)
 
 
 class TestATEEstimator:
@@ -852,12 +866,12 @@ class TestATEEstimator:
             treated_propensity_scores=treated_propensities,
             treated_outcomes=treated_outcomes,
         )
-        lb_expected = -0.6784724957263869
-        ub_expected = 0.8917726898653108
+        lb_expected = -0.6815095568238682
+        ub_expected = 0.8958746381025066
 
         start_time = time.time()
         lb_actual, ub_actual = estimator.expanded_confidence_interval(
-            alpha=0.1, gamma=6.0, seed=42
+            alpha=0.1, gamma=6.0, bootstrap=False
         )
         end_time = time.time()
         print(f"Completed in {end_time - start_time:.03f} seconds")
@@ -868,7 +882,7 @@ class TestATEEstimator:
         # Test one-sided intervals
         start_time = time.time()
         lb_actual, ub_actual = estimator.expanded_confidence_interval(
-            alpha=0.05, gamma=6.0, alternative="less", seed=42
+            alpha=0.05, gamma=6.0, alternative="less", bootstrap=False
         )
         end_time = time.time()
         print(f"Completed in {end_time - start_time:.03f} seconds")
@@ -878,7 +892,7 @@ class TestATEEstimator:
 
         start_time = time.time()
         lb_actual, ub_actual = estimator.expanded_confidence_interval(
-            alpha=0.05, gamma=6.0, alternative="greater", seed=42
+            alpha=0.05, gamma=6.0, alternative="greater", bootstrap=False
         )
         end_time = time.time()
         print(f"Completed in {end_time - start_time:.03f} seconds")
@@ -898,7 +912,7 @@ class TestATEEstimator:
         )
 
         lb_actual, ub_actual = estimator.expanded_confidence_interval(
-            alpha=0.1, gamma=6.0, seed=42
+            alpha=0.1, gamma=6.0, bootstrap=False
         )
         assert lb_actual == pytest.approx(lb_expected)
         assert ub_actual == pytest.approx(ub_expected)
@@ -913,11 +927,11 @@ class TestATEEstimator:
             treated_sampling_propensity_scores=treated_sampling_propensities,
             sampling_estimand_class="PopulationMean",
         )
-        lb_expected = -2.0721958774613065
-        ub_expected = 2.2940124004956144
+        lb_expected = -2.0697098187417162
+        ub_expected = 2.295217687159081
 
         lb_actual, ub_actual = estimator.expanded_confidence_interval(
-            alpha=0.1, gamma=6.0, seed=42
+            alpha=0.1, gamma=6.0, bootstrap=False
         )
         assert lb_actual == pytest.approx(lb_expected)
         assert ub_actual == pytest.approx(ub_expected)
@@ -938,12 +952,12 @@ class TestATEEstimator:
                 "mean_predicted_outcome": treated_mean_predicted_outcome,
             },
         )
-        lb_expected = 0.04230439882983481
-        ub_expected = 0.05807741535242331
+        lb_expected = 0.04226928864052392
+        ub_expected = 0.05809090391133698
 
         start_time = time.time()
         lb_actual, ub_actual = estimator.expanded_confidence_interval(
-            alpha=0.1, gamma=6.0, seed=42
+            alpha=0.1, gamma=6.0, bootstrap=False
         )
         end_time = time.time()
         print(f"Completed in {end_time - start_time:.03f} seconds")
@@ -997,7 +1011,7 @@ class TestATEEstimator:
             alpha=0.10,
             alternative="two-sided",
             ylabel="ATE",
-            B=100,
+            bootstrap=False,
             axis_label_size=18,
             tick_label_size=14,
             ytick_format=".02%",
@@ -1163,7 +1177,7 @@ class TestATTEstimator:
             alpha=0.10,
             alternative="two-sided",
             ylabel="ATT",
-            B=100,
+            bootstrap=False,
             axis_label_size=18,
             tick_label_size=14,
             ytick_format=".02%",
@@ -1307,7 +1321,7 @@ class TestATCEstimator:
             alpha=0.10,
             alternative="two-sided",
             ylabel="ATC",
-            B=100,
+            bootstrap=False,
             axis_label_size=18,
             tick_label_size=14,
             ytick_format=".02%",

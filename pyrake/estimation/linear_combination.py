@@ -12,16 +12,14 @@ class LinearCombinationEstimator(WeightingEstimator):
     r"""Affine combination of WeightingEstimators.
 
     Estimates:
-
         theta = affine + sum_i c_i * theta_i
+    where each theta_i is estimated by the corresponding component estimator. Component
+    estimators may be MeanEstimators, TreatmentEffectEstimators, or other
+    LinearCombinationEstimators.
 
-    where each theta_i is estimated by the corresponding component estimator.
-    Component estimators may be MeanEstimators, TreatmentEffectEstimators, or
-    other LinearCombinationEstimators.
-
-    Sensitivity analysis is valid because the objective is separable across
-    components: hidden bias in each component contributes independently, and
-    the worst-case bounds combine linearly (with sign-aware bound selection).
+    Sensitivity analysis is valid because the objective is separable across components:
+    hidden bias in each component contributes independently, and the worst-case bounds
+    combine linearly (with sign-aware bound selection).
 
     Parameters
     ----------
@@ -33,15 +31,12 @@ class LinearCombinationEstimator(WeightingEstimator):
     Notes
     -----
     Variance is computed assuming independence across component estimators:
-
         var(theta) = sum_i c_i^2 * var(theta_i).
-
-    This is exact when components are fit on disjoint datasets (e.g. different
-    treatment arms or independent studies). If components share data, variance
-    will be understated and variance-based methods (confidence_interval,
-    pvalue) will be anti-conservative. Bootstrap-based methods
-    (expanded_confidence_interval) carry the same independence assumption
-    since each component is resampled independently.
+    This is exact when components are fit on disjoint datasets (e.g. different treatment
+    arms or independent studies). If components share data, variance will be understated
+    and variance-based methods (confidence_interval, pvalue) will be anti-conservative.
+    Bootstrap-based methods (expanded_confidence_interval) carry the same independence
+    assumption since each component is resampled independently.
 
     """
 
@@ -65,24 +60,47 @@ class LinearCombinationEstimator(WeightingEstimator):
         """
         return sum(c**2 * e.variance() for c, e in self.terms)
 
+    def _sensitivity_variance(self, gamma: float) -> tuple[float, float]:
+        """Return variance at the worst-case lower- and upper-bound weights.
+
+        Mirrors the sign-aware bound selection in ``sensitivity_analysis``: for
+        coefficient c and component variance pair (e_lb_var, e_ub_var):
+
+          - c >= 0: contributes c**2 * e_lb_var to the overall lower-bound variance and
+            c**2 * e_ub_var to the upper-bound variance.
+          - c < 0: contributes c**2 * e_ub_var to the lower-bound variance and c**2 *
+            e_lb_var to the upper-bound variance.
+
+        """
+        lb_var = 0.0
+        ub_var = 0.0
+        for c, e in self.terms:
+            e_lb_var, e_ub_var = e._sensitivity_variance(gamma)
+            if c >= 0:
+                lb_var += c**2 * e_lb_var
+                ub_var += c**2 * e_ub_var
+            else:
+                lb_var += c**2 * e_ub_var
+                ub_var += c**2 * e_lb_var
+        return lb_var, ub_var
+
     def sensitivity_analysis(self, gamma: float = 6.0) -> tuple[float, float]:
         r"""Perform a sensitivity analysis.
 
-        The analysis is separable across components. For coefficient c and
-        component sensitivity interval [lb_i, ub_i]:
-
-          - c >= 0: contributes c * lb_i to the overall lower bound and
-            c * ub_i to the overall upper bound.
-          - c < 0: contributes c * ub_i to the overall lower bound and
-            c * lb_i to the overall upper bound.
+        The analysis is separable across components. For coefficient c and component
+        sensitivity interval [lb_i, ub_i]:
+          - c >= 0: contributes c * lb_i to the overall lower bound and c * ub_i to the
+            overall upper bound.
+          - c < 0: contributes c * ub_i to the overall lower bound and c * lb_i to the
+            overall upper bound.
 
         The affine term shifts both bounds by the same constant.
 
         Parameters
         ----------
          gamma : float, optional
-            The Gamma factor. Must be >= 1.0, with 1.0 indicating perfect
-            propensity scores. Defaults to 6. See WeightingEstimator.
+            The Gamma factor. Must be >= 1.0, with 1.0 indicating perfect propensity
+            scores. Defaults to 6. See WeightingEstimator.
 
         Returns
         -------
@@ -115,9 +133,9 @@ class LinearCombinationEstimator(WeightingEstimator):
     ) -> Generator["LinearCombinationEstimator", None, None]:
         """Yield a sequence of resampled estimators.
 
-        Each of the B bootstrap iterations yields a new
-        LinearCombinationEstimator whose components are independently
-        resampled from their respective component estimators.
+        Each of the B bootstrap iterations yields a new LinearCombinationEstimator whose
+        components are independently resampled from their respective component
+        estimators.
 
         Parameters
         ----------
@@ -146,46 +164,6 @@ class LinearCombinationEstimator(WeightingEstimator):
                 affine=self.affine,
             )
 
-    def adjusted_pvalue(
-        self,
-        null_value: float,
-        gamma: float = 6.0,
-        alternative: Literal["two-sided", "less", "greater"] = "two-sided",
-        bootstrap: bool = True,
-        B: int = 1_000,
-        seed: None | (
-            int
-            | list[int]
-            | np.random.SeedSequence
-            | np.random.BitGenerator
-            | np.random.Generator
-        ) = None,
-    ) -> float:
-        r"""Calculate a p-value adjusted for hidden bias.
-
-        See `WeightingEstimator.adjusted_pvalue` for full documentation.
-
-        When gamma=1, returns the standard p-value. When there are no stochastic
-        components, the bootstrap produces a degenerate distribution concentrated
-        at the point estimate, and the adjusted p-value is 1 if the null value is
-        within the sensitivity interval and 0 otherwise.
-
-        """
-        if gamma < 1.0:
-            raise ValueError("`gamma` must be >= 1")
-
-        if gamma == 1.0:
-            return self.pvalue(null_value=null_value, alternative=alternative)
-
-        return super().adjusted_pvalue(
-            null_value=null_value,
-            gamma=gamma,
-            alternative=alternative,
-            bootstrap=bootstrap,
-            B=B,
-            seed=seed,
-        )
-
     def expanded_confidence_interval(
         self,
         alpha: float = 0.10,
@@ -203,13 +181,13 @@ class LinearCombinationEstimator(WeightingEstimator):
     ) -> tuple[float, float]:
         r"""Calculate an expanded confidence interval.
 
-        Each bootstrap replicate independently resamples every component
-        estimator and recomputes the sensitivity interval for the resulting
-        linear combination (exploiting the separability property). Percentiles
-        of those bootstrap sensitivity bounds are returned as the expanded
-        confidence interval. With ``bootstrap=False`` the normal approximation
-        is used instead: the sensitivity interval is expanded by
-        :math:`z \cdot \text{se}` on each side, with no resampling required.
+        Each bootstrap replicate independently resamples every component estimator and
+        recomputes the sensitivity interval for the resulting linear combination
+        (exploiting the separability property). Percentiles of those bootstrap
+        sensitivity bounds are returned as the expanded confidence interval. With
+        ``bootstrap=False`` the normal approximation is used instead: the sensitivity
+        interval is expanded by a multiple of the standard error on each side, with no
+        resampling required.
 
         Parameters
         ----------
@@ -220,20 +198,19 @@ class LinearCombinationEstimator(WeightingEstimator):
          alternative : ["two-sided", "less", "greater"], optional
             Defaults to "two-sided".
          bootstrap : bool, optional
-            If True (default), use the percentile bootstrap. If False, use
-            the normal approximation (no resampling).
+            If True (default), use the percentile bootstrap. If False, use the normal
+            approximation (no resampling).
          B : int, optional
-            Number of bootstrap replications. Ignored when
-            ``bootstrap=False``. Defaults to 1_000.
+            Number of bootstrap replications. Ignored when ``bootstrap=False``. Defaults
+            to 1_000.
          seed : int, list_like, etc
-            A seed for numpy.random.default_rng. Ignored when
-            ``bootstrap=False``.
+            A seed for numpy.random.default_rng. Ignored when ``bootstrap=False``.
 
         Returns
         -------
          lb, ub : float
-            Lower and upper bounds on the confidence interval. For one-sided
-            intervals, only one of these will be finite.
+            Lower and upper bounds on the confidence interval. For one-sided intervals,
+            only one of these will be finite.
 
         """
         if gamma < 1.0:

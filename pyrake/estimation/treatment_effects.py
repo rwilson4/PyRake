@@ -5,6 +5,8 @@ from typing import Any, Literal, cast
 
 import numpy as np
 import numpy.typing as npt
+import pandas as pd
+from matplotlib.axes import Axes
 
 from .base_classes import Estimand, SimpleEstimand, WeightingEstimator
 from .population import (
@@ -77,6 +79,23 @@ class TreatmentEffectEstimator(WeightingEstimator):
     def variance(self) -> float:
         """Calculate the variance."""
         return self.treated_estimator.variance() + self.control_estimator.variance()
+
+    def _sensitivity_variance(self, gamma: float) -> tuple[float, float]:
+        """Return variance at the worst-case lower- and upper-bound weights.
+
+        The lower bound of the treatment-effect sensitivity interval is
+        ``treated_lb - control_ub``, so the variance at the lower-bound
+        weights is the sum of the treated lower-bound variance and the
+        control upper-bound variance. The upper bound is the reverse.
+
+        """
+        treated_lb_var, treated_ub_var = self.treated_estimator._sensitivity_variance(
+            gamma
+        )
+        control_lb_var, control_ub_var = self.control_estimator._sensitivity_variance(
+            gamma
+        )
+        return treated_lb_var + control_ub_var, treated_ub_var + control_lb_var
 
     def pvalue(
         self,
@@ -256,6 +275,45 @@ class TreatmentEffectEstimator(WeightingEstimator):
                 control_estimator=cast("MeanEstimator | RatioEstimator", control_est),
                 treated_estimator=cast("MeanEstimator | RatioEstimator", treated_est),
             )
+
+    def plot_sensitivity(
+        self,
+        gamma_lower: float = 1.0,
+        gamma_upper: float = 6.0,
+        num_points: int = 50,
+        alpha: float = 0.10,
+        alternative: Literal["two-sided", "less", "greater"] = "two-sided",
+        bootstrap: bool = True,
+        B: int = 1_000,
+        null_value: float | None = 0.0,
+        title: str | None = None,
+        ylabel: str = "Sensitivity Interval",
+        ytick_format: str = ".0%",
+        axis_label_size: int | None = None,
+        tick_label_size: int | None = None,
+        legend_label_size: int | None = None,
+        legend_placement: str | None = None,
+        ax: Axes | None = None,
+    ) -> tuple[pd.DataFrame, Axes]:
+        """Like WeightingEstimator.plot_sensitivity, but default to `null_value=0.0`."""
+        return super().plot_sensitivity(
+            gamma_lower=gamma_lower,
+            gamma_upper=gamma_upper,
+            num_points=num_points,
+            alpha=alpha,
+            alternative=alternative,
+            bootstrap=bootstrap,
+            B=B,
+            null_value=null_value,
+            title=title,
+            ylabel=ylabel,
+            ytick_format=ytick_format,
+            axis_label_size=axis_label_size,
+            tick_label_size=tick_label_size,
+            legend_label_size=legend_label_size,
+            legend_placement=legend_placement,
+            ax=ax,
+        )
 
 
 class SimpleDifferenceEstimator(TreatmentEffectEstimator):

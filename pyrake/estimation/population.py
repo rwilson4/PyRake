@@ -340,6 +340,36 @@ class IPWEstimator(MeanEstimator):
             / (n - 1)
         )
 
+    def _sensitivity_variance(self, gamma: float) -> tuple[float, float]:
+        """Return variance at the worst-case lower- and upper-bound weights.
+
+        The lower-bound weights assign each observation the weight from the
+        sensitivity region that minimises the estimate (wl when outcomes >= 0,
+        wu otherwise), mirroring ``sensitivity_analysis``. The upper-bound
+        weights are the element-wise opposite. Variance is then evaluated
+        using the IPW formula at each of these weight vectors, implementing
+        the heuristic from (Wilson 2025, §3).
+
+        This implementation is inherited by ``AIPWEstimator``, where
+        ``self.outcomes`` holds residuals rather than raw outcomes; the
+        formula is identical in both cases.
+
+        """
+        wl, wu = self.estimand.sensitivity_region(gamma)
+        lb_weights = np.where(self.outcomes >= 0, wl, wu)
+        ub_weights = np.where(self.outcomes >= 0, wu, wl)
+        n = len(lb_weights)
+        n_over_N = n / self.population_size
+        lb_pe = np.sum(self.outcomes * lb_weights) / self.population_size
+        ub_pe = np.sum(self.outcomes * ub_weights) / self.population_size
+        lb_var = float(
+            np.mean(np.square(n_over_N * lb_weights * self.outcomes - lb_pe)) / (n - 1)
+        )
+        ub_var = float(
+            np.mean(np.square(n_over_N * ub_weights * self.outcomes - ub_pe)) / (n - 1)
+        )
+        return lb_var, ub_var
+
     def sensitivity_analysis(self, gamma: float = 6.0) -> tuple[float, float]:
         r"""Perform a sensitivity analysis.
 
@@ -610,47 +640,132 @@ class SIPWEstimator(MeanEstimator):
             np.square(self.weights) * np.square(self.outcomes - self.point_estimate())
         ) / (np.sum(self.weights) ** 2)
 
+    def _sensitivity_weights(
+        self, gamma: float
+    ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
+        r"""Return weight vectors that achieve the sensitivity lower and upper bounds.
+
+        For binary outcomes the optimal weights are determined element-wise:
+        observations with outcome 1 receive ``wl`` for the lower bound and
+        ``wu`` for the upper bound; observations with outcome 0 receive the
+        reverse.
+
+        For non-binary outcomes, (Zhao, Small, and Bhattarcharya 2019)
+        calculates
+
+                 \sum_i w_i * y_i
+           inf -------------------
+                   \sum_i w_i
+
+        over ``wl_i <= w_i <= wu_i`` as the lower bound, and the supremum
+        as the upper bound. They propose a fast algorithm requiring a single
+        pass over the sorted data. For the lower bound, observations are
+        processed in ascending outcome order: flipping each weight from
+        ``wl`` to ``wu`` increases the denominator faster than the
+        numerator (low outcome * high weight), decreasing the ratio. The
+        algorithm stops at the first flip that fails to improve. The cutoff
+        index records how many observations were flipped at the optimum, and
+        the weight vector is reconstructed from it. The upper bound uses the
+        same approach in descending outcome order.
+
+        References
+        ----------
+         - Zhao, Qingyuan, Dylan S Small, and Bhaswar B Bhattacharya. 2019.
+           "Sensitivity Analysis for Inverse Probability Weighting Estimators
+           via the Percentile Bootstrap." Journal of the Royal Statistical
+           Society Series B: Statistical Methodology 81 (4): 735--61.
+
+        """
+        wl, wu = self.estimand.sensitivity_region(gamma)
+
+        if self.binary_outcomes:
+            return (
+                np.where(self.outcomes == 1, wl, wu),
+                np.where(self.outcomes == 1, wu, wl),
+            )
+
+        # Non-binary lower bound: process observations in ascending outcome
+        # order, flipping each weight from wl to wu while the ratio decreases.
+        idx_asc = np.argsort(self.outcomes)
+        w = np.array(wl)
+        zeta = np.sum(w)
+        lmbda = np.dot(self.outcomes, w)
+        lb_star = lmbda / zeta
+        lb_cutoff = 0  # number of observations flipped at optimum
+        for ii in range(len(self.outcomes)):
+            w[idx_asc[ii]] = wu[idx_asc[ii]]
+            zeta += wu[idx_asc[ii]] - wl[idx_asc[ii]]
+            lmbda += self.outcomes[idx_asc[ii]] * (wu[idx_asc[ii]] - wl[idx_asc[ii]])
+            if lmbda < lb_star * zeta:
+                lb_star = lmbda / zeta
+                lb_cutoff = ii + 1
+            else:
+                break
+        lb_weights = np.array(wl)
+        lb_weights[idx_asc[:lb_cutoff]] = wu[idx_asc[:lb_cutoff]]
+
+        # Non-binary upper bound: process observations in descending outcome
+        # order, flipping each weight from wl to wu while the ratio increases.
+        idx_desc = idx_asc[::-1]
+        w = np.array(wl)
+        zeta = np.sum(w)
+        lmbda = np.dot(self.outcomes, w)
+        ub_star = lmbda / zeta
+        ub_cutoff = 0
+        for ii in range(len(self.outcomes)):
+            w[idx_desc[ii]] = wu[idx_desc[ii]]
+            zeta += wu[idx_desc[ii]] - wl[idx_desc[ii]]
+            lmbda += self.outcomes[idx_desc[ii]] * (wu[idx_desc[ii]] - wl[idx_desc[ii]])
+            if lmbda > ub_star * zeta:
+                ub_star = lmbda / zeta
+                ub_cutoff = ii + 1
+            else:
+                break
+        ub_weights = np.array(wl)
+        ub_weights[idx_desc[:ub_cutoff]] = wu[idx_desc[:ub_cutoff]]
+
+        return lb_weights, ub_weights
+
+    def _sensitivity_variance(self, gamma: float) -> tuple[float, float]:
+        """Return variance at the worst-case lower- and upper-bound weights.
+
+        Calls ``_sensitivity_weights`` to obtain the weight vectors, then
+        evaluates the SIPW variance formula at each, implementing the
+        heuristic from (Wilson 2025, §3).
+
+        This implementation is inherited by ``SAIPWEstimator``, where
+        ``self.outcomes`` holds residuals; the formula is identical.
+
+        """
+        lb_weights, ub_weights = self._sensitivity_weights(gamma)
+        lb_pe = np.dot(self.outcomes, lb_weights) / np.sum(lb_weights)
+        ub_pe = np.dot(self.outcomes, ub_weights) / np.sum(ub_weights)
+        lb_var = float(
+            np.sum(np.square(lb_weights) * np.square(self.outcomes - lb_pe))
+            / np.sum(lb_weights) ** 2
+        )
+        ub_var = float(
+            np.sum(np.square(ub_weights) * np.square(self.outcomes - ub_pe))
+            / np.sum(ub_weights) ** 2
+        )
+        return lb_var, ub_var
+
     def sensitivity_analysis(self, gamma: float = 6.0) -> tuple[float, float]:
         r"""Perform a sensitivity analysis.
 
         Calculate a range of point estimates implied by the Gamma factor.
+        See ``_sensitivity_weights`` for the algorithm.
 
         Parameters
         ----------
          gamma : float, optional
             The Gamma factor. Must be >= 1.0, with 1.0 indicating perfect propensity
-            scores. Defaults to 6. See Notes.
+            scores. Defaults to 6. See Notes in WeightingEstimator.
 
         Returns
         -------
          lb, ub : float
             Lower and upper bounds on the point estimate.
-
-        Notes
-        -----
-        See the Notes in WeightingEstimator for overall context.
-
-        (Zhao, Small, and Bhattarcharya 2019) calculates
-                 \sum_i w_i * y_i
-           inf -------------------
-                   \sum_i w_i
-        over wli <= w_i <= wui as the lower bound of the sensitivity interval, and the
-        supremum as the upper bound. These are linear fractional programs subject to
-        linear inequality constraints.
-
-        They propose a fast algorithm for calculating the infimum and supremum that
-        requires iterating over the data just once. When the outcome is binary, we can
-        do even better: the infimum is achieved by setting weights corresponding to
-        negative outcomes to their maximum value (wui) and weights corresponding to
-        positive outcomes to their minimum value (wli). Reverse this to calculate the
-        supremum.
-
-        References
-        ----------
-         - Zhao, Qingyuan, Dylan S Small, and Bhaswar B Bhattacharya. 2019. "Sensitivity
-           Analysis for Inverse Probability Weighting Estimators via the Percentile
-           Bootstrap." Journal of the Royal Statistical Society Series B: Statistical
-           Methodology 81 (4). Oxford University Press: pg. 735--61.
 
         """
         if gamma < 1.0:
@@ -659,44 +774,11 @@ class SIPWEstimator(MeanEstimator):
         if gamma == 1.0:
             return self.point_estimate(), self.point_estimate()
 
-        wl, wu = self.estimand.sensitivity_region(gamma)
-        if self.binary_outcomes:
-            lb = np.where(self.outcomes == 1, wl, wu)
-            ub = np.where(self.outcomes == 1, wu, wl)
-            return (
-                np.dot(self.outcomes, lb) / np.sum(lb),
-                np.dot(self.outcomes, ub) / np.sum(ub),
-            )
-
-        idx = np.argsort(self.outcomes)
-        w = np.array(wl)
-        zeta = np.sum(w)
-        lmbda = np.dot(self.outcomes, w)
-        lb_star = lmbda / zeta
-        for ii in range(len(self.outcomes)):
-            w[idx[ii]] = wu[idx[ii]]
-            zeta += wu[idx[ii]] - wl[idx[ii]]
-            lmbda += self.outcomes[idx[ii]] * (wu[idx[ii]] - wl[idx[ii]])
-            if lmbda < lb_star * zeta:
-                lb_star = lmbda / zeta
-            else:
-                break
-
-        idx = idx[::-1]
-        w = np.array(wl)
-        zeta = np.sum(w)
-        lmbda = np.dot(self.outcomes, w)
-        ub_star = lmbda / zeta
-        for ii in range(len(self.outcomes)):
-            w[idx[ii]] = wl[idx[ii]]
-            zeta += wu[idx[ii]] - wl[idx[ii]]
-            lmbda += self.outcomes[idx[ii]] * (wu[idx[ii]] - wl[idx[ii]])
-            if lmbda > ub_star * zeta:
-                ub_star = lmbda / zeta
-            else:
-                break
-
-        return lb_star, ub_star
+        lb_weights, ub_weights = self._sensitivity_weights(gamma)
+        return (
+            np.dot(self.outcomes, lb_weights) / np.sum(lb_weights),
+            np.dot(self.outcomes, ub_weights) / np.sum(ub_weights),
+        )
 
 
 class SAIPWEstimator(SIPWEstimator):

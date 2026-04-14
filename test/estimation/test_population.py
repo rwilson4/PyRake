@@ -254,12 +254,12 @@ class TestIPWEstimator:
             population_size,
             estimand_class=PopulationMean,
         )
-        lb_expected = 0.17558574796577736
-        ub_expected = 1.1792322609834998
+        lb_expected = 0.17587891311249543
+        ub_expected = 1.180186853269606
 
         start_time = time.time()
         lb_actual, ub_actual = estimator.expanded_confidence_interval(
-            alpha=0.1, gamma=6.0, seed=42
+            alpha=0.1, gamma=6.0, bootstrap=False
         )
         end_time = time.time()
         print(f"Completed in {end_time - start_time:.03f} seconds")
@@ -270,7 +270,7 @@ class TestIPWEstimator:
         # Test one-sided intervals
         start_time = time.time()
         lb_actual, ub_actual = estimator.expanded_confidence_interval(
-            alpha=0.05, gamma=6.0, alternative="less", seed=42
+            alpha=0.05, gamma=6.0, alternative="less", bootstrap=False
         )
         end_time = time.time()
         print(f"Completed in {end_time - start_time:.03f} seconds")
@@ -280,7 +280,7 @@ class TestIPWEstimator:
 
         start_time = time.time()
         lb_actual, ub_actual = estimator.expanded_confidence_interval(
-            alpha=0.05, gamma=6.0, alternative="greater", seed=42
+            alpha=0.05, gamma=6.0, alternative="greater", bootstrap=False
         )
         end_time = time.time()
         print(f"Completed in {end_time - start_time:.03f} seconds")
@@ -313,7 +313,7 @@ class TestIPWEstimator:
             alpha=0.10,
             alternative="two-sided",
             ylabel="Incidence",
-            B=1_000,
+            bootstrap=False,
             axis_label_size=18,
             tick_label_size=14,
         )
@@ -565,12 +565,12 @@ class TestAIPWEstimator:
             mean_predicted_outcome,
             population_size,
         )
-        lb_expected = 0.48780560815933593
-        ub_expected = 0.5096700826129239
+        lb_expected = 0.4878022068837456
+        ub_expected = 0.5096846983418535
 
         start_time = time.time()
         lb_actual, ub_actual = estimator.expanded_confidence_interval(
-            alpha=0.1, gamma=6.0, seed=42
+            alpha=0.1, gamma=6.0, bootstrap=False
         )
         end_time = time.time()
         print(f"Completed in {end_time - start_time:.03f} seconds")
@@ -581,7 +581,7 @@ class TestAIPWEstimator:
         # Test one-sided intervals
         start_time = time.time()
         lb_actual, ub_actual = estimator.expanded_confidence_interval(
-            alpha=0.05, gamma=6.0, alternative="less", seed=42
+            alpha=0.05, gamma=6.0, alternative="less", bootstrap=False
         )
         end_time = time.time()
         print(f"Completed in {end_time - start_time:.03f} seconds")
@@ -591,7 +591,7 @@ class TestAIPWEstimator:
 
         start_time = time.time()
         lb_actual, ub_actual = estimator.expanded_confidence_interval(
-            alpha=0.05, gamma=6.0, alternative="greater", seed=42
+            alpha=0.05, gamma=6.0, alternative="greater", bootstrap=False
         )
         end_time = time.time()
         print(f"Completed in {end_time - start_time:.03f} seconds")
@@ -631,7 +631,7 @@ class TestAIPWEstimator:
             alpha=0.10,
             alternative="two-sided",
             ylabel="Incidence",
-            B=1_000,
+            bootstrap=False,
             axis_label_size=18,
             tick_label_size=14,
             ytick_format=".02%",
@@ -716,16 +716,33 @@ class TestSIPWEstimator:
         """Test adjusted p-value calculation."""
         propensities, outcomes = TestSIPWEstimator.get_data()
         estimator = SIPWEstimator(propensities, outcomes)
+        print("Point Estimate:", estimator.point_estimate())
 
+        print("P-values")
         # gamma=1 reduces to the standard p-value
         std_pvalue = estimator.pvalue(null_value=0.50)
         actual = estimator.adjusted_pvalue(null_value=0.50, gamma=1.0)
         assert actual == pytest.approx(std_pvalue)
+        print(f"Unadjusted: {actual:.05f}")
 
         # For gamma > 1, null values inside the sensitivity interval inflate the
         # p-value toward 1 (adjusted >= standard).
-        actual = estimator.adjusted_pvalue(null_value=0.50, gamma=2.0, seed=42)
-        assert actual >= std_pvalue
+        st = time.time()
+        bootstrap = estimator.adjusted_pvalue(null_value=0.50, gamma=1.1, seed=42)
+        print(
+            f"Bootstrap:  {bootstrap:.05f} (calculated in {1000 * (time.time()-st):.03f} ms)"
+        )
+        assert bootstrap >= std_pvalue
+
+        st = time.time()
+        heuristic = estimator.adjusted_pvalue(
+            null_value=0.50, gamma=1.1, bootstrap=False
+        )
+        print(
+            f"Heuristic:  {heuristic:.05f} (calculated in {1000 * (time.time()-st):.03f} ms)"
+        )
+        assert heuristic >= std_pvalue
+        assert heuristic == pytest.approx(bootstrap, abs=0.02)
 
         # One-sided tests with null values near the bootstrap sensitivity-bound
         # medians return adjusted p-values near 0.5.
@@ -945,6 +962,17 @@ class TestSIPWEstimator:
         assert lb_actual == pytest.approx(lb_expected)
         assert ub_actual == pytest.approx(ub_expected)
 
+        # Test heuristic
+        start_time = time.time()
+        lb_heuristic, ub_heuristic = estimator.expanded_confidence_interval(
+            alpha=0.1, gamma=6.0, bootstrap=False
+        )
+        end_time = time.time()
+        print(f"Completed in {end_time - start_time:.03f} seconds")
+        print(lb_heuristic, ub_heuristic)
+        assert lb_heuristic == pytest.approx(lb_actual, abs=0.001)
+        assert ub_heuristic == pytest.approx(ub_actual, abs=0.001)
+
         # Test one-sided intervals
         start_time = time.time()
         lb_actual, ub_actual = estimator.expanded_confidence_interval(
@@ -956,6 +984,17 @@ class TestSIPWEstimator:
         assert lb_actual == -np.inf
         assert ub_actual == pytest.approx(ub_expected)
 
+        # Test heuristic
+        start_time = time.time()
+        lb_heuristic, ub_heuristic = estimator.expanded_confidence_interval(
+            alpha=0.05, gamma=6.0, bootstrap=False, alternative="less"
+        )
+        end_time = time.time()
+        print(f"Completed in {end_time - start_time:.03f} seconds")
+        print(lb_heuristic, ub_heuristic)
+        assert lb_heuristic == -np.inf
+        assert ub_heuristic == pytest.approx(ub_actual, abs=0.001)
+
         start_time = time.time()
         lb_actual, ub_actual = estimator.expanded_confidence_interval(
             alpha=0.05, gamma=6.0, alternative="greater", seed=42
@@ -965,6 +1004,17 @@ class TestSIPWEstimator:
         print(lb_actual, ub_actual)
         assert lb_actual == pytest.approx(lb_expected)
         assert ub_actual == np.inf
+
+        # Test heuristic
+        start_time = time.time()
+        lb_heuristic, ub_heuristic = estimator.expanded_confidence_interval(
+            alpha=0.05, gamma=6.0, bootstrap=False, alternative="greater"
+        )
+        end_time = time.time()
+        print(f"Completed in {end_time - start_time:.03f} seconds")
+        print(lb_heuristic, ub_heuristic)
+        assert lb_heuristic == pytest.approx(lb_actual, abs=0.001)
+        assert ub_heuristic == np.inf
 
     @staticmethod
     def test_plot_sensitivity() -> None:
@@ -980,16 +1030,19 @@ class TestSIPWEstimator:
             "ECI Upper Bound",
         ]
 
+        st = time.time()
         df, ax = estimator.plot_sensitivity(
             gamma_upper=6.0,
             num_points=50,
             alpha=0.10,
             alternative="two-sided",
             ylabel="Incidence",
-            B=1_000,
+            bootstrap=False,
+            null_value=0.2,
             axis_label_size=18,
             tick_label_size=14,
         )
+        print(f"Figure generated in {time.time()-st:.03f} sec")
         # plt.show()
         assert set(df.columns) == set(expected_columns)
         assert len(df) == 50
@@ -1267,12 +1320,12 @@ class TestSAIPWEstimator:
         estimator = SAIPWEstimator(
             propensities, outcomes, predicted_outcomes, mean_predicted_outcome
         )
-        lb_expected = 0.4922371081338087
-        ub_expected = 0.5069528390649397
+        lb_expected = 0.49223076029818014
+        ub_expected = 0.5069680562955309
 
         start_time = time.time()
         lb_actual, ub_actual = estimator.expanded_confidence_interval(
-            alpha=0.1, gamma=6.0, seed=42
+            alpha=0.1, gamma=6.0, bootstrap=False
         )
         end_time = time.time()
         print(f"Completed in {end_time - start_time:.03f} seconds")
@@ -1283,7 +1336,7 @@ class TestSAIPWEstimator:
         # Test one-sided intervals
         start_time = time.time()
         lb_actual, ub_actual = estimator.expanded_confidence_interval(
-            alpha=0.05, gamma=6.0, alternative="less", seed=42
+            alpha=0.05, gamma=6.0, alternative="less", bootstrap=False
         )
         end_time = time.time()
         print(f"Completed in {end_time - start_time:.03f} seconds")
@@ -1293,7 +1346,7 @@ class TestSAIPWEstimator:
 
         start_time = time.time()
         lb_actual, ub_actual = estimator.expanded_confidence_interval(
-            alpha=0.05, gamma=6.0, alternative="greater", seed=42
+            alpha=0.05, gamma=6.0, alternative="greater", bootstrap=False
         )
         end_time = time.time()
         print(f"Completed in {end_time - start_time:.03f} seconds")
@@ -1328,7 +1381,7 @@ class TestSAIPWEstimator:
             alpha=0.10,
             alternative="two-sided",
             ylabel="Incidence",
-            B=100,
+            bootstrap=False,
             axis_label_size=18,
             tick_label_size=14,
             ytick_format=".02%",
@@ -1488,14 +1541,16 @@ class TestRatioEstimator:
         """Test expanded confidence interval bootstrapping produces interval with proper order."""
         ps, num, den = self.generate_data_binary(n=200)
         estimator = RatioEstimator(ps, num, den)
+        lb_expected = 0.2943789485538427
+        ub_expected = 0.6917978251278621
         lb, ub = estimator.expanded_confidence_interval(
-            alpha=0.10, gamma=2.0, B=250, seed=10
+            alpha=0.10, gamma=2.0, bootstrap=False
         )
         assert lb <= ub
+        assert lb == pytest.approx(lb_expected)
+        assert ub == pytest.approx(ub_expected)
         # Check that gamma=1 gives back the regular CI
-        lb1, ub1 = estimator.expanded_confidence_interval(
-            alpha=0.10, gamma=1.0, B=100, seed=11
-        )
+        lb1, ub1 = estimator.expanded_confidence_interval(alpha=0.10, gamma=1.0)
         ci_lb, ci_ub = estimator.confidence_interval(alpha=0.10)
         assert lb1 == pytest.approx(ci_lb, rel=1e-5)
         assert ub1 == pytest.approx(ci_ub, rel=1e-5)
@@ -1516,7 +1571,7 @@ class TestRatioEstimator:
         ]
 
         df, ax = estimator.plot_sensitivity(
-            gamma_lower=1.0, gamma_upper=2.0, B=30, title="Test Plot"
+            gamma_lower=1.0, gamma_upper=2.0, bootstrap=False, title="Test Plot"
         )
         # plt.show()
         assert set(df.columns) == set(expected_columns)

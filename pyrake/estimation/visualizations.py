@@ -43,10 +43,9 @@ def meta_analysis(
      alpha : float, optional
          Threshold for statistical significance. Defaults to 0.10.
      gamma : float, optional
-         The Gamma factor for sensitivity analysis. Must be >= 1.0, with 1.0
-         indicating no hidden bias adjustment. When gamma > 1, uses
-         ``adjusted_pvalue`` (normal approximation) instead of ``pvalue``.
-         Defaults to 1.0.
+         The Gamma factor for sensitivity analysis. Must be >= 1.0, with 1.0 indicating
+         no hidden bias adjustment. When gamma > 1, uses ``adjusted_pvalue`` (normal
+         approximation) instead of ``pvalue``. Defaults to 1.0.
      title : str, optional
          Optional title for figure.
      xlabel : str, optional
@@ -72,28 +71,14 @@ def meta_analysis(
 
     """
     null_values = np.linspace(null_min, null_max, num_points)
-
-    def _pval(
-        estimator: WeightingEstimator,
-        null_value: float,
-        alternative: "Literal['less', 'greater']",
-    ) -> float:
-        if gamma > 1.0:
-            return estimator.adjusted_pvalue(
-                null_value=null_value,
-                gamma=gamma,
-                alternative=alternative,
-                bootstrap=False,
-            )
-        return estimator.pvalue(null_value=null_value, alternative=alternative)
-
     pvals = {
         f"{platform} ({alternative})": np.array(
             [
-                _pval(
-                    estimator,
-                    null_value,
-                    cast("Literal['less', 'greater']", alternative),
+                estimator.adjusted_pvalue(
+                    null_value=null_value,
+                    gamma=gamma,
+                    alternative=cast("Literal['less', 'greater']", alternative),
+                    bootstrap=False,
                 )
                 for null_value in null_values
             ]
