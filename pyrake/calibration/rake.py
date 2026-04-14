@@ -7,6 +7,9 @@ from cvxium import (
     FeasibilitySolver,
     InteriorPointMethodSolver,
     OptimizationSettings,
+    multiply_diagonal,
+    multiply_rank_one_update,
+    multiply_rank_p_update,
     solve_diagonal_eta_inverse,
     solve_kkt_system,
     solve_rank_one_update,
@@ -534,17 +537,24 @@ class Rake(EqualityConstrainedInteriorPointMethodSolver, InteriorPointMethodSolv
         """
         eta = self._hessian_ft_diagonal(x, t)
         zeta = self._hessian_ft_rank_one(x)
-        Hy = eta * y + np.dot(zeta, y) * zeta
 
-        if self.B is not None:
-            assert self.c is not None
-            Bx_minus_c = self.B @ x - self.c
-            kappa_pos = self._hessian_ft_kappa_pos(x, Bx_minus_c)
-            kappa_neg = self._hessian_ft_kappa_neg(x, Bx_minus_c)
-            Hy += kappa_pos @ (kappa_pos.T @ y)
-            Hy += kappa_neg @ (kappa_neg.T @ y)
+        def diag_plus_zeta(z: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+            return multiply_rank_one_update(z, zeta, multiply_diagonal, eta=eta)
 
-        return Hy
+        if self.B is None:
+            return diag_plus_zeta(y)
+
+        assert self.c is not None
+        Bx_minus_c = self.B @ x - self.c
+        kappa_pos = self._hessian_ft_kappa_pos(x, Bx_minus_c)
+        kappa_neg = self._hessian_ft_kappa_neg(x, Bx_minus_c)
+
+        def diag_plus_zeta_plus_neg(
+            z: npt.NDArray[np.float64],
+        ) -> npt.NDArray[np.float64]:
+            return multiply_rank_p_update(z, kappa_neg, diag_plus_zeta)
+
+        return multiply_rank_p_update(y, kappa_pos, diag_plus_zeta_plus_neg)
 
     def _hessian_ft_diagonal(
         self, x: npt.NDArray[np.float64], t: float

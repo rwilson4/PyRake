@@ -10,6 +10,8 @@ from cvxium import (
     NewtonResult,
     OptimizationSettings,
     ProblemCertifiablyInfeasibleError,
+    multiply_diagonal,
+    multiply_rank_p_update,
     solve_diagonal_eta_inverse,
     solve_kkt_system,
     solve_rank_p_update,
@@ -387,23 +389,22 @@ class EqualityWithBoundsAndNormConstraintSolver(
         Our Hessian is diagonal, H = diag(eta), H * y = eta * y
 
         """
+        eta = self._hessian_ft_diagonal(x, t)  # shape (M,)
+
         if self.B is None:
-            eta = self._hessian_ft_diagonal(x, t)
-            return eta * y
+            return multiply_diagonal(y, eta)
 
         assert self.c is not None
         Bx_minus_c = self.B @ x - self.c
-
-        # Diagonal component
-        eta = self._hessian_ft_diagonal(x, t)  # shape (M,)
 
         # Rank-q factors
         kappa_pos = self._hessian_ft_kappa_pos(x, Bx_minus_c)  # shape (M, p2)
         kappa_neg = self._hessian_ft_kappa_neg(x, Bx_minus_c)  # shape (M, p2)
 
-        return (  # shape (M,)
-            eta * y + kappa_pos @ (kappa_pos.T @ y) + kappa_neg @ (kappa_neg.T @ y)
-        )
+        def diag_plus_neg(z: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+            return multiply_rank_p_update(z, kappa_neg, multiply_diagonal, eta=eta)
+
+        return multiply_rank_p_update(y, kappa_pos, diag_plus_neg)  # shape (M,)
 
     def _hessian_ft_diagonal(
         self, x: npt.NDArray[np.float64], t: float
