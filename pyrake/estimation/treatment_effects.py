@@ -213,7 +213,14 @@ class TreatmentEffectEstimator(WeightingEstimator):
         """
         return super().confidence_interval(alpha=alpha, alternative=alternative)
 
-    def sensitivity_analysis(self, gamma: float = 6.0) -> tuple[float, float]:
+    def sensitivity_analysis(  # type: ignore[override]
+        self,
+        gamma: float = 6.0,
+        control_outcome_proxies: list[float] | npt.NDArray[np.float64] | None = None,
+        treated_outcome_proxies: list[float] | npt.NDArray[np.float64] | None = None,
+        proxy_mean: float | None = None,
+        alpha: float = 0.10,
+    ) -> tuple[float, float]:
         r"""Perform a sensitivity analysis.
 
         Calculate a range of point estimates implied by the Gamma factor.
@@ -223,6 +230,24 @@ class TreatmentEffectEstimator(WeightingEstimator):
          gamma : float, optional
             The Gamma factor. Must be >= 1.0, with 1.0 indicating perfect propensity
             scores. Defaults to 6. See Notes.
+         control_outcome_proxies : array_like, optional
+            A proxy for the outcome observed for every control-group unit, with a
+            known population mean given by ``proxy_mean``. When supplied (together
+            with ``treated_outcome_proxies`` and ``proxy_mean``), a constraint is
+            added to the control-arm sensitivity region requiring the weighted
+            proxy estimate to be within the estimator's confidence-interval
+            half-width of ``proxy_mean``. Must have the same length as the
+            control-group outcomes. All three of ``control_outcome_proxies``,
+            ``treated_outcome_proxies``, and ``proxy_mean`` must be provided
+            together.
+         treated_outcome_proxies : array_like, optional
+            A proxy for the outcome observed for every treated-group unit. See
+            ``control_outcome_proxies`` for details.
+         proxy_mean : float, optional
+            Known population mean of the outcome proxy. Required when either
+            ``control_outcome_proxies`` or ``treated_outcome_proxies`` is supplied.
+         alpha : float, optional
+            Significance level for the proxy tolerance. Defaults to 0.10.
 
         Returns
         -------
@@ -237,10 +262,16 @@ class TreatmentEffectEstimator(WeightingEstimator):
 
         """
         control_lb, control_ub = self.control_estimator.sensitivity_analysis(
-            gamma=gamma
+            gamma=gamma,
+            outcome_proxies=control_outcome_proxies,
+            proxy_mean=proxy_mean,
+            alpha=alpha,
         )
         treated_lb, treated_ub = self.treated_estimator.sensitivity_analysis(
-            gamma=gamma
+            gamma=gamma,
+            outcome_proxies=treated_outcome_proxies,
+            proxy_mean=proxy_mean,
+            alpha=alpha,
         )
 
         return treated_lb - control_ub, treated_ub - control_lb
@@ -1163,7 +1194,13 @@ class TreatmentEffectRatioEstimator(WeightingEstimator):
             - (2.0 * mu_num / (mu_den**3.0)) * cov_num_den
         )
 
-    def sensitivity_analysis(self, gamma: float = 6.0) -> tuple[float, float]:
+    def sensitivity_analysis(
+        self,
+        gamma: float = 6.0,
+        outcome_proxies: list[float] | npt.NDArray[np.float64] | None = None,
+        proxy_mean: float | None = None,
+        alpha: float = 0.10,
+    ) -> tuple[float, float]:
         """Not implemented."""
         raise NotImplementedError(
             "Sensitivity analysis is not implemented for TreatmentEffectRatioEstimator."

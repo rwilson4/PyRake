@@ -1541,3 +1541,119 @@ class TestTreatmentEffectRatioEstimator:
         lower, upper = estimator.confidence_interval(alpha=0.05, alternative="less")
         assert upper == pytest.approx(pe + z * se, rel=1e-12)
         assert lower == -np.inf
+
+
+class TestOutcomeProxyTreatmentEffect:
+    """Tests for outcome-proxy-constrained sensitivity analysis in treatment-effect estimators."""
+
+    @staticmethod
+    def _make_proxies(
+        control_outcomes: npt.NDArray[np.float64],
+        treated_outcomes: npt.NDArray[np.float64],
+        seed: int = 11,
+        noise_scale: float = 0.05,
+    ) -> tuple[
+        npt.NDArray[np.float64],
+        npt.NDArray[np.float64],
+        float,
+    ]:
+        """Return (control_proxies, treated_proxies, proxy_mean)."""
+        rng = np.random.default_rng(seed)
+        ctrl_proxies = control_outcomes + noise_scale * rng.standard_normal(
+            len(control_outcomes)
+        )
+        trt_proxies = treated_outcomes + noise_scale * rng.standard_normal(
+            len(treated_outcomes)
+        )
+        all_proxies = np.concatenate([ctrl_proxies, trt_proxies])
+        proxy_mean = float(np.mean(all_proxies))
+        return ctrl_proxies, trt_proxies, proxy_mean
+
+    @staticmethod
+    def test_treatment_effect_proxy_tightens_interval() -> None:
+        """Proxy-constrained TreatmentEffectEstimator interval is contained in unconstrained."""
+        (
+            control_propensities,
+            control_outcomes,
+            _,
+            _,
+            _,
+            treated_propensities,
+            treated_outcomes,
+            _,
+            _,
+            _,
+        ) = TestATEEstimator.get_data()
+
+        estimator = TreatmentEffectEstimator(
+            control_estimator=SIPWEstimator(
+                propensity_scores=control_propensities,
+                outcomes=control_outcomes,
+            ),
+            treated_estimator=SIPWEstimator(
+                propensity_scores=treated_propensities,
+                outcomes=treated_outcomes,
+            ),
+        )
+
+        gamma = 3.0
+        ctrl_proxies, trt_proxies, proxy_mean = (
+            TestOutcomeProxyTreatmentEffect._make_proxies(
+                control_outcomes, treated_outcomes
+            )
+        )
+
+        lb0, ub0 = estimator.sensitivity_analysis(gamma=gamma)
+        lb1, ub1 = estimator.sensitivity_analysis(
+            gamma=gamma,
+            control_outcome_proxies=ctrl_proxies,
+            treated_outcome_proxies=trt_proxies,
+            proxy_mean=proxy_mean,
+        )
+
+        # Constrained interval is a subset of unconstrained.
+        assert lb1 >= lb0 - 1e-10
+        assert ub1 <= ub0 + 1e-10
+        assert ub1 - lb1 < ub0 - lb0
+
+    @staticmethod
+    def test_treatment_effect_proxy_gamma_one() -> None:
+        """gamma=1 returns point estimate regardless of proxy."""
+        (
+            control_propensities,
+            control_outcomes,
+            _,
+            _,
+            _,
+            treated_propensities,
+            treated_outcomes,
+            _,
+            _,
+            _,
+        ) = TestATEEstimator.get_data()
+
+        estimator = TreatmentEffectEstimator(
+            control_estimator=SIPWEstimator(
+                propensity_scores=control_propensities,
+                outcomes=control_outcomes,
+            ),
+            treated_estimator=SIPWEstimator(
+                propensity_scores=treated_propensities,
+                outcomes=treated_outcomes,
+            ),
+        )
+        ctrl_proxies, trt_proxies, proxy_mean = (
+            TestOutcomeProxyTreatmentEffect._make_proxies(
+                control_outcomes, treated_outcomes
+            )
+        )
+
+        lb, ub = estimator.sensitivity_analysis(
+            gamma=1.0,
+            control_outcome_proxies=ctrl_proxies,
+            treated_outcome_proxies=trt_proxies,
+            proxy_mean=proxy_mean,
+        )
+        pe = estimator.point_estimate()
+        assert lb == pytest.approx(pe, rel=1e-6)
+        assert ub == pytest.approx(pe, rel=1e-6)

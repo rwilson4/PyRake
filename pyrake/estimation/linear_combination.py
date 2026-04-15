@@ -4,6 +4,7 @@ from collections.abc import Generator
 from typing import Literal
 
 import numpy as np
+import numpy.typing as npt
 
 from .base_classes import WeightingEstimator
 
@@ -84,7 +85,13 @@ class LinearCombinationEstimator(WeightingEstimator):
                 ub_var += c**2 * e_lb_var
         return lb_var, ub_var
 
-    def sensitivity_analysis(self, gamma: float = 6.0) -> tuple[float, float]:
+    def sensitivity_analysis(
+        self,
+        gamma: float = 6.0,
+        outcome_proxies: list[float] | npt.NDArray[np.float64] | None = None,
+        proxy_mean: float | None = None,
+        alpha: float = 0.10,
+    ) -> tuple[float, float]:
         r"""Perform a sensitivity analysis.
 
         The analysis is separable across components. For coefficient c and component
