@@ -6,9 +6,9 @@ from typing import Any, Literal, Self
 
 import numpy as np
 import numpy.typing as npt
-from scipy import optimize
 
 from .base_classes import Estimand, SimpleEstimand, WeightingEstimator
+from .sensitivity_solvers import LinearFractionalProgramSolver
 
 
 class PopulationMean(SimpleEstimand):
@@ -1051,29 +1051,26 @@ class RatioEstimator(WeightingEstimator):
            University Press, 2004.
 
         """
+        if gamma < 1.0:
+            raise ValueError("`gamma` must be >= 1")
+
+        if gamma == 1.0:
+            return self.point_estimate(), self.point_estimate()
+
         weights = self.weights
         wl = weights / math.sqrt(gamma) + (1.0 - 1.0 / math.sqrt(gamma))
         wu = weights * math.sqrt(gamma) - (math.sqrt(gamma) - 1.0)
-        G = np.vstack([-np.eye(len(weights)), np.eye(len(weights))])
-        h = np.concatenate([-wl, wu])
 
-        lb_res = optimize.linprog(
-            c=np.append(self.numerator_estimator.outcomes, 0),
-            A_ub=np.hstack([G, -h.reshape(-1, 1)]),
-            b_ub=np.zeros_like(h),
-            A_eq=np.append(self.denominator_estimator.outcomes, 0).reshape(1, -1),
-            b_eq=np.array([1]),
-        )
+        x_num = self.numerator_estimator.outcomes
+        y_den = self.denominator_estimator.outcomes
 
-        ub_res = optimize.linprog(
-            c=np.append(-self.numerator_estimator.outcomes, 0),
-            A_ub=np.hstack([G, -h.reshape(-1, 1)]),
-            b_ub=np.zeros_like(h),
-            A_eq=np.append(self.denominator_estimator.outcomes, 0).reshape(1, -1),
-            b_eq=np.array([1]),
-        )
+        lb_solver = LinearFractionalProgramSolver(c=x_num, y=y_den, wl=wl, wu=wu)
+        ub_solver = LinearFractionalProgramSolver(c=-x_num, y=y_den, wl=wl, wu=wu)
 
-        return lb_res.fun, -ub_res.fun
+        lb_res = lb_solver.solve(x0=lb_solver.x0)
+        ub_res = ub_solver.solve(x0=ub_solver.x0)
+
+        return lb_res.objective_value, -ub_res.objective_value
 
     def resample(
         self,
