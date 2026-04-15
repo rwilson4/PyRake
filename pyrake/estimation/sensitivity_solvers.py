@@ -190,6 +190,20 @@ class LinearFractionalProgramSolver(
         bottom = np.hstack([np.eye(n), -self.wu.reshape(-1, 1)])
         return np.vstack([top, bottom])
 
+    def grad_constraints_multiply(
+        self,
+        x: npt.NDArray[np.float64],
+        v: npt.NDArray[np.float64],
+    ) -> npt.NDArray[np.float64]:
+        r"""Compute J @ v without forming the full (2n, n+1) Jacobian.
+
+        For v = [v_w; v_s] where v_w has length n and v_s is a scalar:
+            (J v)[:n] = -v_w + v_s * wl
+            (J v)[n:] =  v_w - v_s * wu
+        """
+        v_w, v_s = v[:-1], v[-1]
+        return np.concatenate([-v_w + v_s * self.wl, v_w - v_s * self.wu])
+
     def grad_constraints_transpose_multiply(
         self,
         x: npt.NDArray[np.float64],
