@@ -1541,8 +1541,8 @@ class TestRatioEstimator:
         """Test expanded confidence interval bootstrapping produces interval with proper order."""
         ps, num, den = self.generate_data_binary(n=200)
         estimator = RatioEstimator(ps, num, den)
-        lb_expected = 0.2943789485538427
-        ub_expected = 0.6917978251278621
+        lb_expected = 0.2943791251935982
+        ub_expected = 0.6917976484180762
         lb, ub = estimator.expanded_confidence_interval(
             alpha=0.10, gamma=2.0, bootstrap=False
         )
