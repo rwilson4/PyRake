@@ -321,7 +321,7 @@ class LinearFractionalProgramSolver(
         x: npt.NDArray[np.float64],
         delta_x: npt.NDArray[np.float64],
     ) -> float:
-        """Compute the largest step s <= 1.0 such that x + s*delta_x is strictly feasible.
+        """Compute the largest step such that x + s*delta_x is strictly feasible.
 
         Feasibility requires alpha_i(x + s*dx) > 0 and beta_i(x + s*dx) > 0:
             alpha_i + s * d_alpha_i > 0,  where d_alpha_i = dw_i - wl_i * ds
@@ -336,7 +336,7 @@ class LinearFractionalProgramSolver(
         d_alpha = dw - self.wl * ds
         d_beta = self.wu * ds - dw
 
-        max_step = 1.0
+        max_step = np.inf
         mask_alpha = d_alpha < 0
         if np.any(mask_alpha):
             max_step = min(
@@ -349,4 +349,4 @@ class LinearFractionalProgramSolver(
                 max_step, float(np.min(beta[mask_beta] / (-d_beta[mask_beta])))
             )
 
-        return 0.99 * max_step
+        return max_step
