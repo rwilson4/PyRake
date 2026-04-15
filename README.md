@@ -82,9 +82,13 @@ covariate balance imposed by the equality constraints. In this case,
 we don't require exact covariate balance, but we insist that no
 covariate is imbalanced worse than the amount implied by $` \psi. `$
 
-PyRake can also be used to solve a sequence of these problems, with
-varying $` \phi `$. This allows the user to visualize the bias/variance
-tradeoff.
+PyRake can also trace the full Pareto frontier between the two extreme
+solutions: the weights that minimize $` D(w, v) `$ (staying as close as
+possible to the baseline, regardless of variance) and the weights that
+minimize $` (1/M) \| w \|_2^2 `$ (minimum variance, regardless of
+distance). The frontier makes the bias/variance tradeoff explicit and
+identifies the "knee" — the point of maximum curvature where further
+variance reduction comes at the steepest cost in bias.
 
 ![Bias-Variance Tradeoff](docs/efficient_frontier.png)
 
@@ -271,6 +275,9 @@ rake = Rake(
 frontier = EfficientFrontier(rake)
 res = frontier.trace()
 res.plot()
+
+knee = res.knee()       # FrontierPoint at the "elbow" of the curve
+weights = knee.solution
 ```
 
 ### Estimation
