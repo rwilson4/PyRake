@@ -286,12 +286,32 @@ class LinearFractionalProgramSolver(
         nu: npt.NDArray[np.float64],
         x_star: npt.NDArray[np.float64],
     ) -> float:
-        """Evaluate the Lagrangian at (x_star, lmbda, nu) as the dual value."""
-        return float(
-            self.evaluate_objective(x_star)
-            + lmbda @ self.constraints(x_star)
-            + nu @ (self._A @ x_star - self._b)
-        )
+        r"""Evaluate the dual function g(lmbda, nu).
+
+        The Lagrangian is linear in (w, s):
+
+            L = c^T w + lmbda1^T(wl*s - w) + lmbda2^T(w - wu*s) + nu*(y^T w - 1)
+
+        Collecting coefficients:
+            coeff_w_j = c_j - lmbda1_j + lmbda2_j + nu * y_j
+            coeff_s   = wl^T lmbda1 - wu^T lmbda2
+
+        The infimum of a linear function over all (w, s) is -inf unless
+        both coefficient vectors are zero; when stationarity holds the dual
+        collapses to the constant term g = -nu.
+        """
+        n = len(self.c)
+        lmbda1, lmbda2 = lmbda[:n], lmbda[n:]
+        nu_scalar = float(nu[0])
+
+        coeff_w = self.c - lmbda1 + lmbda2 + nu_scalar * self.y
+        coeff_s = float(self.wl @ lmbda1 - self.wu @ lmbda2)
+
+        tol = 1e-6
+        if np.max(np.abs(coeff_w)) > tol or abs(coeff_s) > tol:
+            return -np.inf
+
+        return -nu_scalar
 
     # ------------------------------------------------------------------
     # Backtracking line search
