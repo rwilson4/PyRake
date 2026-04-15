@@ -1,4 +1,4 @@
-"""Test EfficientFrontier."""
+"""Test EfficientFrontier and ImbalanceVarianceFrontier."""
 
 import time
 
@@ -7,7 +7,7 @@ import pytest
 from scipy.special import expit, logit
 
 from pyrake.calibration.distance_metrics import KLDivergence
-from pyrake.calibration.frontier import EfficientFrontier
+from pyrake.calibration.frontier import EfficientFrontier, ImbalanceVarianceFrontier
 from pyrake.calibration.rake import Rake
 
 
@@ -89,3 +89,60 @@ def test_frontier(seed: int, M: int, p: int) -> None:
     # 80/20 rule -- more like 70/30 in our case
     assert variance_reduction > 0.7
     assert bias_increase < 0.3
+
+
+@pytest.mark.parametrize(
+    "seed,M,p,q",
+    [
+        (101, 100, 10, 5),
+        (201, 200, 15, 8),
+        (301, 50, 5, 3),
+        (401, 300, 20, 10),
+    ],
+)
+def test_imbalance_variance_frontier(seed: int, M: int, p: int, q: int) -> None:
+    """Test ImbalanceVarianceFrontier."""
+    np.random.seed(seed)
+    X = np.random.rand(M, p)
+    Z = np.random.rand(M, q)
+
+    # Simulate propensity scores and compute population means
+    s = 0.1 * (1 - 0.1) / (0.05 * 0.1 * (1 - 0.1)) - 1
+    true_propensity = np.random.beta(0.1 * s, 0.9 * s, size=M)
+    w_true = 1.0 / true_propensity
+    w_true /= np.mean(w_true)
+
+    mu = (1 / M) * (X.T @ w_true)
+    nu = (1 / M) * (Z.T @ w_true)
+
+    estimated_propensity = expit(logit(true_propensity) + 0.1 * np.random.randn(M))
+
+    rake = Rake(
+        distance=KLDivergence(v=1.0 / estimated_propensity),
+        X=X,
+        mu=mu,
+        Z=Z,
+        nu=nu,
+    )
+
+    frontier = ImbalanceVarianceFrontier(rake)
+    start_time = time.time()
+    ivfr = frontier.trace()
+    end_time = time.time()
+    print(f"Complete in {1e3 * (end_time - start_time):.03f} ms")
+
+    # Convenience properties are sorted by imbalance ascending.
+    assert ivfr.imbalances[0] <= ivfr.imbalances[-1]
+
+    # Variance increases as imbalance bound tightens.
+    assert ivfr.variances[0] >= ivfr.variances[-1]
+
+    # corners[0] minimizes variance; corners[1] minimizes imbalance.
+    assert ivfr.corners[0].objectives[0] <= ivfr.corners[1].objectives[0]
+    assert ivfr.corners[1].objectives[1] <= ivfr.corners[0].objectives[1]
+
+    # knee() satisfies equality constraints and positivity.
+    knee = ivfr.knee()
+    weights = knee.solution
+    np.testing.assert_allclose((1 / M) * (X.T @ weights), mu, atol=1e-4)
+    assert np.all(weights >= 0)
