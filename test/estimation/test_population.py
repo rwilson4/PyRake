@@ -1577,3 +1577,200 @@ class TestRatioEstimator:
         assert set(df.columns) == set(expected_columns)
         assert len(df) == 50
         plt.close("all")
+
+
+class TestOutcomeProxySensitivity:
+    """Tests for outcome-proxy-constrained sensitivity analysis."""
+
+    @staticmethod
+    def _make_proxy(
+        outcomes: npt.NDArray[np.float64],
+        seed: int = 7,
+        noise_scale: float = 0.05,
+    ) -> tuple[npt.NDArray[np.float64], float]:
+        """Return (proxy, proxy_mean) where proxy = outcome + small noise."""
+        rng = np.random.default_rng(seed)
+        proxies = outcomes + noise_scale * rng.standard_normal(len(outcomes))
+        # Use the sample mean as a stand-in for the known population mean.
+        proxy_mean = float(np.mean(proxies))
+        return proxies, proxy_mean
+
+    # ------------------------------------------------------------------
+    # IPWEstimator
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def test_ipw_proxy_tightens_interval() -> None:
+        """Proxy-constrained IPW interval is contained in the unconstrained one."""
+        population_size, propensities, outcomes = TestIPWEstimator.get_data(
+            binary=False
+        )
+        estimator = IPWEstimator(
+            propensities, outcomes, population_size, estimand_class=PopulationMean
+        )
+        gamma = 4.0
+        proxies, proxy_mean = TestOutcomeProxySensitivity._make_proxy(outcomes)
+
+        lb0, ub0 = estimator.sensitivity_analysis(gamma=gamma)
+        lb1, ub1 = estimator.sensitivity_analysis(
+            gamma=gamma, outcome_proxies=proxies, proxy_mean=proxy_mean
+        )
+
+        # Proxy interval must be a subset of the unconstrained interval.
+        assert lb1 >= lb0 - 1e-10
+        assert ub1 <= ub0 + 1e-10
+        # And strictly narrower (proxy is highly correlated with outcomes).
+        assert ub1 - lb1 < ub0 - lb0
+
+    @staticmethod
+    def test_ipw_proxy_gamma_one() -> None:
+        """gamma=1 returns the point estimate regardless of proxy."""
+        population_size, propensities, outcomes = TestIPWEstimator.get_data(
+            binary=False
+        )
+        estimator = IPWEstimator(
+            propensities, outcomes, population_size, estimand_class=PopulationMean
+        )
+        proxies, proxy_mean = TestOutcomeProxySensitivity._make_proxy(outcomes)
+        lb, ub = estimator.sensitivity_analysis(
+            gamma=1.0, outcome_proxies=proxies, proxy_mean=proxy_mean
+        )
+        pe = estimator.point_estimate()
+        assert lb == pytest.approx(pe)
+        assert ub == pytest.approx(pe)
+
+    @staticmethod
+    def test_ipw_proxy_missing_proxy_mean_raises() -> None:
+        """Providing outcome_proxies without proxy_mean raises ValueError."""
+        population_size, propensities, outcomes = TestIPWEstimator.get_data(
+            binary=False
+        )
+        estimator = IPWEstimator(
+            propensities, outcomes, population_size, estimand_class=PopulationMean
+        )
+        proxies, _ = TestOutcomeProxySensitivity._make_proxy(outcomes)
+        with pytest.raises(ValueError, match="proxy_mean"):
+            estimator.sensitivity_analysis(gamma=4.0, outcome_proxies=proxies)
+
+    # ------------------------------------------------------------------
+    # AIPWEstimator
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def test_aipw_proxy_tightens_interval() -> None:
+        """Proxy-constrained AIPW interval is contained in the unconstrained one."""
+        (
+            population_size,
+            propensities,
+            outcomes,
+            predicted_outcomes,
+            mean_predicted_outcome,
+        ) = TestAIPWEstimator.get_data(binary=False)
+        estimator = AIPWEstimator(
+            propensities,
+            outcomes,
+            predicted_outcomes,
+            mean_predicted_outcome,
+            population_size,
+        )
+        gamma = 4.0
+        proxies, proxy_mean = TestOutcomeProxySensitivity._make_proxy(outcomes)
+
+        lb0, ub0 = estimator.sensitivity_analysis(gamma=gamma)
+        lb1, ub1 = estimator.sensitivity_analysis(
+            gamma=gamma, outcome_proxies=proxies, proxy_mean=proxy_mean
+        )
+
+        assert lb1 >= lb0 - 1e-10
+        assert ub1 <= ub0 + 1e-10
+        assert ub1 - lb1 < ub0 - lb0
+
+    # ------------------------------------------------------------------
+    # SIPWEstimator
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def test_sipw_proxy_tightens_interval_binary() -> None:
+        """Proxy-constrained SIPW interval is contained in the unconstrained one (binary)."""
+        propensities, outcomes = TestSIPWEstimator.get_data(binary=True)
+        estimator = SIPWEstimator(propensities, outcomes)
+        gamma = 4.0
+        proxies, proxy_mean = TestOutcomeProxySensitivity._make_proxy(
+            outcomes, noise_scale=0.02
+        )
+
+        lb0, ub0 = estimator.sensitivity_analysis(gamma=gamma)
+        lb1, ub1 = estimator.sensitivity_analysis(
+            gamma=gamma, outcome_proxies=proxies, proxy_mean=proxy_mean
+        )
+
+        assert lb1 >= lb0 - 1e-10
+        assert ub1 <= ub0 + 1e-10
+        assert ub1 - lb1 < ub0 - lb0
+
+    @staticmethod
+    def test_sipw_proxy_tightens_interval_continuous() -> None:
+        """Proxy-constrained SIPW interval is contained in the unconstrained one (continuous)."""
+        propensities, outcomes = TestSIPWEstimator.get_data(binary=False)
+        estimator = SIPWEstimator(propensities, outcomes)
+        gamma = 4.0
+        proxies, proxy_mean = TestOutcomeProxySensitivity._make_proxy(outcomes)
+
+        lb0, ub0 = estimator.sensitivity_analysis(gamma=gamma)
+        lb1, ub1 = estimator.sensitivity_analysis(
+            gamma=gamma, outcome_proxies=proxies, proxy_mean=proxy_mean
+        )
+
+        assert lb1 >= lb0 - 1e-10
+        assert ub1 <= ub0 + 1e-10
+        assert ub1 - lb1 < ub0 - lb0
+
+    @staticmethod
+    def test_sipw_proxy_gamma_one() -> None:
+        """gamma=1 returns the point estimate regardless of proxy."""
+        propensities, outcomes = TestSIPWEstimator.get_data(binary=False)
+        estimator = SIPWEstimator(propensities, outcomes)
+        proxies, proxy_mean = TestOutcomeProxySensitivity._make_proxy(outcomes)
+        lb, ub = estimator.sensitivity_analysis(
+            gamma=1.0, outcome_proxies=proxies, proxy_mean=proxy_mean
+        )
+        pe = estimator.point_estimate()
+        assert lb == pytest.approx(pe)
+        assert ub == pytest.approx(pe)
+
+    @staticmethod
+    def test_sipw_proxy_missing_proxy_mean_raises() -> None:
+        """Providing outcome_proxies without proxy_mean raises ValueError."""
+        propensities, outcomes = TestSIPWEstimator.get_data(binary=False)
+        estimator = SIPWEstimator(propensities, outcomes)
+        proxies, _ = TestOutcomeProxySensitivity._make_proxy(outcomes)
+        with pytest.raises(ValueError, match="proxy_mean"):
+            estimator.sensitivity_analysis(gamma=4.0, outcome_proxies=proxies)
+
+    # ------------------------------------------------------------------
+    # SAIPWEstimator
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def test_saipw_proxy_tightens_interval() -> None:
+        """Proxy-constrained SAIPW interval is contained in the unconstrained one."""
+        (
+            propensities,
+            outcomes,
+            predicted_outcomes,
+            mean_predicted_outcome,
+        ) = TestSAIPWEstimator.get_data(binary=False)
+        estimator = SAIPWEstimator(
+            propensities, outcomes, predicted_outcomes, mean_predicted_outcome
+        )
+        gamma = 4.0
+        proxies, proxy_mean = TestOutcomeProxySensitivity._make_proxy(outcomes)
+
+        lb0, ub0 = estimator.sensitivity_analysis(gamma=gamma)
+        lb1, ub1 = estimator.sensitivity_analysis(
+            gamma=gamma, outcome_proxies=proxies, proxy_mean=proxy_mean
+        )
+
+        assert lb1 >= lb0 - 1e-10
+        assert ub1 <= ub0 + 1e-10
+        assert ub1 - lb1 < ub0 - lb0

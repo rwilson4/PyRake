@@ -6,6 +6,8 @@ from typing import Any, Literal, Self
 
 import numpy as np
 import numpy.typing as npt
+from scipy import stats
+from scipy.optimize import linprog
 
 from .base_classes import Estimand, SimpleEstimand, WeightingEstimator
 from .sensitivity_solvers import LinearFractionalProgramSolver
@@ -370,7 +372,13 @@ class IPWEstimator(MeanEstimator):
         )
         return lb_var, ub_var
 
-    def sensitivity_analysis(self, gamma: float = 6.0) -> tuple[float, float]:
+    def sensitivity_analysis(
+        self,
+        gamma: float = 6.0,
+        outcome_proxies: list[float] | npt.NDArray[np.float64] | None = None,
+        proxy_mean: float | None = None,
+        alpha: float = 0.10,
+    ) -> tuple[float, float]:
         r"""Perform a sensitivity analysis.
 
         Calculate a range of point estimates implied by the Gamma factor.
@@ -380,6 +388,22 @@ class IPWEstimator(MeanEstimator):
          gamma : float, optional
             The Gamma factor. Must be >= 1.0, with 1.0 indicating perfect propensity
             scores. Defaults to 6. See Notes.
+         outcome_proxies : array_like, optional
+            A proxy for the outcome, observed for every unit in the sample. When
+            supplied together with ``proxy_mean``, an additional constraint is added
+            to the sensitivity region: the IPW estimate of the proxy mean must lie
+            within ``tol`` of ``proxy_mean``, where ``tol = z_crit * SE`` (the same
+            half-width as ``confidence_interval``). Weights that violate this
+            constraint are excluded from the sensitivity region, typically reducing
+            the width of the sensitivity interval. Must have the same length as
+            ``outcomes``. Requires ``proxy_mean`` to also be specified.
+         proxy_mean : float, optional
+            Known population mean of the outcome proxy. Requires ``outcome_proxies``
+            to also be specified.
+         alpha : float, optional
+            Significance level used to compute the proxy tolerance
+            ``tol = stats.norm.isf(alpha / 2) * sqrt(variance())``. Defaults to
+            0.10, matching the default of ``confidence_interval``.
 
         Returns
         -------
@@ -388,9 +412,11 @@ class IPWEstimator(MeanEstimator):
 
         Notes
         -----
-        See the Notes in WeightingEstimator for overall context. In our case, there is a
-        simple closed-form calculation for the sensitivity interval. See (Wilson 2025)
-        for details.
+        See the Notes in WeightingEstimator for overall context. Without an outcome
+        proxy there is a simple closed-form calculation for the sensitivity interval.
+        See (Wilson 2025) for details. When an outcome proxy is supplied, the
+        constrained optimisation is solved as a linear programme via
+        ``scipy.optimize.linprog``.
 
         References
         ----------
@@ -398,6 +424,11 @@ class IPWEstimator(MeanEstimator):
            Sampling." https://adventuresinwhy.com/post/survey_sampling/
 
         """
+        if (outcome_proxies is None) != (proxy_mean is None):
+            raise ValueError(
+                "`outcome_proxies` and `proxy_mean` must be provided together."
+            )
+
         if gamma < 1.0:
             raise ValueError("`gamma` must be >= 1")
 
@@ -405,12 +436,42 @@ class IPWEstimator(MeanEstimator):
             return self.point_estimate(), self.point_estimate()
 
         wl, wu = self.estimand.sensitivity_region(gamma)
-        lb = np.where(self.outcomes >= 0, wl, wu)
-        ub = np.where(self.outcomes >= 0, wu, wl)
-        return (
-            np.sum(self.outcomes * lb) / self.population_size,
-            np.sum(self.outcomes * ub) / self.population_size,
+
+        if outcome_proxies is None:
+            # Closed-form: element-wise weight selection.
+            lb = np.where(self.outcomes >= 0, wl, wu)
+            ub = np.where(self.outcomes >= 0, wu, wl)
+            return (
+                np.sum(self.outcomes * lb) / self.population_size,
+                np.sum(self.outcomes * ub) / self.population_size,
+            )
+
+        # LP formulation with proxy constraint.
+        p = np.asarray(outcome_proxies, dtype=float)
+        pm = float(proxy_mean)  # type: ignore[arg-type]
+        zcrit = stats.norm.isf(alpha / 2)
+        tol = zcrit * math.sqrt(self.variance())
+        N = self.population_size
+
+        # Proxy constraint: N*(pm - tol) <= p^T w <= N*(pm + tol)
+        A_ub = np.vstack([p, -p])
+        b_ub = np.array([N * (pm + tol), -N * (pm - tol)])
+        bounds = list(zip(wl.tolist(), wu.tolist(), strict=True))
+
+        lb_res = linprog(
+            c=self.outcomes, A_ub=A_ub, b_ub=b_ub, bounds=bounds, method="highs"
         )
+        ub_res = linprog(
+            c=-self.outcomes, A_ub=A_ub, b_ub=b_ub, bounds=bounds, method="highs"
+        )
+
+        if lb_res.status != 0 or ub_res.status != 0:
+            raise ValueError(
+                "Proxy constraints are infeasible: no weight vector in the "
+                "sensitivity region is consistent with the supplied proxy_mean."
+            )
+
+        return float(lb_res.fun) / N, float(-ub_res.fun) / N
 
 
 class AIPWEstimator(IPWEstimator):
@@ -515,7 +576,13 @@ class AIPWEstimator(IPWEstimator):
             / (len(self.weights) - 1)
         )
 
-    def sensitivity_analysis(self, gamma: float = 6.0) -> tuple[float, float]:
+    def sensitivity_analysis(
+        self,
+        gamma: float = 6.0,
+        outcome_proxies: list[float] | npt.NDArray[np.float64] | None = None,
+        proxy_mean: float | None = None,
+        alpha: float = 0.10,
+    ) -> tuple[float, float]:
         r"""Perform a sensitivity analysis.
 
         Calculate a range of point estimates implied by the Gamma factor.
@@ -525,6 +592,14 @@ class AIPWEstimator(IPWEstimator):
          gamma : float, optional
             The Gamma factor. Must be >= 1.0, with 1.0 indicating perfect propensity
             scores. Defaults to 6. See Notes.
+         outcome_proxies : array_like, optional
+            A proxy for the outcome with a known population mean. See
+            ``IPWEstimator.sensitivity_analysis`` for details. The proxy constraint
+            applies to the same (AIPW) weights.
+         proxy_mean : float, optional
+            Known population mean of the outcome proxy.
+         alpha : float, optional
+            Significance level for the proxy tolerance. Defaults to 0.10.
 
         Returns
         -------
@@ -549,7 +624,12 @@ class AIPWEstimator(IPWEstimator):
         if gamma == 1.0:
             return self.point_estimate(), self.point_estimate()
 
-        lb, ub = super().sensitivity_analysis(gamma=gamma)
+        lb, ub = super().sensitivity_analysis(
+            gamma=gamma,
+            outcome_proxies=outcome_proxies,
+            proxy_mean=proxy_mean,
+            alpha=alpha,
+        )
         return (
             self.mean_predicted_outcome + lb,
             self.mean_predicted_outcome + ub,
@@ -750,17 +830,41 @@ class SIPWEstimator(MeanEstimator):
         )
         return lb_var, ub_var
 
-    def sensitivity_analysis(self, gamma: float = 6.0) -> tuple[float, float]:
+    def sensitivity_analysis(
+        self,
+        gamma: float = 6.0,
+        outcome_proxies: list[float] | npt.NDArray[np.float64] | None = None,
+        proxy_mean: float | None = None,
+        alpha: float = 0.10,
+    ) -> tuple[float, float]:
         r"""Perform a sensitivity analysis.
 
         Calculate a range of point estimates implied by the Gamma factor.
-        See ``_sensitivity_weights`` for the algorithm.
+        See ``_sensitivity_weights`` for the unconstrained algorithm.
 
         Parameters
         ----------
          gamma : float, optional
             The Gamma factor. Must be >= 1.0, with 1.0 indicating perfect propensity
             scores. Defaults to 6. See Notes in WeightingEstimator.
+         outcome_proxies : array_like, optional
+            A proxy for the outcome with a known population mean. When supplied
+            together with ``proxy_mean``, an additional constraint is added to the
+            sensitivity region: the SIPW estimate of the proxy mean must lie within
+            ``tol`` of ``proxy_mean``, where ``tol = z_crit * SE``. For the SIPW
+            estimator this is ``(w^T proxy) / (w^T 1) in [pm - tol, pm + tol]``,
+            which is linear after the Charnes-Cooper transformation. Weights that
+            violate this constraint are excluded from the sensitivity region,
+            typically reducing the width of the sensitivity interval. Must have the
+            same length as ``outcomes``. Requires ``proxy_mean`` to also be
+            specified.
+         proxy_mean : float, optional
+            Known population mean of the outcome proxy. Requires ``outcome_proxies``
+            to also be specified.
+         alpha : float, optional
+            Significance level for the proxy tolerance
+            ``tol = stats.norm.isf(alpha / 2) * sqrt(variance())``. Defaults to
+            0.10, matching the default of ``confidence_interval``.
 
         Returns
         -------
@@ -768,17 +872,82 @@ class SIPWEstimator(MeanEstimator):
             Lower and upper bounds on the point estimate.
 
         """
+        if (outcome_proxies is None) != (proxy_mean is None):
+            raise ValueError(
+                "`outcome_proxies` and `proxy_mean` must be provided together."
+            )
+
         if gamma < 1.0:
             raise ValueError("`gamma` must be >= 1")
 
         if gamma == 1.0:
             return self.point_estimate(), self.point_estimate()
 
-        lb_weights, ub_weights = self._sensitivity_weights(gamma)
-        return (
-            np.dot(self.outcomes, lb_weights) / np.sum(lb_weights),
-            np.dot(self.outcomes, ub_weights) / np.sum(ub_weights),
+        if outcome_proxies is None:
+            lb_weights, ub_weights = self._sensitivity_weights(gamma)
+            return (
+                np.dot(self.outcomes, lb_weights) / np.sum(lb_weights),
+                np.dot(self.outcomes, ub_weights) / np.sum(ub_weights),
+            )
+
+        # Charnes-Cooper LP with proxy constraint.
+        wl, wu = self.estimand.sensitivity_region(gamma)
+        p = np.asarray(outcome_proxies, dtype=float)
+        pm = float(proxy_mean)  # type: ignore[arg-type]
+        zcrit = stats.norm.isf(alpha / 2)
+        tol = zcrit * math.sqrt(self.variance())
+        n = len(self.outcomes)
+
+        # Variables: x = [w_cc (n), s (1)]
+        # Objective: outcomes^T w_cc  (s has zero coefficient)
+        c_obj = np.append(self.outcomes, 0.0)
+
+        # Equality: sum(w_cc) = 1  →  [ones; 0] @ x = 1
+        A_eq = np.append(np.ones(n), 0.0).reshape(1, n + 1)
+        b_eq = np.array([1.0])
+
+        # Box inequalities: -w_cc + wl*s <= 0,  w_cc - wu*s <= 0
+        top = np.hstack([-np.eye(n), wl.reshape(-1, 1)])
+        bottom = np.hstack([np.eye(n), -wu.reshape(-1, 1)])
+
+        # Proxy constraints (after CC substitution; valid since sum(w_cc)=1):
+        # p^T w_cc <= pm + tol  →  (p - (pm+tol))^T w_cc <= 0
+        # p^T w_cc >= pm - tol  →  ((pm-tol) - p)^T w_cc <= 0
+        proxy_upper = np.append(p - (pm + tol), 0.0).reshape(1, n + 1)
+        proxy_lower = np.append((pm - tol) - p, 0.0).reshape(1, n + 1)
+
+        A_ub = np.vstack([top, bottom, proxy_upper, proxy_lower])
+        b_ub = np.zeros(2 * n + 2)
+
+        # Bounds: w_cc unconstrained (enforced by A_ub), s >= 0
+        bounds = [(-np.inf, np.inf)] * n + [(0.0, np.inf)]
+
+        lb_res = linprog(
+            c=c_obj,
+            A_ub=A_ub,
+            b_ub=b_ub,
+            A_eq=A_eq,
+            b_eq=b_eq,
+            bounds=bounds,
+            method="highs",
         )
+        ub_res = linprog(
+            c=-c_obj,
+            A_ub=A_ub,
+            b_ub=b_ub,
+            A_eq=A_eq,
+            b_eq=b_eq,
+            bounds=bounds,
+            method="highs",
+        )
+
+        if lb_res.status != 0 or ub_res.status != 0:
+            raise ValueError(
+                "Proxy constraints are infeasible: no weight vector in the "
+                "sensitivity region is consistent with the supplied proxy_mean."
+            )
+
+        return float(lb_res.fun), float(-ub_res.fun)
 
 
 class SAIPWEstimator(SIPWEstimator):
@@ -857,7 +1026,13 @@ class SAIPWEstimator(SIPWEstimator):
             * np.square(self.outcomes - super().point_estimate())
         ) / (np.sum(self.weights) ** 2)
 
-    def sensitivity_analysis(self, gamma: float = 6.0) -> tuple[float, float]:
+    def sensitivity_analysis(
+        self,
+        gamma: float = 6.0,
+        outcome_proxies: list[float] | npt.NDArray[np.float64] | None = None,
+        proxy_mean: float | None = None,
+        alpha: float = 0.10,
+    ) -> tuple[float, float]:
         r"""Perform a sensitivity analysis.
 
         Calculate a range of point estimates implied by the Gamma factor.
@@ -867,6 +1042,14 @@ class SAIPWEstimator(SIPWEstimator):
          gamma : float, optional
             The Gamma factor. Must be >= 1.0, with 1.0 indicating perfect propensity
             scores. Defaults to 6. See Notes.
+         outcome_proxies : array_like, optional
+            A proxy for the outcome with a known population mean. See
+            ``SIPWEstimator.sensitivity_analysis`` for details. The proxy constraint
+            applies to the same (SAIPW) weights.
+         proxy_mean : float, optional
+            Known population mean of the outcome proxy.
+         alpha : float, optional
+            Significance level for the proxy tolerance. Defaults to 0.10.
 
         Returns
         -------
@@ -884,7 +1067,12 @@ class SAIPWEstimator(SIPWEstimator):
         if gamma == 1.0:
             return self.point_estimate(), self.point_estimate()
 
-        lb, ub = super().sensitivity_analysis(gamma=gamma)
+        lb, ub = super().sensitivity_analysis(
+            gamma=gamma,
+            outcome_proxies=outcome_proxies,
+            proxy_mean=proxy_mean,
+            alpha=alpha,
+        )
         return (
             self.mean_predicted_outcome + lb,
             self.mean_predicted_outcome + ub,
@@ -1016,7 +1204,13 @@ class RatioEstimator(WeightingEstimator):
             ),
         )
 
-    def sensitivity_analysis(self, gamma: float = 6.0) -> tuple[float, float]:
+    def sensitivity_analysis(
+        self,
+        gamma: float = 6.0,
+        outcome_proxies: list[float] | npt.NDArray[np.float64] | None = None,
+        proxy_mean: float | None = None,
+        alpha: float = 0.10,
+    ) -> tuple[float, float]:
         r"""Perform a sensitivity analysis.
 
         Calculate a range of point estimates implied by the Gamma factor.
