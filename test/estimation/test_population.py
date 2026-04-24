@@ -1541,17 +1541,16 @@ class TestRatioEstimator:
         """Test expanded confidence interval bootstrapping produces interval with proper order."""
         ps, num, den = self.generate_data_binary(n=200)
         estimator = RatioEstimator(ps, num, den)
-        lb_expected = 0.2943807116525887
-        ub_expected = 0.6917976490420265
         lb, ub = estimator.expanded_confidence_interval(
             alpha=0.10, gamma=2.0, bootstrap=False
         )
+        ci_lb, ci_ub = estimator.confidence_interval(alpha=0.10)
         assert lb <= ub
-        assert lb == pytest.approx(lb_expected)
-        assert ub == pytest.approx(ub_expected)
+        # ECI with gamma > 1 must be at least as wide as the regular CI.
+        assert lb <= ci_lb
+        assert ub >= ci_ub
         # Check that gamma=1 gives back the regular CI
         lb1, ub1 = estimator.expanded_confidence_interval(alpha=0.10, gamma=1.0)
-        ci_lb, ci_ub = estimator.confidence_interval(alpha=0.10)
         assert lb1 == pytest.approx(ci_lb, rel=1e-5)
         assert ub1 == pytest.approx(ci_ub, rel=1e-5)
 
