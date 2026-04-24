@@ -17,8 +17,8 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "pytest>=8.3.5,<9",
-    "black>=25.1.0,<26",
+    "pytest>=9.0.3,<10",
+    "black>=26.3.1,<27",
     "ruff>=0.11.6,<0.12",
     "mypy>=1.14.0,<2",
     "pandas-stubs>=2.2.0,<3",
