@@ -44,6 +44,13 @@ def _update(self, result, t, best_primal, best_primal_subopt, best_dual):  # typ
     if best_primal is None:
         solves.append((self, []))
     linear = getattr(self, "_all_linear", lambda: None)()
+    x = np.asarray(result.solution)
+    fmax = eq_res = math.nan
+    if isinstance(self, bs._BarrierAdapter):
+        fmax = float(np.max(self.constraints(x)))
+        if self._equality is not None:
+            eq_res = float(np.max(np.abs(self.A @ x - self.b)))
+    subopts = result.suboptimalities
     solves[-1][1].append(
         {
             "f": float(result.objective_value),
@@ -51,6 +58,11 @@ def _update(self, result, t, best_primal, best_primal_subopt, best_dual):  # typ
             "m_over_t": self.num_ineq_constraints / t,
             "linear": linear,
             "residual": getattr(self, "_probe_residual", math.nan),
+            "fmax": fmax,
+            "eq_res": eq_res,
+            "nits": result.nits,
+            "status": result.status,
+            "subopt": float(subopts[-1]) if len(subopts) else math.nan,
         }
     )
     return _orig_update(self, result, t, best_primal, best_primal_subopt, best_dual)
@@ -77,12 +89,17 @@ def main() -> int:
             continue
         violations += len(bad)
         print(f"\nsolve {k}: weak duality violated at step(s) {[j + 1 for j in bad]}")
-        print("step  objective            dual                 m/t        linear  max|grad L|")
+        print(
+            "step  objective            dual                 m/t        linear  "
+            "max|grad L|  max f_i    |Ax-b|     nits  st  subopt"
+        )
         for j, s in enumerate(steps):
             mark = " <-" if j in bad else ""
             print(
                 f"{j + 1:>4}  {s['f']:<19.13g}  {s['g']:<19.13g}  "
-                f"{s['m_over_t']:<9.3g}  {s['linear']!s:<6}  {s['residual']:.3g}{mark}"
+                f"{s['m_over_t']:<9.3g}  {s['linear']!s:<6}  {s['residual']:<11.3g}  "
+                f"{s['fmax']:<9.3g}  {s['eq_res']:<9.3g}  {s['nits']:>4}  "
+                f"{s['status']:>2}  {s['subopt']:.3g}{mark}"
             )
     print(f"\n{violations} violating steps")
     return 0
