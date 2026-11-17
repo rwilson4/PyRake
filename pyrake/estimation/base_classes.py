@@ -1,9 +1,11 @@
 """Base classes for estimation."""
 
+from __future__ import annotations
+
 import math
-from abc import ABC, abstractmethod, abstractproperty
+from abc import ABC, abstractmethod
 from collections.abc import Generator
-from typing import Literal, Self
+from typing import Literal
 
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
@@ -19,64 +21,142 @@ from scipy import stats
 class Estimand(ABC):
     """Base class for things that can be estimated."""
 
-    @abstractproperty
+    @property
+    @abstractmethod
     def weights(self) -> npt.NDArray[np.float64]:
-        """Calculate weights based on propensity scores."""
-        pass
+        """Calculate weights based on propensity scores.
+
+        Returns
+        -------
+         weights : (M,) ``npt.NDArray[np.float64]``
+            Weight for each of the ``M`` sample members.
+
+        """
+        ...
 
     @abstractmethod
     def sensitivity_region(
         self,
         gamma: float,
     ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
-        """Calculate a sensitivity region around baseline weights."""
+        """Calculate a sensitivity region around baseline weights.
+
+        Parameters
+        ----------
+         gamma : float
+            The Gamma factor. Must be >= 1.0.
+
+        Returns
+        -------
+         lower, upper : (M,) ``npt.NDArray[np.float64]``
+            Elementwise lower and upper weight bounds.
+
+        """
         pass
 
     @abstractmethod
-    def resample(self, bootstrap_indices: npt.NDArray[np.int64]) -> Self:
-        """Create a new Estimand object based on resampled indices."""
+    def resample(self, bootstrap_indices: npt.NDArray[np.int64]) -> Estimand:
+        """Create a new Estimand object based on resampled indices.
+
+        Parameters
+        ----------
+         bootstrap_indices : (B,) ``npt.NDArray[np.int64]``
+            Row positions to retain in the resampled estimand.
+
+        Returns
+        -------
+         estimand : ``Estimand``
+            New estimand built from the indexed rows.
+
+        """
         pass
 
     @staticmethod
     @abstractmethod
     def normalizing_factor(sample_size: int, population_size: int) -> float:
-        """Calculate normalizing factor."""
+        """Calculate normalizing factor.
+
+        Parameters
+        ----------
+         sample_size : int
+            Number of units in the sample.
+         population_size : int
+            Number of units in the target population.
+
+        Returns
+        -------
+         factor : float
+            Multiplicative factor mapping sample totals to population totals.
+
+        """
 
 
 class SimpleEstimand(Estimand):
-    """Simple estimands."""
+    """Estimand determined by a single vector of propensity scores.
+
+    Parameters
+    ----------
+     propensity_scores : (M,) ``npt.NDArray[np.float64]``
+        Estimated response propensity for each of the ``M`` sample members.
+
+    """
 
     def __init__(self, propensity_scores: npt.NDArray[np.float64]) -> None:
         self.propensity_scores = propensity_scores
 
-    def resample(self, bootstrap_indices: npt.NDArray[np.int64]) -> Self:
-        """Create a new Estimand object based on resampled indices."""
+    def resample(self, bootstrap_indices: npt.NDArray[np.int64]) -> SimpleEstimand:
+        """Create a new Estimand object based on resampled indices.
+
+        Parameters
+        ----------
+         bootstrap_indices : (B,) ``npt.NDArray[np.int64]``
+            Row positions to retain in the resampled estimand.
+
+        Returns
+        -------
+         estimand : ``SimpleEstimand``
+            New estimand of the same class built from the indexed rows.
+
+        """
         return self.__class__(self.propensity_scores[bootstrap_indices])
 
 
 class WeightingEstimator(ABC):
-    """Base class for weighting estimators."""
+    """Estimator that reweights sample members to a target population."""
 
     @abstractmethod
     def point_estimate(self) -> float:
-        """Calculate a point estimate."""
+        """Calculate a point estimate.
+
+        Returns
+        -------
+         estimate : float
+            Estimated value of the target quantity.
+
+        """
 
     @abstractmethod
     def variance(self) -> float:
-        """Calculate the variance."""
+        """Calculate the variance.
+
+        Returns
+        -------
+         variance : float
+            Sampling variance of the point estimate.
+
+        """
 
     def _sensitivity_variance(self, gamma: float) -> tuple[float, float]:
         """Return variance evaluated at the worst-case sensitivity weights.
 
-        Returns ``(lb_var, ub_var)`` where ``lb_var`` is the variance at
-        the weights that achieve the lower sensitivity bound and ``ub_var``
-        is the variance at the weights that achieve the upper bound.
+        Returns ``(lb_var, ub_var)`` where ``lb_var`` is the variance at the weights
+        that achieve the lower sensitivity bound and ``ub_var`` is the variance at the
+        weights that achieve the upper bound.
 
-        The default falls back to the nominal variance for both bounds.
-        Subclasses that can identify the worst-case weight vectors override
-        this to implement the heuristic from (Wilson 2025, §3): minimize
-        the test-statistic numerator and use those same weights in the
-        denominator.
+        The default falls back to the nominal variance for both bounds. Subclasses that
+        can identify the worst-case weight vectors override this to implement the
+        heuristic from (Wilson 2025, §3): minimize the test-statistic numerator and use
+        those same weights in the denominator.
 
         Parameters
         ----------
@@ -105,7 +185,7 @@ class WeightingEstimator(ABC):
         proxy_mean: float | None = None,
         alpha: float = 0.10,
     ) -> tuple[float, float]:
-        r"""Perform a sensitivity analysis.
+        """Perform a sensitivity analysis.
 
         Calculate a range of point estimates implied by the Gamma factor.
 
@@ -114,30 +194,45 @@ class WeightingEstimator(ABC):
          gamma : float, optional
             The Gamma factor. Must be >= 1.0, with 1.0 indicating perfect propensity
             scores. Defaults to 6. See Notes.
+         outcome_proxies : array_like, optional
+            A proxy for the outcome with a known population mean. When supplied together
+            with ``proxy_mean``, the sensitivity region gains a constraint keeping the
+            proxy estimate within tolerance of ``proxy_mean``, which typically narrows
+            the interval. Defaults to None (no proxy constraint).
+         proxy_mean : float, optional
+            Known population mean of the outcome proxy. Must be supplied together with
+            ``outcome_proxies``. Defaults to None.
+         alpha : float, optional
+            Significance level for the proxy tolerance. Defaults to 0.10.
 
         Returns
         -------
          lb, ub : float
             Lower and upper bounds on the point estimate.
 
+        Raises
+        ------
+         ValueError
+            Raised by implementations when ``gamma`` < 1, when only one of
+            ``outcome_proxies`` and ``proxy_mean`` is supplied, or when the proxy
+            constraints admit no feasible weights.
+
         Notes
         -----
         (Zhao, Small, and Bhattarcharya 2019) posits a model:
-               1             pi_i / (1 - pi_i)
-            ------  < ------------------------------- < Lambda,
-            Lambda     \hat{pi}_i / (1 - \hat{pi}_i)
 
-        where pi_i is the true (typically unknown) propensity score for person i and
-        \hat{pi}_i is the estimated propensity score. That is, Lambda controls how
-        "wrong" the estimated propensity scores are. For sufficiently large values of
-        Lambda, this model will always hold, but we have no way of knowing what value of
-        Lambda is "good enough". So instead we recommend trying a variety of Lambda values
-        and plot the results.
+           1/Λ < (πᵢ / (1 - πᵢ)) / (π̂ᵢ / (1 - π̂ᵢ)) < Λ,
+
+        where πᵢ is the true (unknown) propensity score for person i and π̂ᵢ is its
+        estimate. That is, Λ controls how "wrong" the estimated propensity scores are.
+        For sufficiently large values of Λ, this model will always hold, but we have no
+        way of knowing what value of Λ is "good enough". So instead we recommend trying
+        a variety of Λ values and plot the results.
 
         As discussed in (Fogarty 2023), this model is connected to Rosenbaum's
-        sensitivity analysis via Lambda = sqrt(Gamma). To foster connection with that
-        work (and because lambda is a reserved keyword in python!), we take Gamma as
-        input to this calculation, and then calculate Lambda as sqrt(Gamma).
+        sensitivity analysis via Λ = √Γ. To foster connection with that work (and
+        because ``lambda`` is a reserved keyword in python!), we take Gamma as input to
+        this calculation, and then calculate Λ as √Γ.
 
         While no value of Gamma is guaranteed to be good enough, a value of Gamma=6 is a
         good candidate for default reporting. In his work on sensitivity analysis, Paul
@@ -148,7 +243,7 @@ class WeightingEstimator(ABC):
 
         The constraint on the propensity scores translates into a constraint on the
         weights, but this depends on the estimator. The "true" weights satisfy:
-            wli <= w_i <= wui.
+           wlᵢ ≤ wᵢ ≤ wuᵢ.
 
         (Zhao, Small, and Bhattarcharya 2019) calculates the infimum and supremum of the
         estimator over this range of weights. Details vary depending on the estimator.
@@ -176,7 +271,7 @@ class WeightingEstimator(ABC):
             | np.random.BitGenerator
             | np.random.Generator
         ) = None,
-    ) -> Generator["WeightingEstimator", None, None]:
+    ) -> Generator[WeightingEstimator, None, None]:
         """Yield a sequence of B bootstrap-resampled estimators.
 
         Parameters
@@ -184,7 +279,12 @@ class WeightingEstimator(ABC):
          B : int
             Number of bootstrap replications.
          seed : int, list_like, etc
-            A seed for numpy.random.default_rng.
+            A seed for ``numpy.random.default_rng``.
+
+        Yields
+        ------
+         estimator : ``WeightingEstimator``
+            Bootstrap-resampled estimator.
 
         """
 
@@ -203,7 +303,7 @@ class WeightingEstimator(ABC):
             | np.random.Generator
         ) = None,
     ) -> tuple[float, float]:
-        r"""Calculate an expanded confidence interval.
+        """Calculate an expanded confidence interval.
 
         The expanded confidence interval combines uncertainty from stochastic sampling
         and from propensity scores estimated with error.
@@ -215,12 +315,13 @@ class WeightingEstimator(ABC):
             Defaults to 0.10, corresponding to a 90% confidence interval.
          gamma : float, optional
             The Gamma factor. Must be >= 1.0, with 1.0 indicating perfect propensity
-            scores. Defaults to 6. See Notes in `sensitivity_analysis`.
+            scores. Defaults to 6. See Notes in ``sensitivity_analysis``.
          alternative : ["two-sided", "less", "greater"], optional
             What kind of test:
-              - "two-sided": H0: theta = `null_value` vs Halt: theta <> `null_value`.
-              - "greater": H0: theta <= `null_value` vs Halt: theta > `null_value`.
-              - "less": H0: theta >= `null_value` vs Halt: theta < `null_value`.
+              - "two-sided": H0: theta = ``null_value`` vs Halt:
+                theta <> ``null_value``.
+              - "greater": H0: theta <= ``null_value`` vs Halt: theta > ``null_value``.
+              - "less": H0: theta >= ``null_value`` vs Halt: theta < ``null_value``.
             Defaults to "two-sided".
          bootstrap : bool, optional
             If True (default), use the percentile bootstrap (Zhao, Small, and
@@ -228,13 +329,14 @@ class WeightingEstimator(ABC):
             bounds. If False, use the normal approximation: the ECI is the sensitivity
             interval expanded by a multiple of the standard error on each side, where
             the standard error is evaluated at the worst-case sensitivity weights (the
-            heuristic from Wilson 2025, §3). See `adjusted_pvalue` for additional notes.
+            heuristic from Wilson 2025, §3). See ``adjusted_pvalue`` for additional
+            notes.
          B : int, optional
             Number of bootstrap replications to run. Ignored when ``bootstrap=False``.
             Defaults to 1_000.
          seed : int, list_like, etc
-            A seed for numpy.random.default_rng. Ignored when ``bootstrap=False``. See
-            that documentation for details.
+            A seed for ``numpy.random.default_rng``. Ignored when ``bootstrap=False``.
+            See that documentation for details.
 
         Returns
         -------
@@ -244,6 +346,11 @@ class WeightingEstimator(ABC):
               - "two-sided": lb and ub both finite
               - "greater": lb finite, ub = np.inf
               - "less": lb = -np.inf, ub finite
+
+        Raises
+        ------
+         ValueError
+            If ``gamma`` < 1 or ``alternative`` is not recognized.
 
         References
         ----------
@@ -269,20 +376,18 @@ class WeightingEstimator(ABC):
             else:
                 zcrit = stats.norm.isf(alpha)
 
-            if alternative == "greater" or alternative == "two-sided":
+            if alternative == "greater":
                 lb = float(sen_lb - zcrit * math.sqrt(lb_var))
-                if alternative == "greater":
-                    return lb, np.inf
-
-            if alternative == "less" or alternative == "two-sided":
+                return lb, np.inf
+            elif alternative == "less":
                 ub = float(sen_ub + zcrit * math.sqrt(ub_var))
-                if alternative == "less":
-                    return -np.inf, ub
-
-            if alternative == "two-sided":
+                return -np.inf, ub
+            elif alternative == "two-sided":
+                lb = float(sen_lb - zcrit * math.sqrt(lb_var))
+                ub = float(sen_ub + zcrit * math.sqrt(ub_var))
                 return lb, ub
-
-            raise ValueError(f"Unrecognized input {alternative=:}")
+            else:
+                raise ValueError(f"Unrecognized input {alternative=:}")
 
         lb_bootstrap = np.zeros(B)
         ub_bootstrap = np.zeros(B)
@@ -320,18 +425,24 @@ class WeightingEstimator(ABC):
             The hypothesized theta.
          alternative : ["two-sided", "less", "greater"], optional
             What kind of test:
-              - "two-sided": H0: theta = `null_value` vs Halt: theta <> `null_value`.
-              - "greater": H0: theta <= `null_value` vs Halt: theta > `null_value`.
-              - "less": H0: theta >= `null_value` vs Halt: theta < `null_value`.
-            For example, specifying alternative = "greater" returns a p-value that quantifies
-            the strength of evidence against the null hypothesis that theta is less than
-            `null_value`, in favor of the alternative hypothesis that theta is actually
-            greater than `null_value`. Defaults to "two-sided".
+              - "two-sided": H0: theta = ``null_value`` vs Halt:
+                theta <> ``null_value``.
+              - "greater": H0: theta <= ``null_value`` vs Halt: theta > ``null_value``.
+              - "less": H0: theta >= ``null_value`` vs Halt: theta < ``null_value``.
+            For example, specifying alternative = "greater" returns a p-value that
+            quantifies the strength of evidence against the null hypothesis that theta
+            is less than ``null_value``, in favor of the alternative hypothesis that
+            theta is actually greater than ``null_value``. Defaults to "two-sided".
 
         Returns
         -------
          p : float
             P-value.
+
+        Raises
+        ------
+         ValueError
+            If ``alternative`` is not recognized.
 
         """
         pe = self.point_estimate()
@@ -339,20 +450,16 @@ class WeightingEstimator(ABC):
 
         t = (pe - null_value) / se
 
-        if alternative == "greater" or alternative == "two-sided":
+        if alternative == "greater":
+            return float(stats.norm.sf(t))
+        elif alternative == "less":
+            return float(stats.norm.cdf(t))
+        elif alternative == "two-sided":
             p_greater = float(stats.norm.sf(t))
-            if alternative == "greater":
-                return p_greater
-
-        if alternative == "less" or alternative == "two-sided":
             p_less = float(stats.norm.cdf(t))
-            if alternative == "less":
-                return p_less
-
-        if alternative == "two-sided":
             return min(1.0, 2.0 * min(p_less, p_greater))
-
-        raise ValueError(f"Unrecognized input {alternative=:}")
+        else:
+            raise ValueError(f"Unrecognized input {alternative=:}")
 
     def adjusted_pvalue(
         self,
@@ -369,13 +476,13 @@ class WeightingEstimator(ABC):
             | np.random.Generator
         ) = None,
     ) -> float:
-        r"""Calculate a p-value adjusted for hidden bias.
+        """Calculate a p-value adjusted for hidden bias.
 
         The adjusted p-value accounts for both sampling uncertainty and uncertainty from
         propensity scores estimated with error. It is the smallest alpha for which the
-        expanded confidence interval at level alpha excludes `null_value`, making it the
-        dual of `expanded_confidence_interval` in the same sense that `pvalue` is the
-        dual of `confidence_interval`.
+        expanded confidence interval at level alpha excludes ``null_value``, making it
+        the dual of ``expanded_confidence_interval`` in the same sense that ``pvalue``
+        is the dual of ``confidence_interval``.
 
         Parameters
         ----------
@@ -383,12 +490,13 @@ class WeightingEstimator(ABC):
             The hypothesized theta.
          gamma : float, optional
             The Gamma factor. Must be >= 1.0, with 1.0 indicating perfect propensity
-            scores. Defaults to 6. See Notes in `sensitivity_analysis`.
+            scores. Defaults to 6. See Notes in ``sensitivity_analysis``.
          alternative : ["two-sided", "less", "greater"], optional
             What kind of test:
-              - "two-sided": H0: theta = `null_value` vs Halt: theta <> `null_value`.
-              - "greater": H0: theta <= `null_value` vs Halt: theta > `null_value`.
-              - "less": H0: theta >= `null_value` vs Halt: theta < `null_value`.
+              - "two-sided": H0: theta = ``null_value`` vs Halt:
+                theta <> ``null_value``.
+              - "greater": H0: theta <= ``null_value`` vs Halt: theta > ``null_value``.
+              - "less": H0: theta >= ``null_value`` vs Halt: theta < ``null_value``.
             Defaults to "two-sided".
          bootstrap : bool, optional
             If True (default), use the percentile bootstrap to account for sampling
@@ -401,25 +509,30 @@ class WeightingEstimator(ABC):
             Number of bootstrap replications to run. Ignored when ``bootstrap=False``.
             Defaults to 1_000.
          seed : int, list_like, etc
-            A seed for numpy.random.default_rng. Ignored when ``bootstrap=False``. See
-            that documentation for details.
+            A seed for ``numpy.random.default_rng``. Ignored when ``bootstrap=False``.
+            See that documentation for details.
 
         Returns
         -------
          p : float
             Adjusted p-value.
 
+        Raises
+        ------
+         ValueError
+            If ``gamma`` < 1 or ``alternative`` is not recognized.
+
         Notes
         -----
         When ``bootstrap=True``, B bootstrap replicates are drawn. For each replicate,
-        `sensitivity_analysis` computes the range of point estimates consistent with
+        ``sensitivity_analysis`` computes the range of point estimates consistent with
         gamma-level hidden bias. The adjusted p-value is then the fraction of bootstrap
-        replicates whose sensitivity interval does not rule out `null_value`:
+        replicates whose sensitivity interval does not rule out ``null_value``:
 
           - "greater": fraction of bootstrap lower bounds that do not exceed
-            `null_value`, i.e. mean(lb_bootstrap <= null_value).
-          - "less": fraction of bootstrap upper bounds that are not below `null_value`,
-            i.e. mean(ub_bootstrap > null_value).
+            ``null_value``, i.e. mean(lb_bootstrap <= ``null_value``).
+          - "less": fraction of bootstrap upper bounds not below ``null_value``,
+            i.e. mean(ub_bootstrap > ``null_value``).
           - "two-sided": twice the minimum of the two one-sided adjusted p-values,
             capped at 1.
 
@@ -454,22 +567,18 @@ class WeightingEstimator(ABC):
             sen_lb, sen_ub = self.sensitivity_analysis(gamma=gamma)
             lb_var, ub_var = self._sensitivity_variance(gamma)
 
-            if alternative == "greater" or alternative == "two-sided":
+            if alternative == "greater":
+                return float(stats.norm.sf((sen_lb - null_value) / math.sqrt(lb_var)))
+            elif alternative == "less":
+                return float(stats.norm.sf((null_value - sen_ub) / math.sqrt(ub_var)))
+            elif alternative == "two-sided":
                 p_greater = float(
                     stats.norm.sf((sen_lb - null_value) / math.sqrt(lb_var))
                 )
-                if alternative == "greater":
-                    return p_greater
-
-            if alternative == "less" or alternative == "two-sided":
                 p_less = float(stats.norm.sf((null_value - sen_ub) / math.sqrt(ub_var)))
-                if alternative == "less":
-                    return p_less
-
-            if alternative == "two-sided":
                 return min(1.0, 2.0 * min(p_greater, p_less))
-
-            raise ValueError(f"Unrecognized input {alternative=:}")
+            else:
+                raise ValueError(f"Unrecognized input {alternative=:}")
 
         lb_bootstrap = np.zeros(B)
         ub_bootstrap = np.zeros(B)
@@ -504,7 +613,7 @@ class WeightingEstimator(ABC):
         gamma_upper: float = 6.0,
         tol: float = 1e-3,
     ) -> float:
-        r"""Find the smallest Gamma at which the result is no longer significant.
+        """Find the smallest Gamma at which the result is no longer significant.
 
         Searches for the smallest Gamma >= 1 such that the adjusted p-value is >=
         ``alpha`` (i.e., the result is no longer statistically significant).
@@ -517,18 +626,19 @@ class WeightingEstimator(ABC):
             Significance threshold. Defaults to 0.05.
          alternative : ["two-sided", "less", "greater"], optional
             What kind of test:
-              - "two-sided": H0: theta = `null_value` vs Halt: theta <> `null_value`.
-              - "greater": H0: theta <= `null_value` vs Halt: theta > `null_value`.
-              - "less": H0: theta >= `null_value` vs Halt: theta < `null_value`.
+              - "two-sided": H0: theta = ``null_value`` vs Halt:
+                theta <> ``null_value``.
+              - "greater": H0: theta <= ``null_value`` vs Halt: theta > ``null_value``.
+              - "less": H0: theta >= ``null_value`` vs Halt: theta < ``null_value``.
             Defaults to "two-sided".
          bootstrap : bool, optional
             If True (default), use the percentile bootstrap. If False, use the normal
-            approximation. See `adjusted_pvalue` for details.
+            approximation. See ``adjusted_pvalue`` for details.
          B : int, optional
             Number of bootstrap replications. Ignored when ``bootstrap=False``. Defaults
             to 1_000.
          seed : int, list_like, etc, optional
-            A seed for numpy.random.default_rng. Ignored when ``bootstrap=False``.
+            A seed for ``numpy.random.default_rng``. Ignored when ``bootstrap=False``.
             Passing a fixed seed is recommended when ``bootstrap=True`` because it
             ensures the adjusted p-value is monotone in Gamma, which makes the binary
             search more reliable.
@@ -546,6 +656,12 @@ class WeightingEstimator(ABC):
             The smallest Gamma >= 1 at which the result is not statistically
             significant. Returns 1.0 if the result is already not significant at
             Gamma=1.
+
+        Raises
+        ------
+         ValueError
+            If ``gamma_upper`` < 1, or if ``alternative`` is not recognized (propagated
+            from ``pvalue`` and ``adjusted_pvalue``).
 
         Notes
         -----
@@ -621,9 +737,10 @@ class WeightingEstimator(ABC):
             Defaults to 0.10, corresponding to a 90% confidence interval.
          alternative : ["two-sided", "less", "greater"], optional
             What kind of test:
-              - "two-sided": H0: theta = `null_value` vs Halt: theta <> `null_value`.
-              - "greater": H0: theta <= `null_value` vs Halt: theta > `null_value`.
-              - "less": H0: theta >= `null_value` vs Halt: theta < `null_value`.
+              - "two-sided": H0: theta = ``null_value`` vs Halt:
+                theta <> ``null_value``.
+              - "greater": H0: theta <= ``null_value`` vs Halt: theta > ``null_value``.
+              - "less": H0: theta >= ``null_value`` vs Halt: theta < ``null_value``.
             Defaults to "two-sided".
 
         Returns
@@ -635,6 +752,11 @@ class WeightingEstimator(ABC):
               - "greater": lb finite, ub = np.inf
               - "less": lb = -np.inf, ub finite
 
+        Raises
+        ------
+         ValueError
+            If ``alternative`` is not recognized.
+
         """
         pe = self.point_estimate()
         se = math.sqrt(self.variance())
@@ -643,20 +765,18 @@ class WeightingEstimator(ABC):
         else:
             zcrit = stats.norm.isf(alpha)
 
-        if alternative == "greater" or alternative == "two-sided":
+        if alternative == "greater":
             lb = float(pe - zcrit * se)
-            if alternative == "greater":
-                return lb, np.inf
-
-        if alternative == "less" or alternative == "two-sided":
+            return lb, np.inf
+        elif alternative == "less":
             ub = float(pe + zcrit * se)
-            if alternative == "less":
-                return -np.inf, ub
-
-        if alternative == "two-sided":
+            return -np.inf, ub
+        elif alternative == "two-sided":
+            lb = float(pe - zcrit * se)
+            ub = float(pe + zcrit * se)
             return lb, ub
-
-        raise ValueError(f"Unrecognized input {alternative=:}")
+        else:
+            raise ValueError(f"Unrecognized input {alternative=:}")
 
     def plot_sensitivity(
         self,
@@ -677,7 +797,7 @@ class WeightingEstimator(ABC):
         legend_placement: str | None = None,
         ax: Axes | None = None,
     ) -> tuple[pd.DataFrame, Axes]:
-        r"""Plot sensitivity of estimates to hidden biases.
+        """Plot sensitivity of estimates to hidden biases.
 
         Parameters
         ----------
@@ -690,12 +810,12 @@ class WeightingEstimator(ABC):
             Defaults to 0.10, corresponding to a 90% confidence interval.
          alternative : ["two-sided", "less", "greater"], optional
             What kind of test:
-              - "two-sided": H0: \bar{Y} = `null_value` vs Halt: \bar{Y} <>
-                `null_value`.
-              - "greater": H0: \bar{Y} <= `null_value` vs Halt: \bar{Y} > `null_value`.
-              - "less": H0: \bar{Y} >= `null_value` vs Halt: \bar{Y} < `null_value`.
+              - "two-sided": H0: Ȳ = ``null_value`` vs Halt: Ȳ <>
+                ``null_value``.
+              - "greater": H0: Ȳ <= ``null_value`` vs Halt: Ȳ > ``null_value``.
+              - "less": H0: Ȳ >= ``null_value`` vs Halt: Ȳ < ``null_value``.
          bootstrap : bool, optional
-            Passed to `expanded_confidence_interval`. If True (default), use the
+            Passed to ``expanded_confidence_interval``. If True (default), use the
             percentile bootstrap. If False, use the normal approximation (much faster,
             especially when plotting many gamma values).
          B : int, optional
@@ -726,6 +846,12 @@ class WeightingEstimator(ABC):
             A DataFrame with the lower and upper bounds corresponding to each gamma.
          ax : Axes
             The plot axes.
+
+        Raises
+        ------
+         ValueError
+            If the gamma range is empty, fewer than two points are requested, or
+            ``alternative`` is not recognized.
 
         """
         if gamma_lower < 1 or gamma_upper <= gamma_lower:
@@ -937,12 +1063,18 @@ class WeightingEstimator(ABC):
         )
 
         if null_value is not None:
+            assert alternative in (
+                "two-sided",
+                "less",
+                "greater",
+            )  # Satisfy type-checker
             gs = self.gamma_star(
                 null_value=null_value,
                 alpha=alpha,
                 alternative=alternative,
                 bootstrap=bootstrap,
                 B=B,
+                seed=42,
                 gamma_upper=gamma_upper,
             )
             if gs > 1.0 and gs <= gamma_upper:
@@ -957,6 +1089,200 @@ class WeightingEstimator(ABC):
                     color="black",
                     fontsize=tick_label_size,
                 )
+
+        plt.tight_layout()
+        return df, ax
+
+    def min_ess_bound(
+        self,
+        gamma: float,
+        method: Literal["floor", "exact"] = "floor",
+    ) -> float:
+        """Worst-case effective sample size over the Gamma sensitivity region.
+
+        Returns the smallest Kish effective sample size attainable anywhere in the Gamma
+        sensitivity region (``method="exact"``), or a cheap conservative lower bound on
+        it (``method="floor"``). The default raises, since this is only defined for
+        estimators whose sensitivity region is a box of weights. See
+        ``MeanEstimator.min_ess_bound`` for the implementation.
+
+        Parameters
+        ----------
+         gamma : float
+            The Gamma factor. Must be >= 1.0. See ``sensitivity_analysis``.
+         method : ["floor", "exact"], optional
+            "floor" (default) returns the conservative closed-form lower bound; "exact"
+            returns the actual worst-case minimum via a vertex sweep.
+
+        Returns
+        -------
+         ess : float
+            The worst-case effective sample size over the region (or a lower bound).
+
+        Raises
+        ------
+         NotImplementedError
+            Always raised here; only mean estimators implement this method.
+
+        """
+        raise NotImplementedError(
+            "min_ess_bound is only implemented for mean estimators "
+            "(IPW/SIPW/AIPW/SAIPW)."
+        )
+
+    def plot_min_ess(
+        self,
+        gamma_lower: float = 1.0,
+        gamma_upper: float = 6.0,
+        num_points: int = 50,
+        method: Literal["floor", "exact"] = "floor",
+        reference_ess: float | None = None,
+        title: str | None = None,
+        ylabel: str = "Minimum Effective Sample Size",
+        ytick_format: str = ",.0f",
+        axis_label_size: int | None = None,
+        tick_label_size: int | None = None,
+        legend_label_size: int | None = None,
+        legend_placement: str | None = None,
+        ax: Axes | None = None,
+    ) -> tuple[pd.DataFrame, Axes]:
+        """Plot the worst-case effective sample size against hidden bias.
+
+        Plots the conservative lower bound on the smallest Kish effective sample size
+        ESS(w) = (1ᵀw)²/‖w‖² attainable anywhere in the Gamma sensitivity region, as a
+        function of Gamma. This is the effective-sample-size analogue of
+        ``plot_sensitivity``: it shows how much the leverage of the weights can collapse
+        across the region as the assumed hidden bias grows.
+
+        At ``gamma_lower = 1`` the region collapses to a point, so the curve begins at
+        the exact effective sample size of the nominal weights; as Gamma grows the
+        region widens and the bound decreases. The bound is computed by
+        ``min_ess_bound``, which uses the conservative floor derived in (Wilson 2025):
+        the numerator at the region's lowest corner over the denominator at its highest.
+
+        Parameters
+        ----------
+         gamma_lower, gamma_upper : float, optional
+            Range of Gamma values to plot. Defaults to 1 and 6 resp.
+         num_points : int, optional
+            Number of Gammas to evaluate and plot. Defaults to 50.
+         method : ["floor", "exact"], optional
+            Passed to ``min_ess_bound``. "floor" (default) plots the conservative
+            closed-form lower bound; "exact" plots the actual worst-case minimum.
+         reference_ess : float, optional
+            If specified, draw a horizontal dashed line at this effective sample size
+            (e.g. a reliability floor below which the normal approximation is suspect).
+            No line is drawn if not specified.
+         title, ylabel : str, optional
+            Title/ylabel for plot. If ``title`` is not specified, no title is included.
+         ytick_format : str, optional
+            How to format the y-axis tick labels. Defaults to ",.0f" (integer counts
+            with thousands separators).
+         axis_label_size, tick_label_size, legend_label_size : int, optional
+            Font size for axis labels and title; tick mark labels; and legend entries,
+            resp.
+         legend_placement : str, optional
+            Legend placement. Defaults to "upper right".
+         ax : Axes, optional
+            If specified, plot everything on these axes.
+
+        Returns
+        -------
+         df : pandas DataFrame
+            A DataFrame with the minimum effective sample size bound for each gamma.
+         ax : Axes
+            The plot axes.
+
+        Raises
+        ------
+         ValueError
+            If the gamma range is empty or fewer than two points are requested.
+
+        References
+        ----------
+         - Wilson, Bob. 2025. "Design-Based Inference and Sensitivity Analysis for
+           Survey Sampling." https://adventuresinwhy.com/post/survey_sampling/
+
+        """
+        if gamma_lower < 1 or gamma_upper <= gamma_lower:
+            raise ValueError("Must have 1 <= gamma_lower < gamma_upper")
+
+        if num_points < 2:
+            raise ValueError("Must plot at least 2 points")
+
+        gammas = np.linspace(gamma_lower, gamma_upper, num_points)
+        min_ess = np.array(
+            [self.min_ess_bound(gamma, method=method) for gamma in gammas]
+        )
+
+        df = pd.DataFrame(
+            {
+                "Gamma": gammas,
+                "Min ESS Bound": min_ess,
+            }
+        )
+
+        if ax is None:
+            fig, ax = plt.subplots()
+        else:
+            plt.sca(ax)
+
+        ax.plot(df["Gamma"], df["Min ESS Bound"], color="blue", linestyle="-")
+        plt.fill_between(gammas, 0.0, min_ess, alpha=0.2, color="blue")
+
+        legend_handles = [
+            Line2D(
+                [0],
+                [0],
+                color="blue",
+                linestyle="-",
+                label="Min ESS bound",
+            ),
+        ]
+
+        if reference_ess is not None:
+            ax.plot(
+                df["Gamma"],
+                np.full_like(gammas, reference_ess),
+                color="black",
+                linestyle="--",
+            )
+            legend_handles.append(
+                Line2D(
+                    [0],
+                    [0],
+                    color="black",
+                    linestyle="--",
+                    label=f"ESS = {reference_ess:,.0f}",
+                )
+            )
+
+        ax.set_xlim(gamma_lower, gamma_upper)
+        ax.set_ylim(bottom=0.0)
+        ax.set_xlabel("Gamma")
+        ax.set_ylabel(ylabel)
+        if title is not None:
+            ax.set_title(title, fontsize=axis_label_size)
+
+        ax.yaxis.set_major_formatter(
+            ticker.FuncFormatter(lambda y, pos: ("{0:" + ytick_format + "}").format(y))
+        )
+
+        if axis_label_size is not None:
+            ax.xaxis.label.set_fontsize(axis_label_size)
+            ax.yaxis.label.set_fontsize(axis_label_size)
+
+        if tick_label_size is not None:
+            ax.tick_params(axis="both", which="major", labelsize=tick_label_size)
+
+        if legend_placement is None:
+            legend_placement = "upper right"
+
+        ax.legend(
+            handles=legend_handles,
+            loc=legend_placement,
+            fontsize=legend_label_size,
+        )
 
         plt.tight_layout()
         return df, ax

@@ -1,6 +1,15 @@
-"""Calibration visualizations."""
+"""Balance plots and the rank test behind them.
+
+``plot_balance`` and ``plot_balance_2_sample`` draw standardized differences between
+weighted sample means and their targets; ``wilcoxon_signed_rank`` is the one-sample rank
+alternative offered wherever ``plot_balance`` takes ``test``.
+
+"""
+
+from __future__ import annotations
 
 from collections import namedtuple
+from collections.abc import Mapping
 from typing import Literal
 
 import matplotlib.pyplot as plt
@@ -23,9 +32,9 @@ def wilcoxon_signed_rank(
 
     Parameters
     ----------
-     d : list_like
-        The data.
-     w : list_like, optional
+     d : npt.NDArray[np.float64]
+        The data, one-dimensional.
+     w : npt.NDArray[np.float64] | None, optional
         Weights. See Notes.
 
     Returns
@@ -37,6 +46,14 @@ def wilcoxon_signed_rank(
         square root of its variance.
      pvalue : float
         P-value.
+     log_pvalue : float
+        Natural log of the p-value, for aggregating without underflow.
+
+    Raises
+    ------
+     ValueError
+        When ``d`` is not one-dimensional, or ``w`` is given with a shape different from
+        ``d``.
 
     Notes
     -----
@@ -89,6 +106,58 @@ def wilcoxon_signed_rank(
     return WilcoxonResult(T_plus, z, pval, log_pval)
 
 
+def _resolve_balance_means(
+    means: Mapping[str, npt.NDArray[np.float64] | pd.Series],
+    weights: dict[str, npt.NDArray[np.float64]],
+    covariates: list[str],
+) -> dict[str, npt.NDArray[np.float64]]:
+    """Validate model means; named Series may cover only some covariates.
+
+    Parameters
+    ----------
+     means : Mapping[str, npt.NDArray[np.float64] | pd.Series]
+        Model-estimated means keyed by method name.
+     weights : dict[str, npt.NDArray[np.float64]]
+        Weight sets keyed by method name; names must not overlap ``means``.
+     covariates : list[str]
+        Feature names, in order.
+
+    Returns
+    -------
+     resolved : dict[str, npt.NDArray[np.float64]]
+        Finite covariate vectors in ``covariates`` order, one per method.
+
+    Raises
+    ------
+     ValueError
+        When a method name appears in both ``means`` and ``weights``, a Series has
+        unknown or duplicate covariates, or any mean is not a finite covariate vector.
+
+    """
+    if set(means) & set(weights):
+        raise ValueError("`means` and `weights` must have distinct method names")
+    resolved = {}
+    for name, mean in means.items():
+        if isinstance(mean, pd.Series):
+            if (
+                mean.empty
+                or not mean.index.is_unique
+                or not set(mean.index) <= set(covariates)
+            ):
+                raise ValueError(f"Unknown or duplicate mean covariates for {name!r}")
+            if not np.isfinite(mean.to_numpy(dtype=float)).all():
+                raise ValueError(f"Means for {name!r} must be finite")
+            values = mean.reindex(covariates).to_numpy(dtype=float)
+        else:
+            values = np.asarray(mean, dtype=float)
+            if values.shape != (len(covariates),) or not np.isfinite(values).all():
+                raise ValueError(
+                    f"Means for {name!r} must be a finite covariate vector"
+                )
+        resolved[name] = values
+    return resolved
+
+
 def plot_balance(
     X: npt.NDArray[np.float64],
     mu: npt.NDArray[np.float64],
@@ -102,8 +171,9 @@ def plot_balance(
     imbalance_pval_threshold: float = 0.2,
     legend_placement: str = "lower right",
     ax: Axes | None = None,
+    means: Mapping[str, npt.NDArray[np.float64] | pd.Series] | None = None,
 ) -> tuple[pd.DataFrame, Axes]:
-    r"""Plot one-sample z-statistics for covariates.
+    """Plot one-sample z-statistics for covariates.
 
     The one-sample z-statistic tests a null hypothesis regarding the mean or center of
     symmetry of the sample. For covariates without outliers, this can be as simple as
@@ -112,13 +182,13 @@ def plot_balance(
 
     Parameters
     ----------
-     X : npt.NDArray
+     X : npt.NDArray[np.float64]
         X_ij = feature j for respondent i.
-     mu : npt.NDArray
+     mu : npt.NDArray[np.float64]
         Mean (or median; see Notes) of covariates in target population.
-     covariates : List[str]
+     covariates : list[str]
         Feature names.
-     weights : Dict[str, array]
+     weights : dict[str, npt.NDArray[np.float64]]
         One or more sets of weights.
      test : ["z", "wilcoxon"] or list of such options, optional
         Test to apply when comparing sample to population, for each covariate. The
@@ -127,9 +197,9 @@ def plot_balance(
         large values, means can be unstable, so we also support using the one-sample
         Wilcoxon signed rank test. See Notes. This input can be specified for each
         covariate separately.
-     sigma : npt.NDArray, optional
-        Sqrt of population variance. Only used with `test='z'`. If not specified, the
-        (sqrt of the) sample variance of `X` will be used.
+     sigma : npt.NDArray[np.float64], optional
+        Sqrt of population variance. Only used with ``test='z'``. If not specified, the
+        (sqrt of the) sample variance of ``X`` will be used.
      signed : bool, optional
         If True (default), plot the signed z-statistics. Otherwise, plot the absolute
         value of the z-statistics, which results in more condensed plots.
@@ -144,7 +214,14 @@ def plot_balance(
      legend_placement : str, optional
         Where to place the legend. Defaults to "lower right".
      ax : matplotlib Axes, optional
-        If specified, plot on `ax`.
+        If specified, plot on ``ax``.
+     means : dict of covariate vectors, optional
+        Additional methods' model-estimated means, in covariate order and original
+        units. A Series may name a subset of covariates; omitted entries are not plotted
+        or counted in that method's imbalance. Method names must not overlap weights.
+        Only the 'z' diagnostic supports means; there are no synthetic respondent
+        weights. Uses the same nominal M and sigma as weighted means. These coordinates
+        need not be inferential z-statistics for a model-based estimate.
 
     Returns
     -------
@@ -153,6 +230,13 @@ def plot_balance(
      ax : Axes
         The figure.
 
+    Raises
+    ------
+     ValueError
+        On dimension mismatches between ``X``, ``mu``, ``covariates``, ``sigma`` and
+        ``test``; on an unknown test name; when model means accompany a non-'z'
+        diagnostic; or when ``imbalance_pval_threshold`` falls outside (0, 1].
+
     Notes
     -----
     The Wilcoxon signed rank test computes the difference between the sample values and
@@ -160,15 +244,15 @@ def plot_balance(
     weighted sum of the ranks corresponding to sample values larger than the population
     median.
 
-    The imbalance is quantified by aggregating the p-values for each covariate.  Any
-    p-values less than `imbalance_pval_threshold` represent covariates with large
+    The imbalance is quantified by aggregating the p-values for each covariate. Any
+    p-values less than ``imbalance_pval_threshold`` represent covariates with large
     imbalance; other covariates are ignored. The product of these p-values is a measure
     of imbalance, but to avoid numeric underflow when working with very small p-values
     (and very out-of-balance covariates), we report the logarithm of the product of
     p-values, which is equivalent to the sum of logs of the p-values. We negate the
     result to get a non-negative metric, with larger values indicating greater
-    imbalance. When `quantify_imbalance` is True, the resulting metrics are included in
-    the plot legend.
+    imbalance. When ``quantify_imbalance`` is True, the resulting metrics are included
+    in the plot legend.
 
     """
     if title is None:
@@ -180,15 +264,16 @@ def plot_balance(
             "Dimension mismatch: `X` should have one column for every entry in `mu`"
         )
 
+    test_nn: list[str]
     if test is None:
-        test_nn: list[Literal["z", "wilcoxon"]] = ["z"] * p
+        test_nn = ["z"] * p
     elif isinstance(test, list):
         if len(test) != p:
             raise ValueError("`test` must be scalar or same length as `mu`")
         for t in test:
             if t not in ("z", "wilcoxon"):
                 raise ValueError("Entries of `test` must be either 'z' or 'wilcoxon'")
-        test_nn = test
+        test_nn = list(test)
     elif test not in ("z", "wilcoxon"):
         raise ValueError("`test` must be either 'z' or 'wilcoxon'")
     else:
@@ -201,7 +286,16 @@ def plot_balance(
             "Dimension mismatch: `sigma` should have one entry for each entry in `mu`"
         )
 
+    assert sigma is not None
+    resolved_means = _resolve_balance_means(
+        {} if means is None else means, weights, covariates
+    )
+    if resolved_means and any(t != "z" for t in test_nn):
+        raise ValueError(
+            "Model means support only the mean-difference ('z') diagnostic"
+        )
     methods = []
+    names = []
     z_stats = []
     pvals = []
     log_pvals = []
@@ -217,14 +311,26 @@ def plot_balance(
                 raise ValueError(f"Unrecognized test '{test_nn[ip]}'")
 
             methods.append(method)
+            names.append(covariates[ip])
             z_stats.append(z)
             pvals.append(pval)
             log_pvals.append(log_pval)
 
+    for method, mean in resolved_means.items():
+        for ip in range(p):
+            if np.isnan(mean[ip]):
+                continue
+            z = (mean[ip] - mu[ip]) * np.sqrt(M) / sigma[ip]
+            methods.append(method)
+            names.append(covariates[ip])
+            z_stats.append(z)
+            pvals.append(2.0 * stats.norm.sf(abs(z)))
+            log_pvals.append(np.log(2.0) + stats.norm.logsf(abs(z)))
+    method_names = list(weights) + list(resolved_means)
     df_balance = pd.DataFrame(
         {
             "Method": methods,
-            "covariate": list(covariates) * len(weights),
+            "covariate": names,
             "delta": z_stats,
             "pval": pvals,
             "log_pval": log_pvals,
@@ -247,7 +353,7 @@ def plot_balance(
                 )
             )
         )
-        for key in weights:
+        for key in method_names:
             df_balance["Method"] = np.where(
                 df_balance["Method"] == key,
                 f"{key} (imbalance: {imbalance.loc[key]:,.0f})",
@@ -290,29 +396,38 @@ def plot_balance_2_sample(
     imbalance_pval_threshold: float = 0.2,
     legend_placement: str = "lower right",
     ax: Axes | None = None,
+    means1: Mapping[str, npt.NDArray[np.float64] | pd.Series] | None = None,
+    means2: Mapping[str, npt.NDArray[np.float64] | pd.Series] | None = None,
 ) -> tuple[pd.DataFrame, Axes]:
-    r"""Plot z-statistics for covariates.
+    """Plot z-statistics for covariates.
 
     If we were testing the null hypothesis that the two populations have equal covariate
     averages, then the z-statistic for each covariate would be:
-       (1/M2) * X2^T * w2 - (1/M1) * X1^T * w1
-       ---------------------------------------.
-         sqrt(sigma1^2 / M1 + sigma2^2 / M2)
+       (1/M2) X2ᵀw2 - (1/M1) X1ᵀw1
+       ---------------------------.
+         √(σ1² / M1 + σ2² / M2)
 
     Parameters
     ----------
-     X1, X2 : npt.NDArray
-        X_ij = feature j for respondent i.
-     covariates : List[str]
+     X1 : npt.NDArray[np.float64]
+        X_ij = feature j for respondent i in population 1.
+     X2 : npt.NDArray[np.float64]
+        X_ij = feature j for respondent i in population 2.
+     covariates : list[str]
         Feature names.
-     weights1, weights2 : Dict[str, array]
-        One or more sets of weights.
-     sigma1, sigma2 : npt.NDArray, optional
-        Square root of variances for each population, for putting all covariates on the
-        same scale. The exact values to pass here depend on context, so use judgment
-        about which z-statistic you want to calculate. The key here is to use the same
-        variances regardless of which weights are applied, so you could use variances of
-        each sample, or variances of the respective populations.
+     weights1 : dict[str, npt.NDArray[np.float64]]
+        One or more sets of weights for population 1.
+     weights2 : dict[str, npt.NDArray[np.float64]]
+        One or more sets of weights for population 2.
+     sigma1 : npt.NDArray[np.float64], optional
+        Square root of variances for population 1, for putting all covariates on the
+        same scale. See below for which values to pass.
+     sigma2 : npt.NDArray[np.float64], optional
+        Square root of variances for population 2. The exact values to pass here depend
+        on context, so use judgment about which z-statistic you want to calculate. The
+        key here is to use the same variances regardless of which weights are applied,
+        so you could use variances of each sample, or variances of the respective
+        populations.
      signed : bool, optional
         If True (default), plot the signed z-statistics. Otherwise, plot the two-sided
         z-statistics, which are always >= 0. This results in more condensed plots.
@@ -327,7 +442,14 @@ def plot_balance_2_sample(
      legend_placement : str, optional
         Where to place the legend. Defaults to "lower right".
      ax : matplotlib Axes, optional
-        If specified, plot on `ax`.
+        If specified, plot on ``ax``.
+     means1 : dict of covariate vectors, optional
+        Model means for additional matching method names for population 1, distinct from
+        weights.
+     means2 : dict of covariate vectors, optional
+        Model means for population 2, with keys matching ``means1``. Uses (mean2 -
+        mean1) on the same nominal-count/population-SD scale as weighted means; no
+        weights or posterior tests are implied.
 
     Returns
     -------
@@ -336,13 +458,19 @@ def plot_balance_2_sample(
      ax : Axes
         The figure.
 
+    Raises
+    ------
+     ValueError
+        When the weight or mean method keys disagree across groups, ``X1`` and ``X2``
+        differ in columns, or ``imbalance_pval_threshold`` falls outside (0, 1].
+
     Notes
     -----
     The imbalance is quantified by aggregating the p-values for each covariate.
     Presently we are just doing a z-test on the difference in means, but a future state
     might use something non-parametric.
 
-    Any p-values less than `imbalance_pval_threshold` represent covariates with large
+    Any p-values less than ``imbalance_pval_threshold`` represent covariates with large
     imbalance; other covariates are ignored. The product of these p-values is a measure
     of imbalance, but to avoid numeric underflow when working with very small p-values
     (and very out-of-balance covariates), we report the logarithm of the product of
@@ -350,7 +478,7 @@ def plot_balance_2_sample(
     result to get a non-negative metric, with larger values indicating greater
     imbalance.
 
-    When `quantify_imbalance` is True, the resulting metrics are included in the plot
+    When ``quantify_imbalance`` is True, the resulting metrics are included in the plot
     legend.
 
     """
@@ -372,19 +500,40 @@ def plot_balance_2_sample(
     if sigma2 is None:
         sigma2 = np.ones((X2.shape[1],))
 
-    df_balance = (
-        pd.DataFrame(
-            {
-                k: ((1 / M2) * (X2.T @ w2) - (1 / M1) * (X1.T @ weights1[k]))
-                / np.sqrt(np.square(sigma1) / M1 + np.square(sigma2) / M2)
-                for k, w2 in weights2.items()
-            },
-            index=covariates,
-        )
-        .unstack()
-        .reset_index()
+    means1 = {} if means1 is None else means1
+    means2 = {} if means2 is None else means2
+    if set(means1) != set(means2):
+        raise ValueError("`means1` and `means2` must have consistent keys")
+    resolved_means1 = _resolve_balance_means(means1, weights1, covariates)
+    resolved_means2 = _resolve_balance_means(means2, weights2, covariates)
+    differences = {
+        k: ((X2.T @ w2) / M2 - (X1.T @ weights1[k]) / M1)
+        / np.sqrt(np.square(sigma1) / M1 + np.square(sigma2) / M2)
+        for k, w2 in weights2.items()
+    }
+    differences.update(
+        {
+            k: (mean2 - resolved_means1[k])
+            / np.sqrt(np.square(sigma1) / M1 + np.square(sigma2) / M2)
+            for k, mean2 in resolved_means2.items()
+        }
     )
+    df_balance = pd.DataFrame(differences, index=covariates).unstack().reset_index()
     df_balance.columns = ["Method", "covariate", "delta"]
+    omitted = {
+        (name, covariates[ip])
+        for name in resolved_means1
+        for ip in range(len(covariates))
+        if np.isnan(resolved_means1[name][ip]) or np.isnan(resolved_means2[name][ip])
+    }
+    df_balance = df_balance.loc[
+        [
+            (method, covariate) not in omitted
+            for method, covariate in zip(
+                df_balance["Method"], df_balance["covariate"], strict=True
+            )
+        ]
+    ]
     df_balance["abs_delta"] = df_balance["delta"].abs()
     if quantify_imbalance:
         if imbalance_pval_threshold <= 0.0 or imbalance_pval_threshold > 1.0:
@@ -402,7 +551,9 @@ def plot_balance_2_sample(
                 )
             )
         )
-        for key in weights1:
+        for key in differences:
+            if key not in imbalance.index:
+                continue
             df_balance["Method"] = np.where(
                 df_balance["Method"] == key,
                 f"{key} (imbalance: {imbalance.loc[key]:,.0f})",

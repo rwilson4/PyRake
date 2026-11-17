@@ -1,31 +1,65 @@
 """Population estimators."""
 
+from __future__ import annotations
+
 import math
 from collections.abc import Generator
-from typing import Any, Literal, Self
+from typing import Any, Literal
 
 import numpy as np
 import numpy.typing as npt
 from scipy import stats
 from scipy.optimize import linprog
 
-from .base_classes import Estimand, SimpleEstimand, WeightingEstimator
-from .sensitivity_solvers import LinearFractionalProgramSolver
+from pyrake.estimation.base_classes import (
+    Estimand,
+    SimpleEstimand,
+    WeightingEstimator,
+)
+from pyrake.estimation.sensitivity_solvers import (
+    solve_bounded_linear_fractional_program,
+)
 
 
 class PopulationMean(SimpleEstimand):
-    """Population mean."""
+    """Mean over the full target population.
+
+    Parameters
+    ----------
+     propensity_scores : (M,) ``npt.NDArray[np.float64]``
+        Estimated response propensity for each of the ``M`` sample members.
+
+    """
 
     @property
     def weights(self) -> npt.NDArray[np.float64]:
-        """Calculate weights based on propensity scores."""
+        """Calculate weights based on propensity scores.
+
+        Returns
+        -------
+         weights : (M,) ``npt.NDArray[np.float64]``
+            Inverse propensity weight for each of the ``M`` sample members.
+
+        """
         return np.ones_like(self.propensity_scores) / self.propensity_scores
 
     def sensitivity_region(
         self,
         gamma: float,
     ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
-        """Calculate a sensitivity region around baseline weights."""
+        """Calculate a sensitivity region around baseline weights.
+
+        Parameters
+        ----------
+         gamma : float
+            The Gamma factor. Must be >= 1.0.
+
+        Returns
+        -------
+         lower, upper : (M,) ``npt.NDArray[np.float64]``
+            Elementwise lower and upper weight bounds.
+
+        """
         weights = self.weights
         wl = weights / math.sqrt(gamma) + (1.0 - 1.0 / math.sqrt(gamma))
         wu = weights * math.sqrt(gamma) - (math.sqrt(gamma) - 1.0)
@@ -33,21 +67,47 @@ class PopulationMean(SimpleEstimand):
 
     @staticmethod
     def normalizing_factor(sample_size: int, population_size: int) -> float:
-        """Calculate normalizing factor."""
+        """Calculate normalizing factor.
+
+        Parameters
+        ----------
+         sample_size : int
+            Number of units in the sample.
+         population_size : int
+            Number of units in the target population.
+
+        Returns
+        -------
+         factor : float
+            Size of the target population.
+
+        """
         return population_size
 
 
 class NonRespondentMean(SimpleEstimand):
-    """Non-respondent mean.
+    """Mean among everyone who did not respond.
 
     The non-respondent mean is the mean response among everyone who did *not* respond.
-    The weights for this estimand are (1 - pi) / pi, where pi are the propensity scores.
+    The weights for this estimand are (1 - π) / π, where π are the propensity scores.
+
+    Parameters
+    ----------
+     propensity_scores : (M,) ``npt.NDArray[np.float64]``
+        Estimated response propensity for each of the ``M`` sample members.
 
     """
 
     @property
     def weights(self) -> npt.NDArray[np.float64]:
-        """Calculate weights based on propensity scores."""
+        """Calculate weights based on propensity scores.
+
+        Returns
+        -------
+         weights : (M,) ``npt.NDArray[np.float64]``
+            Non-response weight for each of the ``M`` sample members.
+
+        """
         return (
             np.ones_like(self.propensity_scores) - self.propensity_scores
         ) / self.propensity_scores
@@ -56,7 +116,19 @@ class NonRespondentMean(SimpleEstimand):
         self,
         gamma: float,
     ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
-        """Calculate a sensitivity region around baseline weights."""
+        """Calculate a sensitivity region around baseline weights.
+
+        Parameters
+        ----------
+         gamma : float
+            The Gamma factor. Must be >= 1.0.
+
+        Returns
+        -------
+         lower, upper : (M,) ``npt.NDArray[np.float64]``
+            Elementwise lower and upper weight bounds.
+
+        """
         weights = self.weights
         wl = weights / math.sqrt(gamma)
         wu = weights * math.sqrt(gamma)
@@ -64,34 +136,86 @@ class NonRespondentMean(SimpleEstimand):
 
     @staticmethod
     def normalizing_factor(sample_size: int, population_size: int) -> float:
-        """Calculate normalizing factor."""
+        """Calculate normalizing factor.
+
+        Parameters
+        ----------
+         sample_size : int
+            Number of units in the sample.
+         population_size : int
+            Number of units in the target population.
+
+        Returns
+        -------
+         factor : float
+            Number of non-respondents in the target population.
+
+        """
         return population_size - sample_size
 
 
 class SampleMean(SimpleEstimand):
-    """Sample mean.
+    """Mean among the population of respondents.
 
     The sample mean is the mean response among the population of respondents. The
     weights are simply 1, and thus involve no uncertainty.
+
+    Parameters
+    ----------
+     propensity_scores : (M,) ``npt.NDArray[np.float64]``
+        Estimated response propensity for each of the ``M`` sample members.
 
     """
 
     @property
     def weights(self) -> npt.NDArray[np.float64]:
-        """Calculate weights based on propensity scores."""
+        """Calculate weights based on propensity scores.
+
+        Returns
+        -------
+         weights : (M,) ``npt.NDArray[np.float64]``
+            Unit weight for each of the ``M`` sample members.
+
+        """
         return np.ones_like(self.propensity_scores)
 
     def sensitivity_region(
         self,
         gamma: float,
     ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
-        """Calculate a sensitivity region around baseline weights."""
+        """Calculate a sensitivity region around baseline weights.
+
+        Parameters
+        ----------
+         gamma : float
+            The Gamma factor. Must be >= 1.0.
+
+        Returns
+        -------
+         lower, upper : (M,) ``npt.NDArray[np.float64]``
+            Elementwise lower and upper weight bounds.
+
+        """
         weights = self.weights
         return weights, weights
 
     @staticmethod
     def normalizing_factor(sample_size: int, population_size: int) -> float:
-        """Calculate normalizing factor."""
+        """Calculate normalizing factor.
+
+        Parameters
+        ----------
+         sample_size : int
+            Number of units in the sample.
+         population_size : int
+            Number of units in the target population.
+
+        Returns
+        -------
+         factor : float
+            Number of units in the sample.
+
+        """
         return sample_size
 
 
@@ -103,10 +227,15 @@ class MeanEstimator(WeightingEstimator):
      propensity_scores : list_like
         Propensity scores.
      outcomes : list_like
-        Outcomes or responses. Should have the same length as `propensity_scores`.
+        Outcomes or responses. Should have the same length as ``propensity_scores``.
      estimand : Estimand, optional
-        An Estimand object representing the thing to be estimated. Defaults to
-        PopulationMean.
+        An ``Estimand`` object representing the thing to be estimated. Defaults to
+        ``PopulationMean``.
+     estimand_class : type, optional
+        Estimand class to construct from ``propensity_scores`` when ``estimand`` is not
+        given. Defaults to ``PopulationMean``.
+     kwargs : dict, optional
+        Extra arguments forwarded to the estimator constructor.
 
     """
 
@@ -134,16 +263,106 @@ class MeanEstimator(WeightingEstimator):
         self.outcomes: npt.NDArray[np.float64] = np.asarray(outcomes)
         self.extra_args: dict[str, Any] = kwargs
 
+    def min_ess_bound(
+        self,
+        gamma: float,
+        method: Literal["floor", "exact"] = "floor",
+    ) -> float:
+        """Worst-case effective sample size over the Gamma sensitivity region.
+
+        Returns the smallest Kish effective sample size
+
+           ESS(w) = (1ᵀw)²/‖w‖²
+
+        attainable anywhere in the Gamma sensitivity region [``wl``, ``wu``]. The Kish
+        effective sample size measures how evenly the weights spread the estimate's
+        leverage; the normal approximation behind the sensitivity bounds leans on its
+        being large. Its worst case over the region is a ratio with a rank-one numerator
+        over a separable denominator, so the minimizer is a vertex of the box: heavy
+        units raised to ``wu`` and light units lowered to ``wl``, the arrangement that
+        most concentrates the weights. Because both ``wl`` and ``wu`` increase with the
+        nominal weight, the optimal split is a threshold on the sorted weights, found by
+        sweeping all thresholds in a single pass (``method="exact"``).
+
+        A coarser bound needs no search at all, taking the numerator at the region's
+        lowest corner and the denominator at its highest (``method="floor"``):
+
+           min over wl ≤ w ≤ wu of ESS(w) ≥ (Σᵢ wlᵢ)²/Σᵢ wuᵢ².
+
+        Both are computable before any outcome is examined. At gamma=1 the region
+        collapses to a point and either method returns the exact effective sample size
+        of the nominal weights; as gamma grows the region widens and the value
+        decreases.
+
+        Parameters
+        ----------
+         gamma : float
+            The Gamma factor. Must be >= 1.0. See ``sensitivity_analysis``.
+         method : ["floor", "exact"], optional
+            "floor" (default) returns the conservative closed-form lower bound; "exact"
+            returns the actual worst-case minimum via the threshold sweep.
+
+        Returns
+        -------
+         ess : float
+            The worst-case effective sample size over the region (a lower bound when
+            ``method="floor"``).
+
+        Raises
+        ------
+         ValueError
+            If ``gamma`` < 1 or ``method`` is not recognized.
+
+        References
+        ----------
+         - Wilson, Bob. 2025. "Design-Based Inference and Sensitivity Analysis for
+           Survey Sampling." https://adventuresinwhy.com/post/survey_sampling/
+
+        """
+        if gamma < 1.0:
+            raise ValueError("`gamma` must be >= 1")
+
+        wl, wu = self.estimand.sensitivity_region(gamma)
+        # Orient the box: sub-unit nominal weights can invert the affine bounds.
+        w_lo = np.minimum(wl, wu)
+        w_hi = np.maximum(wl, wu)
+
+        if method == "floor":
+            numerator = float(np.sum(np.maximum(w_lo, 0.0))) ** 2
+            denominator = float(np.sum(np.square(w_hi)))
+            return numerator / denominator
+        elif method == "exact":
+            # The minimizer sets the heaviest units to their upper bound and the rest
+            # to their lower bound. Sort by upper bound (which increases with the
+            # nominal weight) and sweep every threshold via prefix sums: for the kth
+            # split the top k units sit at ``w_hi`` and the remainder at ``w_lo``.
+            order = np.argsort(-w_hi)
+            hi = w_hi[order]
+            lo = w_lo[order]
+            zero = np.zeros(1)
+            cum_hi_sum = np.concatenate((zero, np.cumsum(hi)))
+            cum_hi_sq = np.concatenate((zero, np.cumsum(np.square(hi))))
+            cum_lo_sum = np.concatenate((zero, np.cumsum(lo)))
+            cum_lo_sq = np.concatenate((zero, np.cumsum(np.square(lo))))
+            s1 = cum_hi_sum + (cum_lo_sum[-1] - cum_lo_sum)
+            s2 = cum_hi_sq + (cum_lo_sq[-1] - cum_lo_sq)
+            ess = np.where(
+                s2 > 0.0, np.square(s1) / np.where(s2 > 0.0, s2, 1.0), np.inf
+            )
+            return float(np.min(ess))
+        else:
+            raise ValueError(f"Unrecognized input {method=:}")
+
     def pvalue(
         self,
         null_value: float,
         alternative: Literal["two-sided", "less", "greater"] = "two-sided",
     ) -> float:
-        r"""Calculate a p-value.
+        """Calculate a p-value.
 
         Computes a p-value against the null hypothesis:
-            H0: \bar{Y} = null_value,
-        where \bar{Y} is the mean in the target population.
+            H0: Ȳ = ``null_value``,
+        where Ȳ is the mean in the target population.
 
         Parameters
         ----------
@@ -151,19 +370,25 @@ class MeanEstimator(WeightingEstimator):
             The hypothesized mean.
          alternative : ["two-sided", "less", "greater"], optional
             What kind of test:
-              - "two-sided": H0: \bar{Y} = `null_value` vs Halt: \bar{Y} <>
-                `null_value`.
-              - "greater": H0: \bar{Y} <= `null_value` vs Halt: \bar{Y} > `null_value`.
-              - "less": H0: \bar{Y} >= `null_value` vs Halt: \bar{Y} < `null_value`.
-            For example, specifying alternative = "greater" returns a p-value that quantifies
-            the strength of evidence against the null hypothesis that the mean is less
-            than `null_value`, in favor of the alternative hypothesis that the mean is
-            actually greater than `null_value`. Defaults to "two-sided".
+              - "two-sided": H0: Ȳ = ``null_value`` vs Halt: Ȳ <>
+                ``null_value``.
+              - "greater": H0: Ȳ <= ``null_value`` vs Halt: Ȳ > ``null_value``.
+              - "less": H0: Ȳ >= ``null_value`` vs Halt: Ȳ < ``null_value``.
+            For example, specifying alternative = "greater" returns a p-value that
+            quantifies the strength of evidence against the null hypothesis that the
+            mean is less than ``null_value``, in favor of the alternative hypothesis
+            that the mean is actually greater than ``null_value``. Defaults to
+            "two-sided".
 
         Returns
         -------
          p : float
             P-value.
+
+        Raises
+        ------
+         ValueError
+            If ``alternative`` is not recognized (propagated from ``pvalue``).
 
         """
         return super().pvalue(null_value=null_value, alternative=alternative)
@@ -173,7 +398,7 @@ class MeanEstimator(WeightingEstimator):
         alpha: float = 0.10,
         alternative: Literal["two-sided", "less", "greater"] = "two-sided",
     ) -> tuple[float, float]:
-        r"""Calculate confidence interval on mean in target population.
+        """Calculate confidence interval on mean in target population.
 
         Parameters
         ----------
@@ -182,10 +407,10 @@ class MeanEstimator(WeightingEstimator):
             Defaults to 0.10, corresponding to a 90% confidence interval.
          alternative : ["two-sided", "less", "greater"], optional
             What kind of test:
-              - "two-sided": H0: \bar{Y} = `null_value` vs Halt: \bar{Y} <>
-                `null_value`.
-              - "greater": H0: \bar{Y} <= `null_value` vs Halt: \bar{Y} > `null_value`.
-              - "less": H0: \bar{Y} >= `null_value` vs Halt: \bar{Y} < `null_value`.
+              - "two-sided": H0: Ȳ = ``null_value`` vs Halt: Ȳ <>
+                ``null_value``.
+              - "greater": H0: Ȳ <= ``null_value`` vs Halt: Ȳ > ``null_value``.
+              - "less": H0: Ȳ >= ``null_value`` vs Halt: Ȳ < ``null_value``.
             Defaults to "two-sided".
 
         Returns
@@ -194,8 +419,14 @@ class MeanEstimator(WeightingEstimator):
             Lower and upper bounds on the confidence interval. For one-sided intervals,
             only one of these will be finite:
               - "two-sided": lb and ub both finite
-              - "greater": lb = -np.inf, ub = finite
-              - "less": lb finite, ub = np.inf
+              - "greater": lb finite, ub = np.inf
+              - "less": lb = -np.inf, ub finite
+
+        Raises
+        ------
+         ValueError
+            If ``alternative`` is not recognized (propagated from
+            ``confidence_interval``).
 
         """
         return super().confidence_interval(alpha=alpha, alternative=alternative)
@@ -210,7 +441,7 @@ class MeanEstimator(WeightingEstimator):
             | np.random.BitGenerator
             | np.random.Generator
         ) = None,
-    ) -> Generator[Self, None, None]:
+    ) -> Generator[MeanEstimator, None, None]:
         """Yield a sequence of resampled estimators.
 
         Parameters
@@ -218,7 +449,12 @@ class MeanEstimator(WeightingEstimator):
          B : int
             Number of bootstrap replications to run.
          seed : int, list_like, etc
-            A seed for numpy.random.default_rng. See that documentation for details.
+            A seed for ``numpy.random.default_rng``. See that documentation for details.
+
+        Yields
+        ------
+         estimator : ``MeanEstimator``
+            Bootstrap-resampled estimator.
 
         """
         rng = np.random.default_rng(seed)
@@ -246,34 +482,40 @@ class MeanEstimator(WeightingEstimator):
 
 
 class IPWEstimator(MeanEstimator):
-    r"""Inverse Propensity Weighted Estimator.
+    """Inverse Propensity Weighted Estimator.
 
     Parameters
     ----------
      propensity_scores : list_like
         Propensity scores.
      outcomes : list_like
-        Outcomes or responses. Should have the same length as `propensity_scores`.
+        Outcomes or responses. Should have the same length as ``propensity_scores``.
      population_size : int
         Size of target population.
      estimand : Estimand, optional
-        An Estimand object representing the thing to be estimated. Defaults to
-        PopulationMean.
+        An ``Estimand`` object representing the thing to be estimated. Defaults to
+        ``PopulationMean``.
+     estimand_class : type, optional
+        Estimand class to construct from ``propensity_scores`` when ``estimand`` is not
+        given. Defaults to ``PopulationMean``.
+     kwargs : dict, optional
+        Extra arguments forwarded to the estimator constructor.
 
     Notes
     -----
     The IPW estimator is:
-        \hat{Y}_IPW = (1/N) \sum_i w_i * y_i,
-    where w_i = 1 / pi_i, N is the target population size, and pi_i is the propensity
-    score.
+
+       Ŷ_IPW = (1/N) Σᵢ wᵢyᵢ,
+
+    where wᵢ = 1/πᵢ, N is the target population size, and πᵢ is the propensity score.
 
     Details on this estimator, including sensitivity analysis and links to academic
     resources, can be found in (Wilson, 2025)
 
     References
     ----------
-     - Wilson, Bob. 2025. "Design-Based Inference and Sensitivity Analysis for Survey
-       Sampling." https://adventuresinwhy.com/post/survey_sampling/
+     - Wilson, Bob. 2025. "Design-Based Inference and Sensitivity Analysis for
+       Survey Sampling." https://adventuresinwhy.com/post/survey_sampling/
 
     """
 
@@ -310,25 +552,38 @@ class IPWEstimator(MeanEstimator):
         self.population_size = population_size
 
     def point_estimate(self) -> float:
-        """Calculate a point estimate."""
+        """Calculate a point estimate.
+
+        Returns
+        -------
+         estimate : float
+            Inverse-propensity-weighted estimate of the population total divided by the
+            normalizing factor.
+
+        """
         nf = self.estimand.normalizing_factor(
             sample_size=len(self.weights), population_size=self.population_size
         )
         return np.dot(self.weights, self.outcomes) / nf
 
     def variance(self) -> float:
-        r"""Calculate the variance.
+        """Calculate the variance.
 
         Per (Wilson 2025, §2), an estimator for the variance is:
-                   \sum_i (((n/N) / pi_i) * y_i - pe)^2
-                  --------------------------------------,
-                                n * (n - 1)
+
+           Σᵢ(((n/N)/πᵢ) × yᵢ − pe)² / (n × (n − 1)),
+
         where pe is the point estimate and n is the sample size.
+
+        Returns
+        -------
+         variance : float
+            Estimated sampling variance of the point estimate.
 
         References
         ----------
-         - Wilson, Bob. 2025. "Design-Based Inference and Sensitivity Analysis for Survey
-           Sampling." https://adventuresinwhy.com/post/survey_sampling/
+         - Wilson, Bob. 2025. "Design-Based Inference and Sensitivity Analysis for
+           Survey Sampling." https://adventuresinwhy.com/post/survey_sampling/
 
         """
         n = len(self.weights)
@@ -345,16 +600,25 @@ class IPWEstimator(MeanEstimator):
     def _sensitivity_variance(self, gamma: float) -> tuple[float, float]:
         """Return variance at the worst-case lower- and upper-bound weights.
 
-        The lower-bound weights assign each observation the weight from the
-        sensitivity region that minimises the estimate (wl when outcomes >= 0,
-        wu otherwise), mirroring ``sensitivity_analysis``. The upper-bound
-        weights are the element-wise opposite. Variance is then evaluated
-        using the IPW formula at each of these weight vectors, implementing
-        the heuristic from (Wilson 2025, §3).
+        The lower-bound weights assign each observation the weight from the sensitivity
+        region that minimises the estimate (``wl`` when outcomes >= 0, ``wu``
+        otherwise), mirroring ``sensitivity_analysis``. The upper-bound weights are the
+        element-wise opposite. Variance is then evaluated using the IPW formula at each
+        of these weight vectors, implementing the heuristic from (Wilson 2025, §3).
 
-        This implementation is inherited by ``AIPWEstimator``, where
-        ``self.outcomes`` holds residuals rather than raw outcomes; the
-        formula is identical in both cases.
+        This implementation is inherited by ``AIPWEstimator``, where ``self.outcomes``
+        holds residuals rather than raw outcomes; the formula is identical in both
+        cases.
+
+        Parameters
+        ----------
+         gamma : float
+            The Gamma factor. Must be >= 1.0.
+
+        Returns
+        -------
+         lb_var, ub_var : float
+            Variance at the lower- and upper-bound sensitivity weights.
 
         """
         wl, wu = self.estimand.sensitivity_region(gamma)
@@ -379,7 +643,7 @@ class IPWEstimator(MeanEstimator):
         proxy_mean: float | None = None,
         alpha: float = 0.10,
     ) -> tuple[float, float]:
-        r"""Perform a sensitivity analysis.
+        """Perform a sensitivity analysis.
 
         Calculate a range of point estimates implied by the Gamma factor.
 
@@ -390,29 +654,35 @@ class IPWEstimator(MeanEstimator):
             scores. Defaults to 6. See Notes.
          outcome_proxies : array_like, optional
             A proxy for the outcome, observed for every unit in the sample. When
-            supplied together with ``proxy_mean``, an additional constraint is added
-            to the sensitivity region: the IPW estimate of the proxy mean must lie
-            within ``tol`` of ``proxy_mean``, where ``tol = z_crit * SE`` (the same
-            half-width as ``confidence_interval``). Weights that violate this
-            constraint are excluded from the sensitivity region, typically reducing
-            the width of the sensitivity interval. Must have the same length as
-            ``outcomes``. Requires ``proxy_mean`` to also be specified.
-         proxy_mean : float, optional
-            Known population mean of the outcome proxy. Requires ``outcome_proxies``
+            supplied together with ``proxy_mean``, an additional constraint is added to
+            the sensitivity region: the IPW estimate of the proxy mean must lie within
+            ``tol`` of ``proxy_mean``, where ``tol`` is the half-width from
+            ``confidence_interval``. Weights that violate this constraint are excluded
+            from the sensitivity region, typically reducing the width of the sensitivity
+            interval. Must have the same length as ``outcomes``. Requires ``proxy_mean``
             to also be specified.
+         proxy_mean : float, optional
+            Known population mean of the outcome proxy. Requires ``outcome_proxies`` to
+            also be specified.
          alpha : float, optional
-            Significance level used to compute the proxy tolerance
-            ``tol = stats.norm.isf(alpha / 2) * sqrt(variance())``. Defaults to
-            0.10, matching the default of ``confidence_interval``.
+            Significance level used to compute the proxy tolerance ``tol`` via
+            ``scipy.stats.norm.isf`` and the point-estimate variance. Defaults to 0.10,
+            matching the default of ``confidence_interval``.
 
         Returns
         -------
          lb, ub : float
             Lower and upper bounds on the point estimate.
 
+        Raises
+        ------
+         ValueError
+            If only one of ``outcome_proxies`` and ``proxy_mean`` is supplied, if
+            ``gamma`` < 1, or if the proxy constraints admit no feasible weights.
+
         Notes
         -----
-        See the Notes in WeightingEstimator for overall context. Without an outcome
+        See the Notes in ``WeightingEstimator`` for overall context. Without an outcome
         proxy there is a simple closed-form calculation for the sensitivity interval.
         See (Wilson 2025) for details. When an outcome proxy is supplied, the
         constrained optimisation is solved as a linear programme via
@@ -420,8 +690,8 @@ class IPWEstimator(MeanEstimator):
 
         References
         ----------
-         - Wilson, Bob. 2025. "Design-Based Inference and Sensitivity Analysis for Survey
-           Sampling." https://adventuresinwhy.com/post/survey_sampling/
+         - Wilson, Bob. 2025. "Design-Based Inference and Sensitivity Analysis for
+           Survey Sampling." https://adventuresinwhy.com/post/survey_sampling/
 
         """
         if (outcome_proxies is None) != (proxy_mean is None):
@@ -448,7 +718,8 @@ class IPWEstimator(MeanEstimator):
 
         # LP formulation with proxy constraint.
         p = np.asarray(outcome_proxies, dtype=float)
-        pm = float(proxy_mean)  # type: ignore[arg-type]
+        assert proxy_mean is not None  # Satisfy type-checker
+        pm = float(proxy_mean)
         zcrit = stats.norm.isf(alpha / 2)
         tol = zcrit * math.sqrt(self.variance())
         N = self.population_size
@@ -475,33 +746,43 @@ class IPWEstimator(MeanEstimator):
 
 
 class AIPWEstimator(IPWEstimator):
-    r"""Augmented Inverse Propensity Weighted Estimator.
+    """Augmented Inverse Propensity Weighted Estimator.
 
     Parameters
     ----------
      propensity_scores : list_like
         Propensity scores.
      outcomes : list_like
-        Outcomes or responses. Should have the same length as `propensity_scores`.
+        Outcomes or responses. Should have the same length as ``propensity_scores``.
      predicted_outcomes : list_like
         Predicted outcomes corresponding to each response. Should have the same length
-        as `propensity_scores`.
+        as ``propensity_scores``.
      mean_predicted_outcome : float
         Mean of predicted outcomes in target population.
      population_size : int
         Size of target population.
+     estimand : Estimand, optional
+        An ``Estimand`` object representing the thing to be estimated. Defaults to
+        ``PopulationMean``.
+     estimand_class : type, optional
+        Estimand class to construct from ``propensity_scores`` when ``estimand`` is not
+        given. Defaults to ``PopulationMean``.
+     kwargs : dict, optional
+        Extra arguments forwarded to the estimator constructor.
 
     Notes
     -----
     The AIPW estimator for a mean is:
-        \hat{Y}_AIPW = \bar{\mu} + (1/N) \sum_i w_i * (y_i - \mu(x_i)),
-    where w_i = 1 / pi_i, N is the target population size, and pi_i is the propensity
-    score (as in IPWEstimator). \mu(x_i) is a *prediction* of the outcome, y_i, for
-    individual i, made on the basis of covariates, x, observed for everyone in the
-    target population (including everyone in the sample), and \bar{\mu} is the average
-    predicted outcome in the target population. (Since we observe x for everyone in the
-    target population, we can predict the outcome for everyone in the population, and
-    \bar{\mu} is the average of these predictions.)
+
+       Ŷ_AIPW = μ̄ + (1/N) Σᵢ wᵢ × (yᵢ − μ(xᵢ)),
+
+    where wᵢ = 1/πᵢ, N is the target population size, and πᵢ is the propensity score (as
+    in ``IPWEstimator``). μ(xᵢ) is a *prediction* of the outcome, yᵢ, for individual i,
+    made on the basis of covariates, x, observed for everyone in the target population
+    (including everyone in the sample), and μ̄ is the average predicted outcome in the
+    target population. (Since we observe x for everyone in the target population, we can
+    predict the outcome for everyone in the population, and μ̄ is the average of these
+    predictions.)
 
     The intuition is, if we have a good model for the outcome, we can use it to predict
     the target population mean directly, then adjust this prediction with an estimator
@@ -510,8 +791,8 @@ class AIPWEstimator(IPWEstimator):
 
     References
     ----------
-     - Wilson, Bob. 2025. "Design-Based Inference and Sensitivity Analysis for Survey
-       Sampling." https://adventuresinwhy.com/post/survey_sampling/
+     - Wilson, Bob. 2025. "Design-Based Inference and Sensitivity Analysis for
+       Survey Sampling." https://adventuresinwhy.com/post/survey_sampling/
 
     """
 
@@ -548,22 +829,34 @@ class AIPWEstimator(IPWEstimator):
         self.mean_predicted_outcome = mean_predicted_outcome
 
     def point_estimate(self) -> float:
-        """Calculate a point estimate."""
+        """Calculate a point estimate.
+
+        Returns
+        -------
+         estimate : float
+            Mean predicted outcome plus the IPW estimate of the mean residual.
+
+        """
         return self.mean_predicted_outcome + super().point_estimate()
 
     def variance(self) -> float:
-        r"""Calculate the variance.
+        """Calculate the variance.
 
         Per (Wilson 2025, §2), an estimator for the variance is:
-                   \sum_i (w_i * y_i - pe)^2
-                  ---------------------------,
-                           n * (n - 1)
+
+           Σᵢ(wᵢ × yᵢ − pe)² / (n × (n − 1)),
+
         where pe is the point estimate and n is the sample size.
+
+        Returns
+        -------
+         variance : float
+            Estimated sampling variance of the point estimate.
 
         References
         ----------
-         - Wilson, Bob. 2025. "Design-Based Inference and Sensitivity Analysis for Survey
-           Sampling." https://adventuresinwhy.com/post/survey_sampling/
+         - Wilson, Bob. 2025. "Design-Based Inference and Sensitivity Analysis for
+           Survey Sampling." https://adventuresinwhy.com/post/survey_sampling/
 
         """
         n_over_N = len(self.weights) / self.population_size
@@ -583,7 +876,7 @@ class AIPWEstimator(IPWEstimator):
         proxy_mean: float | None = None,
         alpha: float = 0.10,
     ) -> tuple[float, float]:
-        r"""Perform a sensitivity analysis.
+        """Perform a sensitivity analysis.
 
         Calculate a range of point estimates implied by the Gamma factor.
 
@@ -606,16 +899,23 @@ class AIPWEstimator(IPWEstimator):
          lb, ub : float
             Lower and upper bounds on the point estimate.
 
+        Raises
+        ------
+         ValueError
+            If ``gamma`` < 1, if only one of ``outcome_proxies`` and ``proxy_mean`` is
+            supplied, or if the proxy constraints admit no feasible weights (propagated
+            from ``IPWEstimator.sensitivity_analysis``).
+
         Notes
         -----
-        See the Notes in WeightingEstimator for overall context. In our case, there is a
-        simple closed-form calculation for the sensitivity interval. See (Wilson 2025)
-        for details.
+        See the Notes in ``WeightingEstimator`` for overall context. In our case, there
+        is a simple closed-form calculation for the sensitivity interval. See (Wilson
+        2025) for details.
 
         References
         ----------
-         - Wilson, Bob. 2025. "Design-Based Inference and Sensitivity Analysis for Survey
-           Sampling." https://adventuresinwhy.com/post/survey_sampling/
+         - Wilson, Bob. 2025. "Design-Based Inference and Sensitivity Analysis for
+           Survey Sampling." https://adventuresinwhy.com/post/survey_sampling/
 
         """
         if gamma < 1.0:
@@ -637,26 +937,34 @@ class AIPWEstimator(IPWEstimator):
 
 
 class SIPWEstimator(MeanEstimator):
-    r"""Stabilized Inverse Propensity Weighted Estimator.
+    """Stabilized Inverse Propensity Weighted Estimator.
 
     Parameters
     ----------
      propensity_scores : list_like
         Propensity scores.
      outcomes : list_like
-        Outcomes or responses. Should have the same length as `propensity_scores`.
+        Outcomes or responses. Should have the same length as ``propensity_scores``.
      binary_outcomes : bool, optional
-        Indicates whether the outcomes are binary. If `outcomes` contains values other
+        Indicates whether the outcomes are binary. If ``outcomes`` contains values other
         than 0 and 1, we conclude the outcomes are *not* binary; if all values are 0 and
         1 we conclude outcomes *are* binary. The only place this matters is in the
         sensitivity analysis, which is faster for binary outcomes than in general.
+     estimand : Estimand, optional
+        An ``Estimand`` object representing the thing to be estimated. Defaults to
+        ``PopulationMean``.
+     estimand_class : type, optional
+        Estimand class to construct from ``propensity_scores`` when ``estimand`` is not
+        given. Defaults to ``PopulationMean``.
+     kwargs : dict, optional
+        Extra arguments forwarded to the estimator constructor.
 
     Notes
     -----
     The SIPW estimator is:
-                       \sum_i w_i * y_i
-       \hat{Y}_SIPW = -------------------
-                         \sum_i w_i
+
+       Ŷ_SIPW = Σᵢ wᵢyᵢ / Σᵢ wᵢ.
+
     This is literally the first thing people think of when they hear "weighted average",
     fancy name notwithstanding. The weights are the inverse propensity scores. Since we
     divide by the sum of the weights, we can scale them by an arbitrary multiplicative
@@ -703,17 +1011,29 @@ class SIPWEstimator(MeanEstimator):
             self.binary_outcomes = False
 
     def point_estimate(self) -> float:
-        """Calculate a point estimate."""
+        """Calculate a point estimate.
+
+        Returns
+        -------
+         estimate : float
+            Self-normalized weighted mean of the outcomes.
+
+        """
         return np.dot(self.weights, self.outcomes) / np.sum(self.weights)
 
     def variance(self) -> float:
-        r"""Calculate the variance.
+        """Calculate the variance.
 
         Per (Sarig, Galili, Eilat 2023, Appendix D.2), an estimator for the variance is:
-                   \sum_i w_i^2 * (y_i - pe)^2
-                  -----------------------------,
-                        (\sum_i w_i)^2
+
+           Σᵢ wᵢ² × (yᵢ − pe)² / (Σᵢ wᵢ)²,
+
         where pe is the point estimate.
+
+        Returns
+        -------
+         variance : float
+            Estimated sampling variance of the point estimate.
 
         """
         return np.sum(
@@ -723,30 +1043,34 @@ class SIPWEstimator(MeanEstimator):
     def _sensitivity_weights(
         self, gamma: float
     ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
-        r"""Return weight vectors that achieve the sensitivity lower and upper bounds.
+        """Return weight vectors that achieve the sensitivity lower and upper bounds.
 
         For binary outcomes the optimal weights are determined element-wise:
-        observations with outcome 1 receive ``wl`` for the lower bound and
-        ``wu`` for the upper bound; observations with outcome 0 receive the
-        reverse.
+        observations with outcome 1 receive ``wl`` for the lower bound and ``wu`` for
+        the upper bound; observations with outcome 0 receive the reverse.
 
-        For non-binary outcomes, (Zhao, Small, and Bhattarcharya 2019)
-        calculates
+        For non-binary outcomes, (Zhao, Small, and Bhattarcharya 2019) calculates
 
-                 \sum_i w_i * y_i
-           inf -------------------
-                   \sum_i w_i
+           inf Σᵢwᵢyᵢ/Σᵢwᵢ
 
-        over ``wl_i <= w_i <= wu_i`` as the lower bound, and the supremum
-        as the upper bound. They propose a fast algorithm requiring a single
-        pass over the sorted data. For the lower bound, observations are
-        processed in ascending outcome order: flipping each weight from
-        ``wl`` to ``wu`` increases the denominator faster than the
-        numerator (low outcome * high weight), decreasing the ratio. The
-        algorithm stops at the first flip that fails to improve. The cutoff
-        index records how many observations were flipped at the optimum, and
-        the weight vector is reconstructed from it. The upper bound uses the
-        same approach in descending outcome order.
+        over wlᵢ ≤ wᵢ ≤ wuᵢ as the lower bound, and the supremum as the upper bound.
+        They propose a fast algorithm requiring a single pass over the sorted data. For
+        the lower bound, observations are processed in ascending outcome order: flipping
+        each weight from ``wl`` to ``wu`` increases the denominator faster than the
+        numerator (low outcome * high weight), decreasing the ratio. The algorithm stops
+        at the first flip that fails to improve. The cutoff index records how many
+        observations were flipped at the optimum, and the weight vector is reconstructed
+        from it. The upper bound uses the same approach in descending outcome order.
+
+        Parameters
+        ----------
+         gamma : float
+            The Gamma factor. Must be >= 1.0.
+
+        Returns
+        -------
+         lb_weights, ub_weights : (M,) ``npt.NDArray[np.float64]``
+            Weight vectors attaining the lower and upper sensitivity bounds.
 
         References
         ----------
@@ -809,12 +1133,22 @@ class SIPWEstimator(MeanEstimator):
     def _sensitivity_variance(self, gamma: float) -> tuple[float, float]:
         """Return variance at the worst-case lower- and upper-bound weights.
 
-        Calls ``_sensitivity_weights`` to obtain the weight vectors, then
-        evaluates the SIPW variance formula at each, implementing the
-        heuristic from (Wilson 2025, §3).
+        Calls ``_sensitivity_weights`` to obtain the weight vectors, then evaluates the
+        SIPW variance formula at each, implementing the heuristic from (Wilson 2025,
+        §3).
 
-        This implementation is inherited by ``SAIPWEstimator``, where
-        ``self.outcomes`` holds residuals; the formula is identical.
+        This implementation is inherited by ``SAIPWEstimator``, where ``self.outcomes``
+        holds residuals; the formula is identical.
+
+        Parameters
+        ----------
+         gamma : float
+            The Gamma factor. Must be >= 1.0.
+
+        Returns
+        -------
+         lb_var, ub_var : float
+            Variance at the lower- and upper-bound sensitivity weights.
 
         """
         lb_weights, ub_weights = self._sensitivity_weights(gamma)
@@ -837,39 +1171,45 @@ class SIPWEstimator(MeanEstimator):
         proxy_mean: float | None = None,
         alpha: float = 0.10,
     ) -> tuple[float, float]:
-        r"""Perform a sensitivity analysis.
+        """Perform a sensitivity analysis.
 
-        Calculate a range of point estimates implied by the Gamma factor.
-        See ``_sensitivity_weights`` for the unconstrained algorithm.
+        Calculate a range of point estimates implied by the Gamma factor. See
+        ``_sensitivity_weights`` for the unconstrained algorithm.
 
         Parameters
         ----------
          gamma : float, optional
             The Gamma factor. Must be >= 1.0, with 1.0 indicating perfect propensity
-            scores. Defaults to 6. See Notes in WeightingEstimator.
+            scores. Defaults to 6. See Notes in ``WeightingEstimator``.
          outcome_proxies : array_like, optional
-            A proxy for the outcome with a known population mean. When supplied
-            together with ``proxy_mean``, an additional constraint is added to the
-            sensitivity region: the SIPW estimate of the proxy mean must lie within
-            ``tol`` of ``proxy_mean``, where ``tol = z_crit * SE``. For the SIPW
-            estimator this is ``(w^T proxy) / (w^T 1) in [pm - tol, pm + tol]``,
-            which is linear after the Charnes-Cooper transformation. Weights that
-            violate this constraint are excluded from the sensitivity region,
-            typically reducing the width of the sensitivity interval. Must have the
-            same length as ``outcomes``. Requires ``proxy_mean`` to also be
-            specified.
-         proxy_mean : float, optional
-            Known population mean of the outcome proxy. Requires ``outcome_proxies``
+            A proxy for the outcome with a known population mean. When supplied together
+            with ``proxy_mean``, an additional constraint is added to the sensitivity
+            region: the SIPW estimate of the proxy mean must lie within ``tol`` of
+            ``proxy_mean``, where ``tol`` is the half-width from
+            ``confidence_interval``. For the SIPW estimator this is ``(wᵀproxy)/(wᵀ1)``
+            in [pm − tol, pm + tol], which is linear after the Charnes-Cooper
+            transformation. Weights that violate this constraint are excluded from the
+            sensitivity region, typically reducing the width of the sensitivity
+            interval. Must have the same length as ``outcomes``. Requires ``proxy_mean``
             to also be specified.
+         proxy_mean : float, optional
+            Known population mean of the outcome proxy. Requires ``outcome_proxies`` to
+            also be specified.
          alpha : float, optional
-            Significance level for the proxy tolerance
-            ``tol = stats.norm.isf(alpha / 2) * sqrt(variance())``. Defaults to
-            0.10, matching the default of ``confidence_interval``.
+            Significance level for the proxy tolerance ``tol`` via
+            ``scipy.stats.norm.isf`` and the point-estimate variance. Defaults to 0.10,
+            matching the default of ``confidence_interval``.
 
         Returns
         -------
          lb, ub : float
             Lower and upper bounds on the point estimate.
+
+        Raises
+        ------
+         ValueError
+            If only one of ``outcome_proxies`` and ``proxy_mean`` is supplied, if
+            ``gamma`` < 1, or if the proxy constraints admit no feasible weights.
 
         """
         if (outcome_proxies is None) != (proxy_mean is None):
@@ -893,7 +1233,8 @@ class SIPWEstimator(MeanEstimator):
         # Charnes-Cooper LP with proxy constraint.
         wl, wu = self.estimand.sensitivity_region(gamma)
         p = np.asarray(outcome_proxies, dtype=float)
-        pm = float(proxy_mean)  # type: ignore[arg-type]
+        assert proxy_mean is not None  # Satisfy type-checker
+        pm = float(proxy_mean)
         zcrit = stats.norm.isf(alpha / 2)
         tol = zcrit * math.sqrt(self.variance())
         n = len(self.outcomes)
@@ -902,7 +1243,7 @@ class SIPWEstimator(MeanEstimator):
         # Objective: outcomes^T w_cc  (s has zero coefficient)
         c_obj = np.append(self.outcomes, 0.0)
 
-        # Equality: sum(w_cc) = 1  →  [ones; 0] @ x = 1
+        # Equality: sum(w_cc) = 1  ->  [ones; 0] @ x = 1
         A_eq = np.append(np.ones(n), 0.0).reshape(1, n + 1)
         b_eq = np.array([1.0])
 
@@ -911,8 +1252,8 @@ class SIPWEstimator(MeanEstimator):
         bottom = np.hstack([np.eye(n), -wu.reshape(-1, 1)])
 
         # Proxy constraints (after CC substitution; valid since sum(w_cc)=1):
-        # p^T w_cc <= pm + tol  →  (p - (pm+tol))^T w_cc <= 0
-        # p^T w_cc >= pm - tol  →  ((pm-tol) - p)^T w_cc <= 0
+        # p^T w_cc <= pm + tol  ->  (p - (pm+tol))^T w_cc <= 0
+        # p^T w_cc >= pm - tol  ->  ((pm-tol) - p)^T w_cc <= 0
         proxy_upper = np.append(p - (pm + tol), 0.0).reshape(1, n + 1)
         proxy_lower = np.append((pm - tol) - p, 0.0).reshape(1, n + 1)
 
@@ -958,17 +1299,25 @@ class SAIPWEstimator(SIPWEstimator):
      propensity_scores : list_like
         Propensity scores.
      outcomes : list_like
-        Outcomes or responses. Should have the same length as `propensity_scores`.
+        Outcomes or responses. Should have the same length as ``propensity_scores``.
      predicted_outcomes : list_like
         Predicted outcomes corresponding to each response. Should have the same length
-        as `propensity_scores`.
+        as ``propensity_scores``.
      mean_predicted_outcome : float
         Mean of predicted outcomes in target population.
      binary_outcomes : bool, optional
-        Indicates whether the outcomes are binary. If `outcomes` contains values other
+        Indicates whether the outcomes are binary. If ``outcomes`` contains values other
         than 0 and 1, we conclude the outcomes are *not* binary; if all values are 0 and
         1 we conclude outcomes *are* binary. The only place this matters is in the
         sensitivity analysis, which is faster for binary outcomes than in general.
+     estimand : Estimand, optional
+        An ``Estimand`` object representing the thing to be estimated. Defaults to
+        ``PopulationMean``.
+     estimand_class : type, optional
+        Estimand class to construct from ``propensity_scores`` when ``estimand`` is not
+        given. Defaults to ``PopulationMean``.
+     kwargs : dict, optional
+        Extra arguments forwarded to the estimator constructor.
 
     Notes
     -----
@@ -1008,17 +1357,29 @@ class SAIPWEstimator(SIPWEstimator):
         self.mean_predicted_outcome = mean_predicted_outcome
 
     def point_estimate(self) -> float:
-        """Calculate a point estimate."""
+        """Calculate a point estimate.
+
+        Returns
+        -------
+         estimate : float
+            Mean predicted outcome plus the SIPW estimate of the mean residual.
+
+        """
         return self.mean_predicted_outcome + super().point_estimate()
 
     def variance(self) -> float:
-        r"""Calculate the variance.
+        """Calculate the variance.
 
         Per (Sarig, Galili, Eilat 2023, Appendix D.2), an estimator for the variance is:
-                   \sum_i w_i^2 * (y_i - pe)^2
-                  -----------------------------,
-                        (\sum_i w_i)^2
+
+           Σᵢ wᵢ² × (yᵢ − pe)² / (Σᵢ wᵢ)²,
+
         where pe is the point estimate.
+
+        Returns
+        -------
+         variance : float
+            Estimated sampling variance of the point estimate.
 
         """
         return np.sum(
@@ -1033,7 +1394,7 @@ class SAIPWEstimator(SIPWEstimator):
         proxy_mean: float | None = None,
         alpha: float = 0.10,
     ) -> tuple[float, float]:
-        r"""Perform a sensitivity analysis.
+        """Perform a sensitivity analysis.
 
         Calculate a range of point estimates implied by the Gamma factor.
 
@@ -1056,9 +1417,17 @@ class SAIPWEstimator(SIPWEstimator):
          lb, ub : float
             Lower and upper bounds on the point estimate.
 
+        Raises
+        ------
+         ValueError
+            If ``gamma`` < 1, if only one of ``outcome_proxies`` and ``proxy_mean`` is
+            supplied, or if the proxy constraints admit no feasible weights (propagated
+            from ``SIPWEstimator.sensitivity_analysis``).
+
         Notes
         -----
-        See the Notes in WeightingEstimator and SIPWEstimator for overall context.
+        See the Notes in ``WeightingEstimator`` and ``SIPWEstimator`` for overall
+        context.
 
         """
         if gamma < 1.0:
@@ -1088,15 +1457,19 @@ class RatioEstimator(WeightingEstimator):
         Propensity scores.
      numerator_outcomes, denominator_outcomes : list_like
         Outcomes or responses corresponding to numerator and denominator. Should have
-        the same length as `propensity_scores`.
+        the same length as ``propensity_scores``.
      estimand : Estimand, optional
-        An Estimand object representing the thing to be estimated. Defaults to
-        PopulationMean.
+        An ``Estimand`` object representing the thing to be estimated. Defaults to
+        ``PopulationMean``.
+     estimand_class : type, optional
+        Estimand class to construct from ``propensity_scores`` when ``estimand`` is not
+        given. Defaults to ``PopulationMean``.
      estimator_class : ["IPW", "AIPW", "SIPW", "SAIPW"], optional
-        What kind of estimator to use. Defaults to "SIPW". Currently only "SIPW" is supported.
+        What kind of estimator to use. Defaults to "SIPW". Currently only "SIPW" is
+        supported.
      numerator_estimator_class, denominator_estimator_class: ["IPW", "AIPW", "SIPW", "SAIPW"], optional
         If you really want to use different estimator classes for numerator vs
-        denominator, you can. Defaults to `estimator_class`. Currently only "SIPW" is
+        denominator, you can. Defaults to ``estimator_class``. Currently only "SIPW" is
         supported.
      numerator_kwargs, denominator_kwargs, kwargs : dict_like
         Extra kwargs to pass to the estimators.
@@ -1162,16 +1535,37 @@ class RatioEstimator(WeightingEstimator):
 
     @property
     def weights(self) -> npt.NDArray[np.float64]:
-        """Wrapper for weights."""
+        """Weights from the numerator estimator.
+
+        Returns
+        -------
+         weights : (M,) ``npt.NDArray[np.float64]``
+            Weight for each of the ``M`` sample members.
+
+        """
         return self.numerator_estimator.weights
 
     @property
     def propensity_scores(self) -> npt.NDArray[np.float64]:
-        """Wrapper for propensity scores."""
+        """Propensity scores from the numerator estimator.
+
+        Returns
+        -------
+         propensity_scores : (M,) ``npt.NDArray[np.float64]``
+            Estimated response propensity for each sample member.
+
+        """
         return self.numerator_estimator.propensity_scores
 
     def point_estimate(self) -> float:
-        """Calculate a point estimate."""
+        """Calculate a point estimate.
+
+        Returns
+        -------
+         estimate : float
+            Ratio of the numerator and denominator point estimates.
+
+        """
         return (
             self.numerator_estimator.point_estimate()
             / self.denominator_estimator.point_estimate()
@@ -1181,6 +1575,11 @@ class RatioEstimator(WeightingEstimator):
         """Calculate the variance.
 
         Uses the delta method to calculate the variance.
+
+        Returns
+        -------
+         variance : float
+            Estimated sampling variance of the ratio estimate.
 
         """
         mu_num = self.numerator_estimator.point_estimate()
@@ -1211,7 +1610,7 @@ class RatioEstimator(WeightingEstimator):
         proxy_mean: float | None = None,
         alpha: float = 0.10,
     ) -> tuple[float, float]:
-        r"""Perform a sensitivity analysis.
+        """Perform a sensitivity analysis.
 
         Calculate a range of point estimates implied by the Gamma factor.
 
@@ -1220,21 +1619,32 @@ class RatioEstimator(WeightingEstimator):
          gamma : float, optional
             The Gamma factor. Must be >= 1.0, with 1.0 indicating perfect propensity
             scores. Defaults to 6. See Notes.
+         outcome_proxies : array_like, optional
+            Ignored by this estimator; proxy constraints are not supported here.
+         proxy_mean : float, optional
+            Ignored by this estimator.
+         alpha : float, optional
+            Ignored by this estimator.
 
         Returns
         -------
          lb, ub : float
             Lower and upper bounds on the point estimate.
 
+        Raises
+        ------
+         ValueError
+            If ``gamma`` < 1.
+
         Notes
         -----
-        See the Notes in WeightingEstimator for overall context.
+        See the Notes in ``WeightingEstimator`` for overall context.
 
         We calculate
-                 \sum_i w_i * x_i
-           inf -------------------
-                 \sum_i w_i * y_i
-        over wli <= w_i <= wui as the lower bound of the sensitivity interval, and the
+
+           inf Σᵢwᵢxᵢ/Σᵢwᵢyᵢ
+
+        over wlᵢ ≤ wᵢ ≤ wuᵢ as the lower bound of the sensitivity interval, and the
         supremum as the upper bound. These are linear fractional programs subject to
         linear inequality constraints. They may be transformed to equivalent linear
         programs and solved efficiently, as described in Boyd and Vandenberghe (2004).
@@ -1258,11 +1668,10 @@ class RatioEstimator(WeightingEstimator):
         x_num = self.numerator_estimator.outcomes
         y_den = self.denominator_estimator.outcomes
 
-        lb_solver = LinearFractionalProgramSolver(c=x_num, y=y_den, wl=wl, wu=wu)
-        ub_solver = LinearFractionalProgramSolver(c=-x_num, y=y_den, wl=wl, wu=wu)
-
-        lb_res = lb_solver.solve(x0=lb_solver.x0)
-        ub_res = ub_solver.solve(x0=ub_solver.x0)
+        lb_res = solve_bounded_linear_fractional_program(c=x_num, y=y_den, wl=wl, wu=wu)
+        ub_res = solve_bounded_linear_fractional_program(
+            c=-x_num, y=y_den, wl=wl, wu=wu
+        )
 
         return lb_res.objective_value, -ub_res.objective_value
 
@@ -1276,7 +1685,7 @@ class RatioEstimator(WeightingEstimator):
             | np.random.BitGenerator
             | np.random.Generator
         ) = None,
-    ) -> Generator[Self, None, None]:
+    ) -> Generator[RatioEstimator, None, None]:
         """Yield a sequence of resampled estimators.
 
         Parameters
@@ -1284,7 +1693,12 @@ class RatioEstimator(WeightingEstimator):
          B : int
             Number of bootstrap replications to run.
          seed : int, list_like, etc
-            A seed for numpy.random.default_rng. See that documentation for details.
+            A seed for ``numpy.random.default_rng``. See that documentation for details.
+
+        Yields
+        ------
+         estimator : ``RatioEstimator``
+            Bootstrap-resampled estimator.
 
         """
         rng = np.random.default_rng(seed)

@@ -11,18 +11,24 @@ dependencies = [
     "matplotlib>=3.10.1,<4",
     "pandas>=2.3.1,<3",
     "seaborn>=0.13.2,<0.14",
-    "typing-extensions>=4.15.0,<5",
-    "cvxium>=0.4.2",
+    "cvxium>=1.0.0,<2",
 ]
 
 [dependency-groups]
 dev = [
     "pytest>=9.0.3,<10",
+    "parameterized>=0.9.0,<0.10",
     "black>=26.3.1,<27",
     "ruff>=0.11.6,<0.12",
     "mypy>=1.14.0,<2",
     "pandas-stubs>=2.2.0,<3",
 ]
+
+[tool.hatch.build.targets.wheel]
+force-include = {"USAGE.md" = "pyrake/USAGE.md"}
+
+[tool.hatch.build.targets.sdist]
+include = ["pyrake/", "USAGE.md", "README.md", "LICENSE.txt"]
 
 [build-system]
 requires = ["hatchling"]
@@ -103,6 +109,14 @@ ignore = [
     "N806",   # Variable in function should be lowercase (allows math notation like M, N, X)
     "NPY002", # Allow numpy.random.Generator for newer code
     "SIM108", # Use ternary operator (sometimes clearer to use if-else)
+    "RUF001", # Ambiguous unicode in strings (math notation: ν, σ, −, ×, ℓ)
+    "RUF002", # Ambiguous unicode in docstrings
+    "RUF003", # Ambiguous unicode in comments
+    "UP038",  # isinstance(x, (A, B)) is clearer than A | B; deprecated in ruff
+    "TC001",  # Moving annotation-only imports under TYPE_CHECKING adds noise
+    "TC002",  # for no runtime benefit at this library's import cost
+    "TC003",
+    "TC006",  # Quoting the type in cast() hurts readability
 ]
 
 # Allow autofix for all enabled rules (when `--fix`) is provided
@@ -184,6 +198,7 @@ module = [
     "scipy.*",
     "matplotlib.*",
     "seaborn.*",
+    "parameterized.*",
 ]
 ignore_missing_imports = true
 

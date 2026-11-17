@@ -1,38 +1,139 @@
-"""Solve optimization problem."""
+"""Weight calibration with exact and approximate balance constraints.
+
+``Rake`` solves the single-group calibration problem, minimizing a ``Distance`` penalty
+subject to equality, imbalance, weight-cap and design-effect constraints. Joint
+treatment/control calibration lives in ``joint_calibrator``, which builds on this
+module.
+
+"""
+
+from __future__ import annotations
+
+from typing import Literal, overload
 
 import numpy as np
 import numpy.typing as npt
 from cvxium import (
-    EqualityConstrainedInteriorPointMethodSolver,
-    FeasibilitySolver,
-    InteriorPointMethodSolver,
+    BarrierSolver,
+    BoundsConstraintLayer,
+    ConstraintLayer,
+    EqualityConstraintLayer,
+    ImbalanceConstraintLayer,
     OptimizationSettings,
-    multiply_diagonal,
-    multiply_rank_one_update,
-    multiply_rank_p_update,
-    solve_diagonal_eta_inverse,
-    solve_kkt_system,
-    solve_rank_one_update,
-    solve_rank_p_update,
+    PrimalDualSolver,
+    Problem,
+    Solver,
+    SolveResult,
+    SquaredNormConstraintLayer,
 )
 
-from .distance_metrics import Distance
-from .phase1solvers import (
-    EqualityWithBoundsAndImbalanceConstraintSolver,
-    EqualityWithBoundsAndNormConstraintSolver,
-    EqualityWithBoundsSolver,
+from pyrake._typing import none_throws
+from pyrake.calibration.distance_metrics import (
+    Distance,
 )
 
 
-class Rake(EqualityConstrainedInteriorPointMethodSolver, InteriorPointMethodSolver):
-    r"""Solve optimization problem.
+def _as_float_array(
+    value: npt.ArrayLike | None, name: str
+) -> npt.NDArray[np.float64] | None:
+    """Coerce ``value`` to a float64 array, passing None through.
 
-    Class for solving problems of the form:
-           minimize    D(w, v)
-           subject to  (1/M) * X^T * w = \mu
-                       \| (1/M) * Z^T * w - \nu \|_\infty <= \psi (optional)
-                       (1/M) * \| w \|_2^2 <= \phi (optional)
-                        w >= min_weight,
+    Callers build these from pandas objects, and a frame that carries a single
+    non-numeric column yields slices of dtype object. Numpy ufuncs cannot operate on
+    those, so without this the solve fails inside the barrier loop with ``loop of ufunc
+    does not support argument 0 of type float``, many frames from the input that caused
+    it.
+
+    Parameters
+    ----------
+     value : npt.ArrayLike | None
+        Candidate array-like, or None.
+     name : str
+        Argument name, for the error when conversion fails.
+
+    Returns
+    -------
+     arr : npt.NDArray[np.float64] | None
+        ``value`` as float64, or None when ``value`` is None.
+
+    Raises
+    ------
+     ValueError
+        When ``value`` cannot be converted to float64.
+
+    """
+    if value is None:
+        return None
+
+    try:
+        return np.asarray(value, dtype=np.float64)
+    except (TypeError, ValueError) as e:
+        raise ValueError(
+            f"`{name}` must be numeric, but could not be converted to float64. "
+            "If it came from a DataFrame, check for non-numeric columns, e.g. "
+            "`df[covariates].astype(float)`."
+        ) from e
+
+
+@overload
+def _as_float_scalar_or_array(
+    value: float | list[float] | npt.NDArray[np.float64], name: str
+) -> float | npt.NDArray[np.float64]: ...
+
+
+@overload
+def _as_float_scalar_or_array(
+    value: float | list[float] | npt.NDArray[np.float64] | None, name: str
+) -> float | npt.NDArray[np.float64] | None: ...
+
+
+def _as_float_scalar_or_array(
+    value: float | list[float] | npt.NDArray[np.float64] | None, name: str
+) -> float | npt.NDArray[np.float64] | None:
+    """Coerce ``value`` to a float or a float64 array, passing None through.
+
+    Scalars stay scalars: callers downstream branch on whether these are sequences, and
+    promoting a scalar to a 0-d array would change that.
+
+    Parameters
+    ----------
+     value : float | list[float] | npt.NDArray[np.float64] | None
+        Candidate scalar or array-like, or None.
+     name : str
+        Argument name, for the error when conversion fails.
+
+    Returns
+    -------
+     out : float | npt.NDArray[np.float64] | None
+        ``value`` as a float or float64 array, or None when ``value`` is None.
+
+    Raises
+    ------
+     ValueError
+        When ``value`` is neither a scalar nor convertible to float64.
+
+    """
+    if value is None:
+        return None
+
+    if isinstance(value, (list, tuple, np.ndarray)):
+        return _as_float_array(value, name)
+
+    try:
+        return float(value)
+    except (TypeError, ValueError) as e:
+        raise ValueError(f"`{name}` must be a number, but got {value!r}.") from e
+
+
+class Rake:
+    """Calibrated weights with exact and approximate covariate balance.
+
+    Solves problems of the form:
+       minimize    D(w, v)
+       subject to  (1/M) Xᵀw = μ,
+                   ‖(1/M) Zᵀw - ν‖∞ ≤ ψ (optional),
+                   (1/M) ‖w‖₂² ≤ φ (optional),
+                   w ≥ min_weight,
     with optional constraints on max covariate imbalance and on the mean of the weights.
 
     Parameters
@@ -55,12 +156,20 @@ class Rake(EqualityConstrainedInteriorPointMethodSolver, InteriorPointMethodSolv
          Constraint on mean squared weight.
      min_weight : float or list[float], optional
          Lower bound on weights. Defaults to 0.
+     max_weight : float or list[float] or None, optional
+         Upper bound on weights (a "weight cap"). A common use is to cap the influence
+         of any single response: e.g. ``max_weight=20`` prevents one observation from
+         driving the estimate. ``None`` (the default) disables the upper bound. Like
+         ``min_weight``, may be scalar (broadcasts to all components) or a vector of
+         per-component caps; vectors are particularly useful when jointly calibrating
+         (the cap can vary by group).
      constrain_mean_weight_to : float or None, default=1
          If not None, add a constraint that the average weight must equal
-         `constrain_mean_weight_to`, which must be strictly positive. The default is an
-         average weight of 1. Another common option is for the average weight to equal
+         ``constrain_mean_weight_to``, which must be strictly positive. The default
+         is an average weight of 1. Another common option is for the average
+         weight to equal
          the average baseline weight. If no such constraint is desired, manually specify
-         `constrain_mean_weight_to=None`.
+         ``constrain_mean_weight_to=None``.
      settings : OptimizationSettings
         Optimization settings.
 
@@ -74,19 +183,19 @@ class Rake(EqualityConstrainedInteriorPointMethodSolver, InteriorPointMethodSolv
 
     The next level is a constraint on the maximum imbalance. For covariates
     corresponding to the inputs Z and nu, the vector of covariate imbalances, after
-    weighting, is (1/M) * Z^T * w - \nu. We want these imbalances to be close to zero,
-    but not necessarily exactly zero. Even a true random sample would have some chance
-    imbalances. The l∞ constraint allows us to achieve an adjustment strategy that
+    weighting, is (1/M) Zᵀw - ν. We want these imbalances to be close to zero, but not
+    necessarily exactly zero. Even a true random sample would have some chance
+    imbalances. The ℓ∞ constraint allows us to achieve an adjustment strategy that
     mimics a random sample.
 
     When we assess covariate balance (using the tools in visualizations.py), we plot z
-    statistics: adjusted sample mean minus population mean divided by sqrt(M) times the
+    statistics: adjusted sample mean minus population mean divided by √M times the
     population standard deviation. If we whiten Z and nu (divide by the population
     standard deviation), which we typically recommend to put all covariates on a common
-    scale, then setting psi to, say 1.96 / sqrt(M) will constrain covariate imbalances
-    to be not-stat-sig at level 0.05. But (Cochran and Chambers, 1965, §3.1) emphasizes
-    bias can occur even without stat sig differences in covariates. Their recommendation
-    is equivalent to setting psi = 1.5 / sqrt(M), which is the default here.
+    scale, then setting psi to, say 1.96 / √M will constrain covariate imbalances to be
+    not-stat-sig at level 0.05. But (Cochran and Chambers, 1965, §3.1) emphasizes bias
+    can occur even without stat sig differences in covariates. Their recommendation is
+    equivalent to setting psi = 1.5 / √M, which is the default here.
 
     The highest level is to force the adjusted sample mean to match the population mean
     exactly. This can typically only be done for a few covariates without drastically
@@ -95,25 +204,25 @@ class Rake(EqualityConstrainedInteriorPointMethodSolver, InteriorPointMethodSolv
     We thus recommend having a strong point of view on the covariates that are most
     important for predicting the response. Use propensity scores to balance all
     covariates approximately; balance the means of the more important covariates using
-    the l∞ constraint; balance exactly the means only of the most important covariates.
+    the ℓ∞ constraint; balance exactly the means only of the most important covariates.
 
-    In a sense, the ideal weight to use is (M/N) / pi, where N is the population size
-    and pi the true propensity score. That yields unbiased estimates, but of course
-    requires known propensity scores. Weights that are less than (M/N) correspond to
-    propensity scores > 1, which are impossible a priori. Thus, weights should generally
-    never be less than M/N, which can be incorporated into the optimization problem
-    using the `min_weight` argument.
+    In a sense, the ideal weight to use is (M/N) / π, where N is the population size and
+    π the true propensity score. That yields unbiased estimates, but of course requires
+    known propensity scores. Weights that are less than (M/N) correspond to propensity
+    scores > 1, which are impossible a priori. Thus, weights should generally never be
+    less than M/N, which can be incorporated into the optimization problem using the
+    ``min_weight`` argument.
 
-    `min_weight` and `psi` can both be vector arguments. This is particularly helpful
-    when jointly calibrating weights for treatment and control groups. In this case,
-    min_weight for the control (treated) observations should be the control (treated)
-    sample size divided by the population size, so different bounds should be specified
-    for the two groups. For joint calibration, we may have up to 3 groups of imbalance
-    constraints, comparing treatment and control (internal validity), comparing control
-    to the target population (external validity), and comparing treatment to the target
-    population (external validity). The two sets of external validity constraints would
-    use, e.g. 1.5 / sqrt(control sample size) or 1.5 / sqrt(treated sample size),
-    while the internal validity constraint would use
+    ``min_weight`` and ``psi`` can both be vector arguments. This is particularly
+    helpful when jointly calibrating weights for treatment and control groups. In this
+    case, min_weight for the control (treated) observations should be the control
+    (treated) sample size divided by the population size, so different bounds should be
+    specified for the two groups. For joint calibration, we may have up to 3 groups of
+    imbalance constraints, comparing treatment and control (internal validity),
+    comparing control to the target population (external validity), and comparing
+    treatment to the target population (external validity). The two sets of external
+    validity constraints would use, e.g. 1.5 / sqrt(control sample size) or 1.5 /
+    sqrt(treated sample size), while the internal validity constraint would use
        1.5 * sqrt(1 / (control sample size) + 1 / (treated sample size)),
     corresponding to a 2 sample z test.
 
@@ -134,12 +243,44 @@ class Rake(EqualityConstrainedInteriorPointMethodSolver, InteriorPointMethodSolv
         psi: float | list[float] | npt.NDArray[np.float64] | None = None,
         phi: float | None = None,
         min_weight: float | list[float] | npt.NDArray[np.float64] = 0.0,
+        max_weight: float | list[float] | npt.NDArray[np.float64] | None = None,
         constrain_mean_weight_to: float | None = 1.0,
         settings: OptimizationSettings | None = None,
+        engine: Literal["ipm", "pd"] = "ipm",
     ) -> None:
-        """Create a Rake object."""
+        """Create a Rake calibrator.
+
+        ``engine`` selects the inner solver used by ``Rake.solve()``: ``"ipm"``
+        (default) routes through Cvxium's ``BarrierSolver`` over the cached ``Problem``;
+        ``"pd"`` dispatches through ``PrimalDualSolver`` on an equivalent ``Problem``.
+        Both engines converge to the same solution at high precision; on a single solve,
+        IPM and PD are within ~20% of each other on Rake-shape problems (2026-05-21
+        re-benchmark). PD's practical advantage shows up on *sweep* paths such as
+        ``EfficientFrontier`` where it warm-starts naturally across Pareto-frontier
+        iterations -- IPM cannot, because its barrier Phase I rejects boundary-feasible
+        ``x0`` from the prior iteration. ``EfficientFrontier`` therefore defaults to PD;
+        see its docstring.
+
+        """
+        if engine not in ("ipm", "pd"):
+            raise ValueError(f"engine must be one of 'ipm' or 'pd' (got {engine!r}).")
+        self.engine: Literal["ipm", "pd"] = engine
+
+        # Coerce before any validation: `.shape` and the dimension checks
+        # below succeed on object-dtype input, which then fails in the solver.
+        X = none_throws(_as_float_array(X, "X"))
+        mu = none_throws(_as_float_array(mu, "mu"))
+        Z = _as_float_array(Z, "Z")
+        nu = _as_float_array(nu, "nu")
+        psi = _as_float_scalar_or_array(psi, "psi")
+        min_weight = _as_float_scalar_or_array(min_weight, "min_weight")
+        max_weight = _as_float_scalar_or_array(max_weight, "max_weight")
+
         M, p = X.shape
-        assert mu.shape[0] == p
+        if mu.shape[0] != p:
+            raise ValueError(
+                "Dimension mismatch: mu must have same number of rows as X has columns."
+            )
 
         if Z is not None:
             if Z.shape[0] != M:
@@ -184,957 +325,232 @@ class Rake(EqualityConstrainedInteriorPointMethodSolver, InteriorPointMethodSolv
 
         self.distance = distance
         self.dimension: int = M
+        # A bare distance (e.g. ``KLDivergence()`` with no ``v``/``dimension``)
+        # defers its dimension; bind this Rake's ``M`` so it can serve as the
+        # ``Problem`` objective. Idempotent when already set to ``M``; raises on a
+        # genuine mismatch (e.g. a ``v`` whose length disagrees with the data).
+        self.distance.bind_dimension(M)
         self.phi = phi
         self.min_weight = min_weight
+        self._validate_weight_bounds(min_weight, max_weight)
+        self.max_weight = max_weight
         if settings is None:
             self.settings: OptimizationSettings = OptimizationSettings()
         else:
             self.settings = settings
 
-        if phi is not None:
-            self.phase1_solver: FeasibilitySolver = (
-                EqualityWithBoundsAndNormConstraintSolver(
-                    phi=M * phi,
-                    A=(1 / M) * self.X.T,
-                    b=self.mu,
-                    lb=min_weight,
-                    B=self.B,
-                    c=self.c,
-                    psi=self.psi,
-                    settings=self.settings,
-                )
-            )
-        elif self.B is not None:
+        A_mat = (1 / M) * self.X.T
+        self._equality_layer: EqualityConstraintLayer = EqualityConstraintLayer(
+            A=A_mat, b=self.mu
+        )
+        # Cached structured `Problem` (objective + constraint layers + equality),
+        # rebuilt whenever `phi` changes (see `update_phi`). Feasibility is handled
+        # by the solver's structured Phase I, which cascades the constraint layers
+        # itself; no pre-built per-layer Phase I solvers are needed.
+        self._problem: Problem = self._build_problem()
+
+    def solve(
+        self,
+        x0: npt.NDArray[np.float64] | None = None,
+    ) -> SolveResult:
+        """Dispatch to the configured solver engine.
+
+        ``engine='ipm'`` (default) routes through Cvxium's ``BarrierSolver``;
+        ``engine='pd'`` dispatches through ``PrimalDualSolver``. Both consume the same
+        cached ``Problem`` and handle equality feasibility themselves -- the barrier
+        projects a supplied ``x0`` onto the manifold and runs its structured Phase I;
+        PD's infeasible-start step drives the equality residual to zero.
+
+        When ``x0`` is None it defaults -- for BOTH engines -- to a domain-informed warm
+        start: ``self.distance.v`` when defined (the Distance's reference weights, e.g.
+        ``KLDivergence(v=...)``) else ``np.full(M, 1.0)``, clipped into ``[min_weight,
+        max_weight]`` (the bare default can fall outside the box, e.g. when ``max_weight
+        < 1.0`` or when ``self.distance.v`` itself does). See ``_default_x0``. A
+        user-supplied ``x0`` is passed through unchanged.
+
+        Parameters
+        ----------
+         x0 : npt.NDArray[np.float64] | None
+            Starting weights, or None for the domain-informed default.
+
+        Returns
+        -------
+         res : SolveResult
+            The solver result; ``res.solution`` is the weight vector of length M.
+
+        """
+        solver: Solver
+        if self.engine == "ipm":
+            solver = BarrierSolver(self.settings)
+        else:
+            solver = PrimalDualSolver(self.settings)
+
+        # Domain-informed default warm start for both engines: the barrier
+        # converges faster from the Distance's reference weights than from a
+        # bare min-norm seed, and PD already relied on this start. The barrier
+        # projects it onto the equality manifold and Phase-I's it to strict
+        # inequality feasibility; PD drives the equality residual to zero from it.
+        if x0 is None:
+            x0 = self._default_x0()
+
+        return self._problem.solve(solver, x0=x0)
+
+    def _default_x0(self) -> npt.NDArray[np.float64]:
+        """Build the domain-informed default ``x0``, clipped into the bounds box.
+
+        Used by both solver engines when no ``x0`` is supplied: ``self.distance.v`` when
+        defined (e.g. ``KLDivergence(v=...)``) else ``np.full(M, 1.0)``, then
+        ``np.clip`` into ``[min_weight, max_weight]`` so the start is bounds-feasible
+        even when the bare default would otherwise violate the box.
+
+        Returns
+        -------
+         x0 : npt.NDArray[np.float64]
+            The clipped start, of length M.
+
+        """
+        distance_v = getattr(self.distance, "v", None)
+        if distance_v is not None:
+            x0 = np.asarray(distance_v, dtype=np.float64)
+        else:
+            x0 = np.full(self.dimension, 1.0)
+        ub = np.inf if self.max_weight is None else self.max_weight
+        return np.clip(x0, self.min_weight, ub)
+
+    def _build_problem(self) -> Problem:
+        """Assemble a Cvxium ``Problem`` mirroring this Rake's stack.
+
+        Reuses the cached ``self._equality_layer`` (preserves its SVD cache) and
+        assembles the inequality layers in the canonical order Bounds -> Imbalance? ->
+        SquaredNorm?. The solver's structured Phase I cascades these layers for
+        feasibility (bounds -> +imbalance -> +norm).
+
+        The ``Distance`` objective declares a diagonal Hessian contribution, so the
+        default ``BarrierSolver`` path routes this ``Problem`` through
+        ``build_hessian_system`` / structured assembly: every component here contributes
+        a diagonal-or-zero shape (Distance objective and BoundsConstraintLayer Diagonal,
+        ImbalanceConstraintLayer Zero, SquaredNormConstraintLayer Diagonal), so the
+        diagonal-plus-low-rank assembler absorbs them all. The PD path consumes the same
+        ``Problem``, so the engine="pd" path is unchanged.
+
+        Returns
+        -------
+         prob : Problem
+            The assembled problem: distance objective plus equality and inequality
+            layers.
+
+        """
+        constraints: list[ConstraintLayer] = [
+            BoundsConstraintLayer(
+                lb=self.min_weight, ub=self.max_weight, dimension=self.dimension
+            ),
+        ]
+        if self.B is not None:
             assert self.c is not None
             assert self.psi is not None
-            self.phase1_solver = EqualityWithBoundsAndImbalanceConstraintSolver(
-                B=self.B,
-                c=self.c,
-                psi=self.psi,
-                A=(1 / M) * self.X.T,
-                b=self.mu,
-                lb=min_weight,
-                settings=self.settings,
+            constraints.append(
+                ImbalanceConstraintLayer(B=self.B, c=self.c, psi=self.psi)
             )
-        else:
-            self.phase1_solver = EqualityWithBoundsSolver(
-                A=(1 / M) * self.X.T,
-                b=self.mu,
-                lb=min_weight,
-                settings=self.settings,
+        if self.phi is not None:
+            constraints.append(
+                SquaredNormConstraintLayer(
+                    phi=self.dimension * self.phi, dimension=self.dimension
+                )
             )
 
-    @property
-    def A(self) -> npt.NDArray[np.float64]:  # noqa: N802
-        """Matrix representing equality constraints."""
-        return (1 / self.dimension) * self.X.T
+        return Problem.minimize(self.distance).subject_to(
+            eq=self._equality_layer, ineq=constraints
+        )
 
-    @property
-    def b(self) -> npt.NDArray[np.float64]:
-        """Right-hand side of equality constraints."""
-        return self.mu
+    @staticmethod
+    def _validate_weight_bounds(
+        min_weight: float | list[float] | npt.NDArray[np.float64],
+        max_weight: float | list[float] | npt.NDArray[np.float64] | None,
+    ) -> None:
+        """Reject inconsistent weight bounds at construction.
 
-    def svd_A(  # noqa: N802
-        self,
-    ) -> tuple[
-        npt.NDArray[np.float32 | np.float64],
-        npt.NDArray[np.float32 | np.float64],
-        npt.NDArray[np.float32 | np.float64],
-    ]:
-        """Calculate and cache SVD of A."""
-        if self.phase1_solver is None:
-            raise ValueError("phase1_solver is required.")
+        Skipped when ``max_weight is None`` (the unconstrained case).
 
-        if not isinstance(
-            self.phase1_solver,
-            EqualityWithBoundsSolver
-            | EqualityWithBoundsAndImbalanceConstraintSolver
-            | EqualityWithBoundsAndNormConstraintSolver,
-        ):
+        Parameters
+        ----------
+         min_weight : float | list[float] | npt.NDArray[np.float64]
+            Lower bound, scalar or per-component.
+         max_weight : float | list[float] | npt.NDArray[np.float64] | None
+            Upper bound, scalar or per-component, or None.
+
+        Raises
+        ------
+         ValueError
+            When both bounds are given but are not broadcast-compatible, or any
+            component violates ``min_weight < max_weight`` strictly.
+
+        """
+        if max_weight is None:
+            return
+        lb_arr = np.atleast_1d(np.asarray(min_weight, dtype=np.float64))
+        ub_arr = np.atleast_1d(np.asarray(max_weight, dtype=np.float64))
+        try:
+            lb_b, ub_b = np.broadcast_arrays(lb_arr, ub_arr)
+        except ValueError as e:
             raise ValueError(
-                "phase1_solver must be an EqualityWithBoundsSolver or "
-                "EqualityWithBoundsAndImbalanceConstraintSolver or"
-                "EqualityWithBoundsAndNormConstraintSolver"
+                f"`min_weight` (shape {lb_arr.shape}) and `max_weight` (shape "
+                f"{ub_arr.shape}) are not broadcast-compatible."
+            ) from e
+        if not np.all(lb_b < ub_b):
+            raise ValueError(
+                "All components must satisfy `min_weight < max_weight` strictly; "
+                f"got min(max_weight - min_weight) = {float(np.min(ub_b - lb_b))!r}."
             )
 
-        return self.phase1_solver.svd_A()
+    @property
+    def equality_layer(self) -> EqualityConstraintLayer:
+        """Return the cached EqualityConstraintLayer for the (A, b) equality system.
+
+        Use this when constructing Phase I solvers that share the same equality system
+        (e.g. the Pareto-frontier corner solvers). Reusing the cached layer preserves
+        the ``EqualityConstraintLayer.svd_A()`` cache across Phase I builds;
+        constructing a fresh layer per call site forces an SVD recompute and defeats
+        that cache.
+
+        Returns
+        -------
+         layer : EqualityConstraintLayer
+            The cached ``(A, b)`` equality layer.
+
+        """
+        return self._equality_layer
 
     def update_phi(self, phi: float | None = None) -> None:
-        """Update phi, mostly for EfficientFrontier."""
+        """Update phi, mostly for EfficientFrontier.
+
+        Rebuilds the cached ``Problem`` so its ``SquaredNormConstraintLayer`` membership
+        (present only when ``phi`` is set) matches the new ``phi``.
+
+        Parameters
+        ----------
+         phi : float | None
+            New design-effect bound, or None to drop the constraint.
+
+        """
         self.phi = phi
-        if phi is not None:
-            self.phase1_solver = EqualityWithBoundsAndNormConstraintSolver(
-                phi=self.dimension * phi,
-                A=(1 / self.dimension) * self.X.T,
-                b=self.mu,
-                lb=self.min_weight,
-                B=self.B,
-                c=self.c,
-                psi=self.psi,
-                settings=self.settings,
-            )
-        elif self.B is not None:
-            assert self.c is not None
-            assert self.psi is not None
-            self.phase1_solver = EqualityWithBoundsAndImbalanceConstraintSolver(
-                B=self.B,
-                c=self.c,
-                psi=self.psi,
-                A=(1 / self.dimension) * self.X.T,
-                b=self.mu,
-                lb=self.min_weight,
-                settings=self.settings,
-            )
-        else:
-            self.phase1_solver = EqualityWithBoundsSolver(
-                A=(1 / self.dimension) * self.X.T,
-                b=self.mu,
-                lb=self.min_weight,
-                settings=self.settings,
-            )
+        self._problem = self._build_problem()
 
-    @property
-    def num_eq_constraints(self) -> int:
-        """Count equality constraints."""
-        return self.X.shape[1]
-
-    @property
-    def num_ineq_constraints(self) -> int:
-        """Count inequality constraints."""
-        n = self.dimension
-
-        if self.B is not None:
-            n += 2 * self.B.shape[0]
-
-        if self.phi is not None:
-            n += 1
-
-        return n
-
-    def initialize_barrier_parameter(self, x0: npt.NDArray[np.float64]) -> float:
-        """Initialize barrier parameter."""
-        # Initialize t as the number of inequality constraints divided by an estimate of
-        # the suboptimality of w. Since the distance metric is always non-negative, the
-        # sub-optimality is at most D(w, v). Always do at least 1 step so we get the
-        # Lagrange multipliers.
-        t1 = self.num_ineq_constraints / max(
-            self.settings.outer_tolerance, self.distance.evaluate(x0)
-        )
-
-        return max(t1, super().initialize_barrier_parameter(x0))
-
-    def calculate_newton_step(
-        self, x: npt.NDArray[np.float64], t: float
-    ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
-        r"""Calculate Newton step.
-
-        Calculates Newton step for the "inner" problem:
-          minimize   ft(w) := t * D(w, v)
-                              - log(1 - (1 / (M * phi)) \| w \|_2^2)
-                              - \sum_i log(w_i)
-          subject to (1 / M) * X^T * w = \mu.
-
-        Parameters
-        ----------
-         w : vector
-            Current estimate.
-         t : float
-            Barrier parameter.
-
-        Returns
-        -------
-         delta_w : vector
-            Newton step.
-         nu : vector
-            Lagrange multiplier associated with equality constraints.
-
-        Notes
-        -----
-        The Newton step, delta_w, is the solution of the system:
-           _       _   _       _     _         _
-          | H   A^T | | delta_w |   | - grad_ft |
-          | A    0  | |   nu    | = |      0    |
-           -       -   -       -     -         -
-        where H is the Hessian of ft evaluated at w, A = (1/M) * X^T, grad_f is the
-        gradient of ft evaluated at w, and nu is the Lagrange multiplier associated with
-        the equality constraints. We use `solve_kkt_system` to solve this system in
-        O(p^3 + p^2 * M) time.
-
-        """
-        eta_inverse: npt.NDArray[np.float64] = self._hessian_ft_diagonal_inverse(x, t)
-        if self.B is not None and self.phi is not None:
-            assert self.c is not None
-            Bx_minus_c = self.B @ x - self.c
-            kappa_B_pos: npt.NDArray[np.float64] = self._hessian_ft_kappa_pos(
-                x, Bx_minus_c
-            )
-            kappa_B_neg: npt.NDArray[np.float64] = self._hessian_ft_kappa_neg(
-                x, Bx_minus_c
-            )
-            kappa_phi: npt.NDArray[np.float64] = self._hessian_ft_rank_one(x)
-
-            def A_solve_B_pos(  # noqa: N802
-                b: npt.NDArray[np.float64],
-            ) -> npt.NDArray[np.float64]:
-                return solve_rank_p_update(
-                    b,
-                    kappa=kappa_B_pos,
-                    A_solve=solve_diagonal_eta_inverse,
-                    eta_inverse=eta_inverse,
-                )
-
-            def A_solve_B_neg(  # noqa: N802
-                b: npt.NDArray[np.float64],
-            ) -> npt.NDArray[np.float64]:
-                return solve_rank_p_update(b, kappa=kappa_B_neg, A_solve=A_solve_B_pos)
-
-            return solve_kkt_system(
-                A=self.A,
-                g=-self.gradient_barrier(x, t),
-                hessian_solve=solve_rank_one_update,
-                kappa=kappa_phi,
-                A_solve=A_solve_B_neg,
-            )
-
-        if self.B is not None and self.phi is None:
-            assert self.c is not None
-            Bx_minus_c = self.B @ x - self.c
-            kappa_B_pos = self._hessian_ft_kappa_pos(x, Bx_minus_c)
-            kappa_B_neg = self._hessian_ft_kappa_neg(x, Bx_minus_c)
-
-            def A_solve_nested(  # noqa: N802
-                b: npt.NDArray[np.float64],
-            ) -> npt.NDArray[np.float64]:
-                return solve_rank_p_update(
-                    b,
-                    kappa=kappa_B_pos,
-                    A_solve=solve_diagonal_eta_inverse,
-                    eta_inverse=eta_inverse,
-                )
-
-            return solve_kkt_system(
-                A=self.A,
-                g=-self.gradient_barrier(x, t),
-                hessian_solve=solve_rank_p_update,
-                kappa=kappa_B_neg,
-                A_solve=A_solve_nested,
-            )
-
-        if self.B is None and self.phi is not None:
-            kappa_phi = self._hessian_ft_rank_one(x)
-            return solve_kkt_system(
-                A=self.A,
-                g=-self.gradient_barrier(x, t),
-                hessian_solve=solve_rank_one_update,
-                kappa=kappa_phi,
-                A_solve=solve_diagonal_eta_inverse,
-                eta_inverse=eta_inverse,
-            )
-
-        return solve_kkt_system(
-            A=self.A,
-            g=-self.gradient_barrier(x, t),
-            hessian_solve=solve_diagonal_eta_inverse,
-            eta_inverse=eta_inverse,
-        )
-
-    def btls_keep_feasible(
-        self, x: npt.NDArray[np.float64], delta_x: npt.NDArray[np.float64]
-    ) -> float:
-        r"""Make sure x + btls_s * delta_x stays strictly feasible.
-
-        In our case, we want a btls_s such that:
-            x + btls_s * delta_x > min_weight, and
-            \| x + btls_s * delta_x \|_2^2 <= M * phi
-
-        For the first constraint, since x is strictly feasible, and since btls_s > 0,
-        this is only a concern for entries having delta_x[i] < 0, for which we want:
-            btls_s < (x[i] - min_weight) / -delta_x[i].
-        We want this for all i having delta_x[i] < 0, so we set btls_s as the minimum of
-        these quantities. If this minimum > 1, we just set btls_s = 1.0 If all entries
-        of delta_x > 0, we just set btls_s = 1.
-
-        The last constraint is convex quadratic in btls_s, so the acceptable btls_s lie
-        between the two roots. It is straightforward to show that if
-            \| x \|_2^2 <= M * phi,
-        then the lower root is <= 0, and since the step size must be positive there
-        is no need to enforce a lower bound.
-
-        """
-        M = self.dimension
-
-        mask = delta_x < 0
-        theta1 = np.inf
-        min_weight = self.min_weight
-        if np.any(mask):
-            if isinstance(min_weight, list | tuple | np.ndarray):
-                theta1 = np.min((x[mask] - min_weight[mask]) / -delta_x[mask])
-            else:
-                theta1 = np.min((x[mask] - min_weight) / -delta_x[mask])
-        thetas = [theta1]
-
-        B = self.B
-        if B is not None:
-            c = self.c
-            psi = self.psi
-            assert c is not None
-            assert psi is not None
-            Bx_minus_c = B @ x - c
-            B_delta_x = B @ delta_x
-
-            mask2 = B_delta_x < 0
-            theta2 = np.inf
-            if np.any(mask2):
-                if isinstance(psi, list | tuple | np.ndarray):
-                    theta2 = np.min(
-                        (Bx_minus_c[mask2] + psi[mask2]) / -B_delta_x[mask2]
-                    )
-                else:
-                    theta2 = np.min((Bx_minus_c[mask2] + psi) / -B_delta_x[mask2])
-
-            mask3 = B_delta_x > 0
-            theta3 = np.inf
-            if np.any(mask3):
-                if isinstance(psi, list | tuple | np.ndarray):
-                    theta3 = np.min(
-                        -(Bx_minus_c[mask3] - psi[mask3]) / B_delta_x[mask3]
-                    )
-                else:
-                    theta3 = np.min(-(Bx_minus_c[mask3] - psi) / B_delta_x[mask3])
-
-            thetas.append(theta2)
-            thetas.append(theta3)
-
-        phi = self.phi
-        if phi is not None:
-            quad_a = np.dot(delta_x, delta_x)
-            quad_b = 2.0 * np.dot(x, delta_x)
-            quad_c = np.dot(x, x) - M * phi
-            theta4 = (-quad_b + np.sqrt(quad_b * quad_b - 4.0 * quad_a * quad_c)) / (
-                2.0 * quad_a
-            )
-
-            thetas.append(theta4)
-
-        return min(thetas)
-
-    def evaluate_objective(self, x: npt.NDArray[np.float64]) -> float:
-        """Calculate f0 at x."""
-        return self.distance.evaluate(x)
-
-    def gradient(self, x: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
-        """Calculate gradient of ft at w."""
-        return self.distance.gradient(x)
-
-    def hessian_multiply(
-        self, x: npt.NDArray[np.float64], t: float, y: npt.NDArray[np.float64]
-    ) -> npt.NDArray[np.float64]:
-        """Multiply H * y.
-
-        Our Hessian is diag(eta) + zeta * zeta^T, so H * y is eta * y + (zeta^T * y) *
-        zeta.
-
-        """
-        eta = self._hessian_ft_diagonal(x, t)
-        zeta = self._hessian_ft_rank_one(x)
-
-        def diag_plus_zeta(z: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
-            return multiply_rank_one_update(z, zeta, multiply_diagonal, eta=eta)
-
-        if self.B is None:
-            return diag_plus_zeta(y)
-
-        assert self.c is not None
-        Bx_minus_c = self.B @ x - self.c
-        kappa_pos = self._hessian_ft_kappa_pos(x, Bx_minus_c)
-        kappa_neg = self._hessian_ft_kappa_neg(x, Bx_minus_c)
-
-        def diag_plus_zeta_plus_neg(
-            z: npt.NDArray[np.float64],
-        ) -> npt.NDArray[np.float64]:
-            return multiply_rank_p_update(z, kappa_neg, diag_plus_zeta)
-
-        return multiply_rank_p_update(y, kappa_pos, diag_plus_zeta_plus_neg)
-
-    def _hessian_ft_diagonal(
-        self, x: npt.NDArray[np.float64], t: float
-    ) -> npt.NDArray[np.float64]:
-        """Calculate diagonal component of Hessian of ft at w."""
-        d = t * self.distance.hessian_diagonal(x) + np.square(
-            1.0 / (x - self.min_weight)
-        )
-        if self.phi is None:
-            return d
-
-        M_phi_den = self.dimension * self.phi - np.dot(x, x)
-        return d + np.full_like(x, 2.0 / M_phi_den)
-
-    def _hessian_ft_diagonal_inverse(
-        self, x: npt.NDArray[np.float64], t: float
-    ) -> npt.NDArray[np.float64]:
-        """Calculate diagonal component of Hessian of ft at w."""
-        if self.phi is None:
-            tx2 = self.distance.hessian_diagonal(x) * np.square(
-                np.sqrt(t) * (x - self.min_weight)
-            )
-        else:
-            M_phi_den = self.dimension * self.phi - np.dot(x, x)
-            tx2 = np.square(
-                np.sqrt(t * self.distance.hessian_diagonal(x) + 2.0 / M_phi_den)
-                * (x - self.min_weight)
-            )
-
-        return np.square((x - self.min_weight) / np.sqrt(1.0 + tx2))
-
-    def _hessian_ft_rank_one(
-        self, x: npt.NDArray[np.float64]
-    ) -> npt.NDArray[np.float64]:
-        """Calculate rank one component of Hessian of ft at w."""
-        if self.phi is None:
-            return np.zeros_like(x)
-
-        M_phi_den = self.dimension * self.phi - np.dot(x, x)
-        return x * (2.0 / M_phi_den)
-
-    def _hessian_ft_kappa_pos(
-        self, x: npt.NDArray[np.float64], Bx_minus_c: npt.NDArray[np.float64]
-    ) -> npt.NDArray[np.float64]:
-        """Calculate positive rank update to Hessian of ft at x."""
-        psi = self.psi
-        if psi is None:
-            raise ValueError("psi not defined")
-
-        denom_pos = psi + Bx_minus_c  # shape (p2,)
-        if np.any(denom_pos <= 0):
-            raise ValueError(
-                "Barrier argument out of domain: denominators must be positive."
-            )
-
-        # Each column: B[j, :] / denom_pos[j]
-        assert self.B is not None  # Satisfy type-checker
-        return self.B.T / denom_pos
-
-    def _hessian_ft_kappa_neg(
-        self, x: npt.NDArray[np.float64], Bx_minus_c: npt.NDArray[np.float64]
-    ) -> npt.NDArray[np.float64]:
-        """Calculate negative rank update to Hessian of ft at x."""
-        psi = self.psi
-        if psi is None:
-            raise ValueError("psi not defined")
-
-        denom_neg = psi - Bx_minus_c  # shape (q,)
-        if np.any(denom_neg <= 0):
-            raise ValueError(
-                "Barrier argument out of domain: denominators must be positive."
-            )
-        assert self.B is not None  # Satisfy type-checker
-        return self.B.T / denom_neg
-
-    def constraints(self, x: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
-        r"""Calculate the vector of (inequality) constraints, fi(x) <= 0.
-
-        Our constraints are x >= min_weight and 1 - (1 / M*\phi) * \| x \|_2^2 >= 0, or
-           -x + min_weight <= 0
-           -1 + (1 / M*\phi) * \| x \|_2^2 <= 0
-
-        """
-        cons = -x + self.min_weight
-
-        if self.B is not None:
-            assert self.c is not None
-            assert self.psi is not None
-            Bx_minus_c = self.B @ x - self.c
-            cons = np.concatenate(
-                [
-                    cons,
-                    -Bx_minus_c - self.psi,
-                    Bx_minus_c - self.psi,
-                ]
-            )
-
-        if self.phi is not None:
-            cons = np.append(
-                cons, (1.0 / (self.dimension * self.phi)) * np.dot(x, x) - 1.0
-            )
-
-        return cons
-
-    def grad_constraints(self, x: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
-        """Calculate the gradients of constraints, fi(x) <= 0.
-
-        If phi is None, G = -I. Otherwise, G is -I, with a row at the bottom of
-        (2 / (M * phi)) * x
-
-        """
-        G = -np.eye(self.dimension)
-
-        B = self.B
-        if B is not None:
-            G = np.vstack([G, -B, B])
-
-        phi = self.phi
-        if phi is not None:
-            G = np.vstack([G, (2.0 / (self.dimension * phi)) * x])
-
-        return G
-
-    def grad_constraints_multiply(
-        self, x: npt.NDArray[np.float64], y: npt.NDArray[np.float64]
-    ) -> npt.NDArray[np.float64]:
-        """Calculate grad_constraints(x) @ y.
-
-        If phi is None, this is just -y. Otherwise, the first entries are -y, and the
-        last entry is (2 / (M * phi)) * <x, y>.
-
-        """
-        assert len(y) == self.dimension
-        Gy = -y
-
-        if self.B is not None:
-            By = self.B @ y
-            Gy = np.concatenate([Gy, -By, By])
-
-        if self.phi is not None:
-            Gy = np.append(Gy, (2.0 / (self.dimension * self.phi)) * np.dot(x, y))
-
-        return Gy
-
-    def grad_constraints_transpose_multiply(
-        self, x: npt.NDArray[np.float64], y: npt.NDArray[np.float64]
-    ) -> npt.NDArray[np.float64]:
-        """Calculate grad_constraints(x).T @ y."""
-        assert len(y) == self.num_ineq_constraints
-        M = self.dimension
-        GTy = -y[0:M]
-
-        B = self.B
-        if B is not None:
-            p2 = B.shape[0]
-            GTy += B.T @ (y[(M + p2) : (M + 2 * p2)] - y[M : (M + p2)])
-
-        phi = self.phi
-        if phi is not None:
-            GTy += ((2.0 * y[-1]) / (M * phi)) * x
-
-        return GTy
-
-    def evaluate_dual(
-        self,
-        lmbda: npt.NDArray[np.float64],
-        nu: npt.NDArray[np.float64],
-        x_star: npt.NDArray[np.float64],
-    ) -> float:
-        """Evaluate dual function.
-
-        Parameters
-        ----------
-         lmbda : vector
-            Lagrange multipliers for inequality constraints.
-         nu : vector
-            Lagrange multipliers for equality constraints.
-
-        Returns
-        -------
-         g : float
-            The dual function evaluated at lmbda, nu.
-
-        Notes
-        -----
-        This implementation only works if lmbda and nu are optimal.
-
-        """
-        return (
-            self.evaluate_objective(x_star)
-            + np.dot(lmbda, self.constraints(x_star))
-            + np.dot(nu, self.A @ x_star - self.b)
-        )
-
-
-class JointCalibrator(Rake):
-    r"""Solve optimization problem.
-
-    Class for solving problems of the form:
-           minimize    D([w1, w2], [v1, v2])
-           subject to  (1/M1) * X1^T * w1 = mu1                                               (external validity)
-                       (1/M2) * X2^T * w2 = mu2                                               (external validity)
-                       (1/M1) * X3^T * w1 = (1/M2) * X4^T * w2                                (internal validity)
-                       \| (1/M1) * Z1^T * w1 - nu1 \|_\infty <= psi1                          (external validity)
-                       \| (1/M2) * Z2^T * w2 - nu2 \|_\infty <= psi2                          (external validity)
-                       \| (1/M2) * Z4^T * w2 - (1/M1) * Z3^T * w1 \|_\infty <= psi3           (internal validity)
-                       (1/(M1 + M2)) * (\| w1 \|_2^2 + \| w2 \|_2^2) <= phi
-                       w1 >= min_weight1
-                       w2 >= min_weight2
-
-    The use case is calibrating weights for treatment and control groups at the same
-    time, to achieve internal and external validity.
-
-    Parameters
-    ----------
-     X1, X2, X3, X4 : npt.NDArray[np.float64], optional
-        Matrices for achieving exact covariate balance.
-     mu1, mu2 : npt.NDArray[np.float64], optional
-        Population means corresponding to X1, X2, resp.
-     Z1, Z2, Z3, Z4 : npt.NDArray[np.float64], optional
-        Matrices for constraining covariate imbalance.
-     nu1, nu2 : npt.NDArray[np.float64], optional
-        Population means corresponding to Z1, Z2, resp.
-     psi1, psi2, psi3 : float or list[float], optional
-        Constraints on covariate imbalances.
-     phi : float
-         Constraint on mean squared weight.
-     min_weight1, min_weight2 : float or list[float], optional
-         Lower bound on weights. Defaults to 0.
-     constrain_mean_weight1_to, constrain_mean_weight2_to : float or None, default=1
-         If not None, add a constraint that the average weight must equal
-         `constrain_mean_weight_to`, which must be strictly positive. The default is an
-         average weight of 1. Another common option is for the average weight to equal
-         the average baseline weight. If no such constraint is desired, manually specify
-         `constrain_mean_weight_to=None`.
-     settings : OptimizationSettings
-        Optimization settings.
-
-    Notes
-    -----
-    This is really just a wrapper around Rake. Let:
-    - w = [w1; w2]
-    - v = [v1; v2],
-    - M = M1 + M2
-             -                                        -
-            |   (M / M1) * X1^T             0          |
-    - X^T = |          0               (M / M2) * X2^T |
-            |  -(M / M1) * X3^T        (M / M2) * X4^T |
-             -                                        -
-    - mu = [mu1; mu2; 0]
-             -                                        -
-            |   (M / M1) * Z1^T             0          |
-    - Z^T = |          0               (M / M2) * Z2^T |
-            |  -(M / M1) * Z3^T        (M / M2) * Z4^T |
-             -                                        -
-    - nu = [nu1; nu2; 0]
-    - psi = a vector with q1 entries of psi1, followed by q2 entries of psi2, followed
-      by q3 entries of psi3, where q1, q2, and q3 are the numbers of columns in Z1, Z2,
-      and Z3, respectively.
-    - min_weight = a vector with M1 entries of min_weight1, followed by M2 entries of
-      min_weight2, where M1 and M2 are the lengths of w1 and w2, respectively.
-
-    Then the problem is equivalent to:
-           minimize    D(w, v)
-           subject to  (1/M) * X^T * w = mu                   (exact balance)
-                       -psi <= (1/M) * Z^T * w - nu <= psi    (approximate balance)
-                       (1/M) * \| w \|_2^2 <= phi             (variance)
-                       w >= min_weight                        (positivity)
-
-    Many of the constraints in the above optimization problem are optional. The user may
-    wish to approximately balance some covariates for internal validity only, in which
-    case they would specify Z3 and Z4 only, not X1, X2, X3, X4, Z1, or Z2. Then Z^T
-    would just be:
-          -                                        -
-         |  -(M / M1) * Z3^T        (M / M2) * Z4^T |
-          -                                        -
-
-    Due to a technical limitation in Rake, we *require* at least one equality constraint
-    in the optimization problem. Thankfully, we typically want to constrain the mean
-    weight to be 1, which is represented as (1/M) 1^T w = 1, where 1^T is a vector of
-    all ones. In our case, it makes sense to constrain w1 and w2 separately, e.g.
-    (1 / M1) 1^T w1 = 1 and (1 / M2) 1^T w2 = 1. If the user does not specify any of the
-    X's, we can just use these two constraints to satisfy Rake's requirement. Otherwise,
-    corresponding constraints should be prepended as the first rows of X1 and X2,
-    respectively, e.g. X1 = np.vstack([np.ones((M1,)), X1]) and
-    mu1 = np.concatenate([[constrain_mean_weight1_to], mu1]).
-
-    """
-
-    def __init__(
-        self,
-        distance: Distance,
-        X1: npt.NDArray[np.float64] | None = None,
-        X2: npt.NDArray[np.float64] | None = None,
-        X3: npt.NDArray[np.float64] | None = None,
-        X4: npt.NDArray[np.float64] | None = None,
-        mu1: npt.NDArray[np.float64] | None = None,
-        mu2: npt.NDArray[np.float64] | None = None,
-        Z1: npt.NDArray[np.float64] | None = None,
-        Z2: npt.NDArray[np.float64] | None = None,
-        Z3: npt.NDArray[np.float64] | None = None,
-        Z4: npt.NDArray[np.float64] | None = None,
-        nu1: npt.NDArray[np.float64] | None = None,
-        nu2: npt.NDArray[np.float64] | None = None,
-        psi1: float | list[float] | npt.NDArray[np.float64] | None = None,
-        psi2: float | list[float] | npt.NDArray[np.float64] | None = None,
-        psi3: float | list[float] | npt.NDArray[np.float64] | None = None,
-        phi: float | None = None,
-        min_weight1: float | list[float] | npt.NDArray[np.float64] = 0.0,
-        min_weight2: float | list[float] | npt.NDArray[np.float64] = 0.0,
-        constrain_mean_weight1_to: float | None = 1.0,
-        constrain_mean_weight2_to: float | None = 1.0,
-        settings: OptimizationSettings | None = None,
+    def update_psi(
+        self, psi: float | list[float] | npt.NDArray[np.float64] | None = None
     ) -> None:
-        M1 = M2 = None
-        p1 = p2 = p3 = None
-        q1 = q2 = q3 = None
-        if X1 is not None:
-            M1, p1 = X1.shape
+        """Update the imbalance tolerance, rebuilding the cached ``Problem``.
 
-            if mu1 is None:
-                raise ValueError("Must specify both or neither of X1, mu1")
+        The sibling of ``update_phi``, and necessary for the same reason: ``Problem`` is
+        assembled once at construction, so assigning ``self.psi`` alone leaves ``solve``
+        running against the band the calibrator was built with. Used by
+        ``solve_with_fallback`` when the external band is chosen from the frontier's
+        knee rather than requested up front (``frontier.solve_with_knee_fallback``).
 
-            if len(mu1) != p1:
-                raise ValueError("Dimension mismatch")
+        Parameters
+        ----------
+         psi : float | list[float] | npt.NDArray[np.float64] | None
+            New imbalance band, or None to drop the imbalance layer.
 
-        if X2 is not None:
-            M2, p2 = X2.shape
-
-            if mu2 is None:
-                raise ValueError("Must specify both or neither of X2, mu2")
-
-            if len(mu2) != p2:
-                raise ValueError("Dimension mismatch")
-
-        if X3 is not None:
-            if M1 is not None and X3.shape[0] != M1:
-                raise ValueError("Dimension mismatch")
-
-            M1, p3 = X3.shape
-
-        if X4 is not None:
-            if M2 is not None and X4.shape[0] != M2:
-                raise ValueError("Dimension mismatch")
-
-            if p3 is not None and X4.shape[1] != p3:
-                raise ValueError("Dimension mismatch")
-
-            M2, p3 = X4.shape
-
-        if not ((X3 is None and X4 is None) or (X3 is not None and X4 is not None)):
-            raise ValueError("Must specify both or neither of X3, X4")
-
-        if Z1 is not None:
-            if M1 is not None and Z1.shape[0] != M1:
-                raise ValueError("Dimension mismatch")
-
-            M1, q1 = Z1.shape
-
-            if nu1 is None:
-                raise ValueError("Must specify both or neither of Z1, nu1")
-
-            if len(nu1) != q1:
-                raise ValueError("Dimension mismatch")
-
-            if psi1 is None:
-                psi1 = 1.5 / np.sqrt(M1)
-
-            if isinstance(psi1, list | tuple | np.ndarray) and len(psi1) != q1:
-                raise ValueError("Dimension mismatch")
-
-        if Z2 is not None:
-            if M2 is not None and Z2.shape[0] != M2:
-                raise ValueError("Dimension mismatch")
-
-            M2, q2 = Z2.shape
-
-            if nu2 is None:
-                raise ValueError("Must specify both or neither of Z2, nu2")
-
-            if len(nu2) != q2:
-                raise ValueError("Dimension mismatch")
-
-            if psi2 is None:
-                psi2 = 1.5 / np.sqrt(M2)
-
-            if isinstance(psi2, list | tuple | np.ndarray) and len(psi2) != q2:
-                raise ValueError("Dimension mismatch")
-
-        if Z3 is not None:
-            if M1 is not None and Z3.shape[0] != M1:
-                raise ValueError("Dimension mismatch")
-
-            M1, q3 = Z3.shape
-
-            if Z4 is None:
-                raise ValueError("Must specify both or neither of Z3, Z4")
-
-            if M2 is not None and Z4.shape[0] != M2:
-                raise ValueError("Dimension mismatch")
-
-            if Z4.shape[1] != q3:
-                raise ValueError("Dimension mismatch")
-
-            M2, q3 = Z4.shape
-
-            if psi3 is None:
-                psi3 = 1.5 * np.sqrt(1 / M1 + 1 / M2)
-
-            if isinstance(psi3, list | tuple | np.ndarray) and len(psi3) != q3:
-                raise ValueError("Dimension mismatch")
-
-        if M1 is None:
-            if isinstance(min_weight1, list | tuple | np.ndarray):
-                M1 = len(min_weight1)
-            else:
-                raise ValueError("Cannot infer weight dimension")
-        elif (
-            isinstance(min_weight1, list | tuple | np.ndarray)
-            and len(min_weight1) != M1
-        ):
-            raise ValueError("Dimension mismatch")
-
-        if M2 is None:
-            if isinstance(min_weight2, list | tuple | np.ndarray):
-                M2 = len(min_weight2)
-            else:
-                raise ValueError("Cannot infer weight dimension")
-        elif (
-            isinstance(min_weight2, list | tuple | np.ndarray)
-            and len(min_weight2) != M2
-        ):
-            raise ValueError("Dimension mismatch")
-
-        M = M1 + M2
-
-        if not ((X1 is None and mu1 is None) or (X1 is not None and mu1 is not None)):
-            raise ValueError("Must specify both or neither of X1, mu1")
-
-        if not ((X2 is None and mu2 is None) or (X2 is not None and mu2 is not None)):
-            raise ValueError("Must specify both or neither of X2, mu2")
-
-        if not ((X3 is None and X4 is None) or (X3 is not None and X4 is not None)):
-            raise ValueError("Must specify both or neither of X3, X4")
-
-        if not (
-            (Z1 is None and nu1 is None and psi1 is None)
-            or (Z1 is not None and nu1 is not None and psi1 is not None)
-        ):
-            raise ValueError("Must specify all or none of Z1, nu1, psi1")
-
-        if not (
-            (Z2 is None and nu2 is None and psi2 is None)
-            or (Z2 is not None and nu2 is not None and psi2 is not None)
-        ):
-            raise ValueError("Must specify all or none of Z2, nu2, psi2")
-
-        if not (
-            (Z3 is None and Z4 is None and psi3 is None)
-            or (Z3 is not None and Z4 is not None and psi3 is not None)
-        ):
-            raise ValueError("Must specify all or none of Z3, Z4, psi3")
-
-        if constrain_mean_weight1_to is not None:
-            if X1 is None:
-                X1 = np.ones((M1, 1))
-                mu1 = np.array([constrain_mean_weight1_to])
-                p1 = 1
-            else:
-                assert p1 is not None
-                assert mu1 is not None
-                X1 = np.hstack([np.ones((M1, 1)), X1])
-                mu1 = np.concatenate([[constrain_mean_weight1_to], mu1])
-                p1 += 1
-
-        if constrain_mean_weight2_to is not None:
-            if X2 is None:
-                X2 = np.ones((M2, 1))
-                mu2 = np.array([constrain_mean_weight2_to])
-                p2 = 1
-            else:
-                assert p2 is not None
-                assert mu2 is not None
-                X2 = np.hstack([np.ones((M2, 1)), X2])
-                mu2 = np.concatenate([[constrain_mean_weight2_to], mu2])
-                p2 += 1
-
-        if X1 is None and X2 is None and X3 is None and X4 is None:
-            raise ValueError("We need at least one equality constraint.")
-
-        # Build X and mu
-        XT_blocks, mu_blocks = [], []
-        if X1 is not None:
-            assert p1 is not None
-            assert mu1 is not None
-            XT_blocks.append(np.hstack([(M / M1) * X1.T, np.zeros((p1, M2))]))
-            mu_blocks.append(mu1)
-
-        if X2 is not None:
-            assert p2 is not None
-            assert mu2 is not None
-            XT_blocks.append(np.hstack([np.zeros((p2, M1)), (M / M2) * X2.T]))
-            mu_blocks.append(mu2)
-
-        if X3 is not None and X4 is not None:
-            assert p3 is not None
-            XT_blocks.append(np.hstack([-(M / M1) * X3.T, (M / M2) * X4.T]))
-            mu_blocks.append(np.zeros(p3))
-
-        X = np.vstack(XT_blocks).T
-        mu = np.concatenate(mu_blocks)
-
-        # Build Z, nu, psi
-        ZT_blocks, nu_blocks, psi_blocks = [], [], []
-        if Z1 is not None:
-            assert q1 is not None
-            assert nu1 is not None
-            assert psi1 is not None
-            ZT_blocks.append(np.hstack([(M / M1) * Z1.T, np.zeros((q1, M2))]))
-            nu_blocks.append(nu1)
-
-            if isinstance(psi1, list | tuple | np.ndarray):
-                psi_blocks.append(np.asarray(psi1))
-            else:
-                psi_blocks.append(np.full(q1, psi1))
-
-        if Z2 is not None:
-            assert q2 is not None
-            assert nu2 is not None
-            ZT_blocks.append(np.hstack([np.zeros((q2, M1)), (M / M2) * Z2.T]))
-            nu_blocks.append(nu2)
-
-            if isinstance(psi2, list | tuple | np.ndarray):
-                psi_blocks.append(np.asarray(psi2))
-            else:
-                psi_blocks.append(np.full(q2, psi2))
-
-        if Z3 is not None and Z4 is not None:
-            assert q3 is not None
-            ZT_blocks.append(np.hstack([-(M / M1) * Z3.T, (M / M2) * Z4.T]))
-            nu_blocks.append(np.zeros(q3))
-
-            if isinstance(psi3, list | tuple | np.ndarray):
-                psi_blocks.append(np.asarray(psi3))
-            else:
-                psi_blocks.append(np.full(q3, psi3))
-
-        if len(ZT_blocks) > 0:
-            Z = np.vstack(ZT_blocks).T
-            nu = np.concatenate(nu_blocks)
-            psi = np.concatenate(psi_blocks)
-        else:
-            Z = None
-            nu = None
-            psi = None
-
-        # Build min_weight
-        min_weight_blocks = []
-        if isinstance(min_weight1, list | tuple | np.ndarray):
-            min_weight_blocks.append(min_weight1)
-        else:
-            min_weight_blocks.append(np.full(M1, min_weight1))
-
-        if isinstance(min_weight2, list | tuple | np.ndarray):
-            min_weight_blocks.append(min_weight2)
-        else:
-            min_weight_blocks.append(np.full(M2, min_weight2))
-
-        min_weight = np.concatenate(min_weight_blocks)
-
-        # Call Rake
-        super().__init__(
-            distance=distance,
-            X=X,
-            mu=mu,
-            Z=Z,
-            nu=nu,
-            psi=psi,
-            phi=phi,
-            min_weight=min_weight,
-            constrain_mean_weight_to=None,  # Already handled above
-            settings=settings,
-        )
+        """
+        self.psi = _as_float_scalar_or_array(psi, "psi")
+        self._problem = self._build_problem()

@@ -1,6 +1,8 @@
 """Estimation visualizations."""
 
-from typing import Literal, cast
+from __future__ import annotations
+
+from typing import Literal
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -10,7 +12,9 @@ import seaborn as sns
 from matplotlib import ticker
 from matplotlib.axes import Axes
 
-from .base_classes import WeightingEstimator
+from pyrake.estimation.base_classes import (
+    WeightingEstimator,
+)
 
 
 def meta_analysis(
@@ -19,7 +23,6 @@ def meta_analysis(
     null_max: float,
     num_points: int = 1_000,
     alpha: float = 0.10,
-    gamma: float = 1.0,
     title: str | None = None,
     xlabel: str | None = None,
     xtick_format: str = ".0%",
@@ -34,57 +37,52 @@ def meta_analysis(
     Parameters
     ----------
      estimators : dict_like
-         Estimators for each platform. Keys should be the name of the platform, and
-         value should be a WeightingEstimator corresponding to a particular metric.
-     null_min, null_max : float, optional
-         Range of null hypotheses to test.
+        Estimators for each platform. Keys should be the name of the platform, and value
+        should be a ``WeightingEstimator`` corresponding to a particular metric.
+     null_min, null_max : float
+        Range of null hypotheses to test.
      num_points : int, optional
-         Number of hypotheses to check. Defaults to 1_000.
+        Number of hypotheses to check. Defaults to 1_000.
      alpha : float, optional
-         Threshold for statistical significance. Defaults to 0.10.
-     gamma : float, optional
-         The Gamma factor for sensitivity analysis. Must be >= 1.0, with 1.0 indicating
-         no hidden bias adjustment. When gamma > 1, uses ``adjusted_pvalue`` (normal
-         approximation) instead of ``pvalue``. Defaults to 1.0.
+        Threshold for statistical significance. Defaults to 0.10.
      title : str, optional
-         Optional title for figure.
+        Optional title for figure.
      xlabel : str, optional
-         Optional xlabel for figure. Defaults to "Null Hypothesis".
+        Optional xlabel for figure. Defaults to "Null Hypothesis".
      xtick_format : str, optional
-         Format for tick marks on x-axis. Defaults to ".0%", leading to xticks like
-         "50%".
+        Format for tick marks on x-axis. Defaults to ".0%", leading to xticks like
+        "50%".
      axis_label_size, tick_label_size, legend_label_size : int, optional
-         Font sizes for various figure elements.
+        Font sizes for various figure elements.
      legend_placement : str, optional
-         Where to put the legend.
+        Where to put the legend.
      ax : Axes, optional
-         Where to plot the figure.
+        Where to plot the figure.
 
     Returns
     -------
      point_estimate : float
-         Combined point estimate.
+        Combined point estimate.
      confidence_interval : tuple[float, float]
-         Combined confidence interval.
+        Combined confidence interval.
      ax : Axes
-         The figure.
+        The plot axes.
 
     """
     null_values = np.linspace(null_min, null_max, num_points)
+    alternatives: list[Literal["less", "greater"]] = ["less", "greater"]
     pvals = {
         f"{platform} ({alternative})": np.array(
             [
-                estimator.adjusted_pvalue(
+                estimator.pvalue(
                     null_value=null_value,
-                    gamma=gamma,
-                    alternative=cast("Literal['less', 'greater']", alternative),
-                    bootstrap=False,
+                    alternative=alternative,
                 )
                 for null_value in null_values
             ]
         )
         for platform, estimator in estimators.items()
-        for alternative in ["less", "greater"]
+        for alternative in alternatives
     }
     pvals["Null Hypothesis"] = null_values
     df_meta = pd.DataFrame(pvals)
@@ -102,7 +100,7 @@ def meta_analysis(
         )
 
     # Calculate a two-sided p-value based on both one-side p-values.
-    for platform in [*list(estimators.keys()), "Combined"]:
+    for platform in [*estimators, "Combined"]:
         df_meta[platform] = df_meta.apply(
             lambda row, platform=platform: min(
                 1.0, 2 * min(row[f"{platform} (less)"], row[f"{platform} (greater)"])
@@ -110,25 +108,25 @@ def meta_analysis(
             axis=1,
         )
 
-    df_meta = df_meta[["Null Hypothesis", *list(estimators.keys()), "Combined"]]
+    df_meta = df_meta[["Null Hypothesis", *estimators, "Combined"]]
 
     # Calculate max pvals for each platform so we know how tall the vertical lines should be.
     max_pvals = df_meta.values[:, 1:].max(axis=0)
 
     # Calculate the point estimate as the null hypothesis with maximal p-value.
     # If there are multiple hypotheses with that same p-value, use the midpoint.
-    pe_low = df_meta["Null Hypothesis"].loc[df_meta["Combined"].values.argmax()]  # type: ignore[union-attr]
+    pe_low = df_meta["Null Hypothesis"].loc[df_meta["Combined"].to_numpy().argmax()]
     pe_high = df_meta["Null Hypothesis"].loc[
-        len(null_values) - 1 - df_meta["Combined"].values[::-1].argmax()  # type: ignore[union-attr]
+        len(null_values) - 1 - df_meta["Combined"].to_numpy()[::-1].argmax()
     ]
     point_estimate = 0.5 * (pe_low + pe_high)
 
     # Find the first and last null hypotheses with p-values larger than the threshold.
     ci_low = df_meta["Null Hypothesis"].loc[
-        (df_meta["Combined"] >= alpha).values.argmax()  # type: ignore[union-attr]
+        (df_meta["Combined"] >= alpha).to_numpy().argmax()
     ]
     ci_high = df_meta["Null Hypothesis"].loc[
-        len(null_values) - 1 - (df_meta["Combined"].values[::-1] >= alpha).argmax()  # type: ignore[union-attr,operator]
+        len(null_values) - 1 - (df_meta["Combined"].to_numpy()[::-1] >= alpha).argmax()
     ]
 
     # Plot the p-value curves for each platform and the combination.

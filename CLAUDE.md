@@ -1,155 +1,191 @@
 # CLAUDE.md
 
 This file provides guidance to Claude Code (claude.ai/code) when
-working with code in this repository.
+working with code in this repository. It explains how to *modify*
+this code. For guidance on how to *use* this library in
+applications, see USAGE.md (also available at runtime via
+`pyrake.usage()`).
 
-## Project Overview
+## Overview
 
-PyRake is a Python library for calculating balancing weights to adjust
-surveys for non-response bias. It solves constrained optimization
-problems that balance three objectives:
-1. Reduce bias (by emphasizing under-represented respondents)
-2. Improve representativeness (by balancing important covariates)
-3. Reduce variance (by controlling weight sizes)
-
-The library supports multiple distance metrics (KL Divergence, Squared
-L2, Huber) and provides estimators for population means and causal
-treatment effects.
+PyRake is a survey calibration and balancing weights library for
+causal inference and observational studies. It solves constrained
+convex optimization problems to find weights that balance covariates
+between a sample and a target population while controlling variance,
+then uses those weights for estimation and inference. The
+optimization itself is delegated to
+[Cvxium](https://pypi.org/project/cvxium/), an interior point
+framework that began life as a PyRake module.
 
 ## Development Commands
 
-### Environment Setup
 ```bash
-# Create virtual environment and install dependencies
+# Create the virtual environment and install dependencies
 uv sync
-```
 
-### Testing
-```bash
-# Run all tests
+# THE FAST LOOP: skips the tests marked `slow` (~30s)
+uv run python -m pytest -q -m "not slow"
+
+# The other half, when you have touched the frontier code (~35s)
+uv run python -m pytest -q -m "slow"
+
+# Everything (~1 minute), which is what CI runs
 uv run python -m pytest
 
-# Run specific test file
-uv run python -m pytest test/test_rake.py
+# Find out what is slow before complaining about it
+uv run python -m pytest -q --durations=20
 
-# Run specific test function
-uv run python -m pytest test/test_rake.py::test_rake_solve_kl_divergence
+# One file, one class, one method, one parameterization
+uv run python -m pytest test/calibration/test_rake.py
+uv run python -m pytest test/calibration/test_rake.py::RakeSolveTest
+uv run python -m pytest test/calibration/test_rake.py::RakeSolveTest::test_solve_kl_divergence_0_M100_p20_no_phi
 
-# Run tests with verbose output
-uv run python -m pytest -v
-```
-
-### Linting
-```bash
-# Check code formatting with ruff
-uv run python -m ruff check pyrake test
-
-# Check code formatting with black
-uv run python -m black --check pyrake/ test/
-
-# Auto-format with black (if needed)
+# Format, lint, and type-check (CI runs all three)
 uv run python -m black pyrake/ test/
-
-# Check types
+uv run python -m ruff check pyrake/ test/
 uv run python -m mypy
-
-# Run all quality checks together
-uv run python -m black pyrake/ test/ && \
-uv run python -m ruff check pyrake/ test/ --fix && \
-uv run python -m mypy && \\
-uv run python -m pytest
 ```
 
-### Installation
-```bash
-pip install .
-```
+When debugging a failure, narrow scope at increasing granularity
+rather than re-running the whole suite: file → class → method → single
+parameterization. PyRake tests are heavily parameterized across
+problem sizes (M=13 to M=500, p=3 to p=100).
+
+### The `slow` marker
+
+Tests that trace a real Pareto frontier cost seconds rather than
+milliseconds. They carry `@pytest.mark.slow` (registered in
+`test/conftest.py`), which is what `-m "not slow"` selects against. **A
+new test that traces a frontier, or otherwise runs for more than a
+second or so, should be marked**; the fast loop is only worth having
+if it stays fast. CI passes no `-m`, so marking a test does not reduce
+the coverage that gates a merge.
+
+### Performance guard
+
+Cvxium's performance guard fails a test whose solver iteration counts
+move materially, up *or* down, against `test/perf_baseline.json`.
+`test/conftest.py` arms it by setting `CVXIUM_PERF_BASELINE` before
+cvxium is imported; set the variable to an empty string to disable
+it. If a change intentionally alters iteration counts, regenerate
+with `CVXIUM_PERF_BASELINE_WRITE=1 uv run python -m pytest` and
+explain why in the commit message. Counts below 8 iterations are not
+guarded, and known-bimodal tests are listed under the baseline's
+`__ignore__` key.
+
+### Test conventions
+
+The test suite uses `unittest.TestCase` classes, run by pytest; test
+classes follow the `*Test` naming convention. For parameterization,
+use `@parameterized.expand` and pass a name as the first element of
+each tuple; the generated test ID is `<test_method>_<index>_<label>`
+(e.g., `test_solve_kl_divergence_0_M100_p20_no_phi`).
 
 ## Architecture
 
-### Core Components
+### `pyrake/calibration/` — Finding weights
 
-**Optimization** (`pyrake/optimization/`)
-- Implements solvers for convex optimization problems.
-- Uses interior point methods with Newton's method for solving
-  constrained optimization
-- Custom KKT system solvers for equality-constrained problems
-- Settings managed via `OptimizationSettings` dataclass
+- **`distance_metrics.py`** — `Distance` (a Cvxium `Objective`) with
+  implementations `SquaredL2`, `KLDivergence`, `Huber`. Each provides
+  `evaluate`, `gradient`, and `hessian_diagonal`, and reports its
+  Hessian to Cvxium as a `DiagonalSystem`.
+- **`rake.py`** — `Rake`, the primary user-facing API. Minimizes
+  D(w, v) subject to exact balance (1/M) X^T w = μ, approximate
+  balance ‖(1/M) Z^T w − ν‖∞ ≤ ψ, a mean squared weight bound
+  (1/M) ‖w‖₂² ≤ φ, and weight bounds. It assembles these as a Cvxium
+  `Problem` from layered constraints (`EqualityConstraintLayer`,
+  `BoundsConstraintLayer`, `ImbalanceConstraintLayer`,
+  `SquaredNormConstraintLayer`) and solves it with `BarrierSolver`
+  (`engine="ipm"`, the default) or `PrimalDualSolver`
+  (`engine="pd"`). Cvxium builds and solves the Phase I feasibility
+  problem itself.
+- **`joint_calibrator.py`** — `JointCalibrator` extends `Rake` to
+  jointly calibrate treatment and control weights for internal
+  validity (balance between groups) and external validity (balance
+  with the target population). `solve_with_fallback()` degrades
+  gracefully through fallback levels when the full problem is
+  infeasible, returning a `FallbackOptimizationResult`.
+- **`frontier.py`** — `EfficientFrontier` traces the bias-variance
+  Pareto frontier over φ; `ExternalValidityVarianceFrontier` traces
+  external imbalance against variance. Includes knee detection,
+  knee refinement, tangent slopes, and `solve_with_knee_fallback`.
+- **`visualizations.py`** — `plot_balance` (one-sample),
+  `plot_balance_2_sample`, and the Wilcoxon signed-rank test behind
+  them.
 
-**Calibration** (`pyrake/calibration/`):
-- `Rake`: Main class for solving weight calibration problems with
-  exact covariate balance constraints (equality), approximate balance
-  constraints (l∞ norm), variance constraints (l2 norm), and lower
-  bound constraints
-- `JointCalibrator`: Extension for jointly calibrating treatment and
-  control group weights to achieve both internal validity (balance
-  between groups) and external validity (balance with population)
-- Solves: minimize D(w, v) subject to (1/M)X^T w = μ, constraints on
-  covariate imbalance, mean squared weight, and positivity
-- `EfficientFrontier`: Traces out the bias-variance tradeoff by
-  solving optimization problems for a range of variance constraints
-  (φ)
+### `pyrake/estimation/` — Using weights
 
-**Estimation** (`pyrake/estimation/`):
-- Hierarchy of estimator classes for population means and treatment
-  effects:
-  - Base: `MeanEstimator`, `WeightingEstimator`
-  - Population means: `IPWEstimator` (Inverse Propensity Weighted),
-    `SIPWEstimator` (Stabilized IPW), `AIPWEstimator` (Augmented IPW),
-    `SAIPWEstimator` (Stabilized Augmented IPW)
-  - Treatment effects: `TreatmentEffectEstimator`, `ATEEstimator`,
-    `ATTEstimator`, `ATCEstimator`
-- Compute point estimates, variance, confidence intervals, p-values
-- Include sensitivity analysis methods for hidden bias (from Zhao,
-  Small, and Bhattacharya, 2019)
+- **Estimands**: `PopulationMean`, `NonRespondentMean`, `SampleMean`,
+  `DoubleSamplingEstimand`.
+- **Mean estimators**: `IPWEstimator`, `AIPWEstimator`,
+  `SIPWEstimator`, `SAIPWEstimator`, `RatioEstimator` (delta method
+  variance).
+- **Treatment effect estimators**: `ATEEstimator`, `ATTEstimator`,
+  `ATCEstimator`, `SimpleDifferenceEstimator`,
+  `TreatmentEffectRatioEstimator`.
+- **`LinearCombinationEstimator`** — affine combinations of
+  independent estimators with delta-method variance.
+- **`sensitivity_solvers.py`** — the linear fractional program behind
+  `RatioEstimator`'s sensitivity analysis, as a Cvxium layer.
+- **`visualizations.py`** — `meta_analysis` (Fisher's method across
+  platforms).
+- All estimators provide `point_estimate`, `variance`,
+  `confidence_interval`, `pvalue`, `sensitivity_analysis`,
+  `plot_sensitivity`, and `resample` (for the bootstrap).
 
-### Key Design Patterns
+## Key Design Patterns
 
-**Optimization Strategy**:
-- Interior point methods transform inequality constraints into
-  logarithmic barrier functions
-- Newton's method solves the "centering step" for each barrier
-  parameter value
-- Barrier parameter increases by `barrier_multiplier` each iteration
-  until convergence
-- Custom KKT solvers exploit problem structure (diagonal + low-rank
-  Hessians)
-
-**Constraint Hierarchy**:
-1. **Exact balance** (equality constraints): Force (1/M)X^T w = μ for
-   critical covariates
-2. **Approximate balance** (l∞ constraints): Limit max imbalance
-   ||(1/M)Z^T w - ν||∞ ≤ ψ for important covariates
-3. **Implicit balance**: Propensity score weighting approximately
-   balances all covariates used in the model
-
-**Estimator Pattern**:
-- Double robustness: Augmented estimators are unbiased if either
-  propensity scores OR outcome model is correct
-- Stabilization: Normalizing weights to sum to sample size ensures
-  estimates stay within data range
-- Sensitivity analysis: Explore robustness to unobserved confounding
+- **Hessian structure exploitation**: Newton systems are solved in
+  O(p³ + p²M) rather than O(M³) by exploiting the diagonal plus
+  low-rank Hessian structure; Cvxium's `MatrixSystem` classes carry
+  that structure.
+- **Absolute imports**: All modules and test files use
+  fully-qualified absolute imports rooted at `pyrake.` (e.g., `from
+  pyrake.calibration.rake import Rake`).
+- **Narrowing optionals**: use `pyrake._typing.none_throws` rather
+  than a bare `assert x is not None` where an expression is needed;
+  unlike an assert, it survives `python -O`.
+- **Logging**: modules log under the `pyrake` namespace, which gets a
+  `NullHandler` on import. `pyrake.enable_logging` wires `pyrake` and
+  `cvxium` to one handler so solver output lands beneath the
+  calibration stage that invoked it.
 
 ## Important Conventions
 
 - **Weight normalization**: Mean weight of 1 corresponds to a true
   weighted average. This differs from standard Horvitz-Thompson
-  notation which uses weights summing to population size.
-- **Variance constraint**: The constraint (1/M)||w||₂² ≤ φ controls
-  the design effect, which quantifies efficiency loss from
+  notation, which uses weights summing to population size.
+- **Variance constraint**: The constraint (1/M) ‖w‖₂² ≤ φ controls the
+  design effect, which quantifies efficiency loss from
   unrepresentative samples.
 - **Default ψ**: When not specified, maximum covariate imbalance
   defaults to 1.5/√M, following Cochran and Chambers (1965) guidance
   on acceptable balance.
 - **Minimum weights**: Should generally be ≥ M/N (sample/population
-  ratio) since weights < M/N correspond to impossible propensity
+  ratio), since weights < M/N correspond to impossible propensity
   scores > 1.
 
-## Testing Notes
+## Dependencies
 
-- Tests use parametrized fixtures with different seeds, sample sizes,
-  covariate dimensions, and variance constraints
-- Test data generation simulates realistic propensity scores using
-  beta distributions
-- Tests verify both optimization convergence and correctness of
-  statistical properties
+numpy, scipy, pandas, matplotlib, seaborn, and cvxium, managed with
+uv. Development tools: pytest, parameterized, black, ruff, mypy.
+
+## Tests
+
+Tests are in `test/`, organized by `calibration/` and `estimation/`
+subdirectories matching the source layout:
+
+| File                                     | Coverage                                                                                                                                                     |
+|------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `calibration/test_distance_metrics.py`   | Distance evaluations, gradients, Hessians                                                                                                                    |
+| `calibration/test_rake.py`               | Rake.solve() with all distance metrics; infeasible problems; imbalance constraints; JointCalibrator fallback scenarios; cross-engine (IPM vs PD) equivalence |
+| `calibration/test_frontier.py`           | The frontier classes, the knee fallback and tangent slopes, cross-engine equivalence. Holds most of the suite's runtime; largely marked `slow`               |
+| `calibration/test_frontier_seam.py`      | Frontiers that cross the seam where external balance must be relaxed                                                                                         |
+| `calibration/test_knee_fallback.py`      | `solve_with_knee_fallback` and its degradation paths                                                                                                         |
+| `calibration/test_convergence.py`        | Newton step budgets and full steps past quadratic convergence                                                                                                |
+| `calibration/test_logging.py`            | `enable_logging` narration and the Cvxium log beneath it                                                                                                     |
+| `calibration/test_model_mean_balance.py` | Balance plots against model-based means                                                                                                                      |
+| `estimation/test_population.py`          | IPW, AIPW, SIPW, SAIPW population-mean estimators; sensitivity analysis; outcome-proxy-constrained sensitivity; ratio estimator                              |
+| `estimation/test_treatment_effects.py`   | ATE/ATT/ATC treatment effect estimators; simple difference; treatment-effect ratio; outcome-proxy-constrained sensitivity                                    |
+| `estimation/test_linear_combination.py`  | LinearCombinationEstimator                                                                                                                                   |
+| `estimation/test_sensitivity_solvers.py` | The sensitivity linear fractional program, against `scipy.optimize.linprog`                                                                                  |

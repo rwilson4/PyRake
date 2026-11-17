@@ -148,16 +148,17 @@ wheels = [
 
 [[package]]
 name = "cvxium"
-version = "0.4.2"
+version = "1.0.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "matplotlib" },
     { name = "numpy" },
     { name = "scipy" },
+    { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/0d/45/b2e6862e0d0bff8581b1142168a05905f9d982284b583f502840f43cc944/cvxium-0.4.2.tar.gz", hash = "sha256:73f30b032dcd5cba90bfb007512c7288ea94ebb7ec902efb412411336c30cef8", size = 63005, upload-time = "2026-04-14T23:09:47.887Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/55/9a/5e1d3754010e1d07cabbb567602678a2261d361ea7e5f9d3e891d624e3a5/cvxium-1.0.0.tar.gz", hash = "sha256:e591e33f4698592f60eabe2749dec91296f3e8b9e8643753fa7e228e39073484", size = 376449, upload-time = "2026-11-08T19:06:53.544Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/5d/a7/69731ccb54622030bb9bdb2946931db2d7c4e99af6f60906d42879733634/cvxium-0.4.2-py3-none-any.whl", hash = "sha256:0d9537c7f3ab9c4f655a2bd7352f37872350be3ba864dcb3698ca706cba32228", size = 71214, upload-time = "2026-04-14T23:09:46.396Z" },
+    { url = "https://files.pythonhosted.org/packages/a2/d8/87b176f6e7543b9a447ec68eef4429aab2106e2d56b786a07d0e608002ac/cvxium-1.0.0-py3-none-any.whl", hash = "sha256:4bfa380855b680eaa2de9eafdf1fa8f4ef985fa41a218a11c495168a5ccaabde", size = 406028, upload-time = "2026-11-08T19:06:51.632Z" },
 ]
 
 [[package]]
@@ -685,6 +686,15 @@ wheels = [
 ]
 
 [[package]]
+name = "parameterized"
+version = "0.9.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/ea/49/00c0c0cc24ff4266025a53e41336b79adaa5a4ebfad214f433d623f9865e/parameterized-0.9.0.tar.gz", hash = "sha256:7fc905272cefa4f364c1a3429cbbe9c0f98b793988efb5bf90aac80f08db09b1", size = 24351, upload-time = "2023-03-27T02:01:11.592Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/00/2f/804f58f0b856ab3bf21617cccf5b39206e6c4c94c2cd227bde125ea6105f/parameterized-0.9.0-py2.py3-none-any.whl", hash = "sha256:4e0758e3d41bea3bbd05ec14fc2c24736723f243b28d702081aef438c9372b1b", size = 20475, upload-time = "2023-03-27T02:01:09.31Z" },
+]
+
+[[package]]
 name = "pathspec"
 version = "1.0.4"
 source = { registry = "https://pypi.org/simple" }
@@ -827,7 +837,6 @@ dependencies = [
     { name = "pandas" },
     { name = "scipy" },
     { name = "seaborn" },
-    { name = "typing-extensions" },
 ]
 
 [package.dev-dependencies]
@@ -835,19 +844,19 @@ dev = [
     { name = "black" },
     { name = "mypy" },
     { name = "pandas-stubs" },
+    { name = "parameterized" },
     { name = "pytest" },
     { name = "ruff" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "cvxium", specifier = ">=0.4.2" },
+    { name = "cvxium", specifier = ">=1.0.0,<2" },
     { name = "matplotlib", specifier = ">=3.10.1,<4" },
     { name = "numpy", specifier = ">=2.2.5,<3" },
     { name = "pandas", specifier = ">=2.3.1,<3" },
     { name = "scipy", specifier = ">=1.15.2,<2" },
     { name = "seaborn", specifier = ">=0.13.2,<0.14" },
-    { name = "typing-extensions", specifier = ">=4.15.0,<5" },
 ]
 
 [package.metadata.requires-dev]
@@ -855,6 +864,7 @@ dev = [
     { name = "black", specifier = ">=26.3.1,<27" },
     { name = "mypy", specifier = ">=1.14.0,<2" },
     { name = "pandas-stubs", specifier = ">=2.2.0,<3" },
+    { name = "parameterized", specifier = ">=0.9.0,<0.10" },
     { name = "pytest", specifier = ">=9.0.3,<10" },
     { name = "ruff", specifier = ">=0.11.6,<0.12" },
 ]

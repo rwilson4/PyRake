@@ -1,22 +1,28 @@
 """Linear combination estimator."""
 
+from __future__ import annotations
+
 from collections.abc import Generator
-from typing import Literal
+from typing import Any, Literal
 
 import numpy as np
 import numpy.typing as npt
 
-from .base_classes import WeightingEstimator
+from pyrake.estimation.base_classes import (
+    WeightingEstimator,
+)
 
 
 class LinearCombinationEstimator(WeightingEstimator):
-    r"""Affine combination of WeightingEstimators.
+    """Affine combination of WeightingEstimators.
 
     Estimates:
-        theta = affine + sum_i c_i * theta_i
-    where each theta_i is estimated by the corresponding component estimator. Component
-    estimators may be MeanEstimators, TreatmentEffectEstimators, or other
-    LinearCombinationEstimators.
+
+       θ = affine + Σᵢ cᵢθᵢ,
+
+    where each θᵢ is estimated by the corresponding component estimator. Component
+    estimators may be ``MeanEstimator``, ``TreatmentEffectEstimator``, or other
+    ``LinearCombinationEstimator`` objects.
 
     Sensitivity analysis is valid because the objective is separable across components:
     hidden bias in each component contributes independently, and the worst-case bounds
@@ -32,12 +38,14 @@ class LinearCombinationEstimator(WeightingEstimator):
     Notes
     -----
     Variance is computed assuming independence across component estimators:
-        var(theta) = sum_i c_i^2 * var(theta_i).
+
+       var(θ) = Σᵢ cᵢ²var(θᵢ).
+
     This is exact when components are fit on disjoint datasets (e.g. different treatment
     arms or independent studies). If components share data, variance will be understated
-    and variance-based methods (confidence_interval, pvalue) will be anti-conservative.
-    Bootstrap-based methods (expanded_confidence_interval) carry the same independence
-    assumption since each component is resampled independently.
+    and variance-based methods (``confidence_interval``, ``pvalue``) will be
+    anti-conservative. Bootstrap-based methods (``expanded_confidence_interval``) carry
+    the same independence assumption since each component is resampled independently.
 
     """
 
@@ -50,13 +58,25 @@ class LinearCombinationEstimator(WeightingEstimator):
         self.affine = affine
 
     def point_estimate(self) -> float:
-        """Calculate the point estimate."""
+        """Calculate the point estimate.
+
+        Returns
+        -------
+         estimate : float
+            Offset plus the coefficient-weighted sum of component estimates.
+
+        """
         return self.affine + sum(c * e.point_estimate() for c, e in self.terms)
 
     def variance(self) -> float:
         """Calculate the variance.
 
         Assumes independence across component estimators. See class docstring.
+
+        Returns
+        -------
+         variance : float
+            Coefficient-weighted sum of component variances.
 
         """
         return sum(c**2 * e.variance() for c, e in self.terms)
@@ -71,6 +91,16 @@ class LinearCombinationEstimator(WeightingEstimator):
             c**2 * e_ub_var to the upper-bound variance.
           - c < 0: contributes c**2 * e_ub_var to the lower-bound variance and c**2 *
             e_lb_var to the upper-bound variance.
+
+        Parameters
+        ----------
+         gamma : float
+            The Gamma factor. Must be >= 1.0.
+
+        Returns
+        -------
+         lb_var, ub_var : float
+            Variance at the lower- and upper-bound sensitivity weights.
 
         """
         lb_var = 0.0
@@ -91,8 +121,11 @@ class LinearCombinationEstimator(WeightingEstimator):
         outcome_proxies: list[float] | npt.NDArray[np.float64] | None = None,
         proxy_mean: float | None = None,
         alpha: float = 0.10,
+        *,
+        proxy_kwargs: list[dict[str, Any]] | None = None,
+        **kwargs: Any,
     ) -> tuple[float, float]:
-        r"""Perform a sensitivity analysis.
+        """Perform a sensitivity analysis.
 
         The analysis is separable across components. For coefficient c and component
         sensitivity interval [lb_i, ub_i]:
@@ -107,18 +140,61 @@ class LinearCombinationEstimator(WeightingEstimator):
         ----------
          gamma : float, optional
             The Gamma factor. Must be >= 1.0, with 1.0 indicating perfect propensity
-            scores. Defaults to 6. See WeightingEstimator.
+            scores. Defaults to 6. See ``WeightingEstimator``.
+         outcome_proxies : array_like, optional
+            Accepted for override compatibility with ``WeightingEstimator``; must be
+            None. Use ``proxy_kwargs`` instead.
+         proxy_mean : float, optional
+            Accepted for override compatibility with ``WeightingEstimator``; must be
+            None. Use ``proxy_kwargs`` instead.
+         alpha : float, optional
+            Significance level for the proxy tolerance. Defaults to 0.10.
+         proxy_kwargs : list of dict, optional
+            Per-component keyword arguments forwarded to each component's
+            ``sensitivity_analysis``. Must have the same length as ``terms``. Each dict
+            is unpacked into the corresponding component's call, so the keys must match
+            that component's signature. Use an empty dict ``{}`` for components that
+            need no proxy arguments. For example, a ``MeanEstimator`` component accepts
+            ``outcome_proxies`` and ``proxy_mean``, while a ``TreatmentEffectEstimator``
+            accepts ``control_outcome_proxies``, ``treated_outcome_proxies``, and
+            ``proxy_mean``.
+         kwargs : dict, optional
+            Accepted for override compatibility with ``WeightingEstimator``; must be
+            empty.
 
         Returns
         -------
          lb, ub : float
             Lower and upper bounds on the point estimate.
 
+        Raises
+        ------
+         TypeError
+            If ``outcome_proxies``, ``proxy_mean``, or unexpected keyword arguments
+            are supplied.
+         ValueError
+            If ``proxy_kwargs`` disagrees with ``terms`` in length, or if ``gamma`` < 1
+            (propagated from the component ``sensitivity_analysis`` calls).
+
         """
+        if outcome_proxies is not None or proxy_mean is not None:
+            raise TypeError(
+                "`outcome_proxies` and `proxy_mean` are not supported here; use "
+                "`proxy_kwargs`."
+            )
+        if kwargs:
+            raise TypeError(f"Unexpected keyword arguments: {sorted(kwargs)}.")
+        if proxy_kwargs is not None and len(proxy_kwargs) != len(self.terms):
+            raise ValueError(
+                f"proxy_kwargs has {len(proxy_kwargs)} elements "
+                f"but there are {len(self.terms)} terms."
+            )
+
         lb = self.affine
         ub = self.affine
-        for c, e in self.terms:
-            e_lb, e_ub = e.sensitivity_analysis(gamma)
+        for i, (c, e) in enumerate(self.terms):
+            kw: dict[str, Any] = proxy_kwargs[i] if proxy_kwargs is not None else {}
+            e_lb, e_ub = e.sensitivity_analysis(gamma, alpha=alpha, **kw)
             if c >= 0:
                 lb += c * e_lb
                 ub += c * e_ub
@@ -137,7 +213,7 @@ class LinearCombinationEstimator(WeightingEstimator):
             | np.random.BitGenerator
             | np.random.Generator
         ) = None,
-    ) -> Generator["LinearCombinationEstimator", None, None]:
+    ) -> Generator[LinearCombinationEstimator, None, None]:
         """Yield a sequence of resampled estimators.
 
         Each of the B bootstrap iterations yields a new LinearCombinationEstimator whose
@@ -149,7 +225,12 @@ class LinearCombinationEstimator(WeightingEstimator):
          B : int
             Number of bootstrap replications.
          seed : int, list_like, etc
-            A seed for numpy.random.default_rng. See that documentation.
+            A seed for ``numpy.random.default_rng``. See that documentation.
+
+        Yields
+        ------
+         estimator : ``LinearCombinationEstimator``
+            Bootstrap-resampled estimator.
 
         """
         if not self.terms:
@@ -159,7 +240,18 @@ class LinearCombinationEstimator(WeightingEstimator):
                 yield LinearCombinationEstimator(terms=[], affine=self.affine)
             return
 
-        resamplers = [e.resample(B, seed=seed) for _, e in self.terms]
+        if isinstance(seed, np.random.SeedSequence):
+            ss = seed
+        elif isinstance(seed, (np.random.Generator, np.random.BitGenerator)):
+            rng = np.random.default_rng(seed)
+            ss = np.random.SeedSequence(int(rng.integers(2**63)))
+        else:
+            ss = np.random.SeedSequence(seed)
+        child_seeds = ss.spawn(len(self.terms))
+        resamplers = [
+            e.resample(B, seed=cs)
+            for cs, (_, e) in zip(child_seeds, self.terms, strict=True)
+        ]
         for resampled_components in zip(*resamplers, strict=False):
             yield LinearCombinationEstimator(
                 terms=[
@@ -186,7 +278,7 @@ class LinearCombinationEstimator(WeightingEstimator):
             | np.random.Generator
         ) = None,
     ) -> tuple[float, float]:
-        r"""Calculate an expanded confidence interval.
+        """Calculate an expanded confidence interval.
 
         Each bootstrap replicate independently resamples every component estimator and
         recomputes the sensitivity interval for the resulting linear combination
@@ -211,13 +303,18 @@ class LinearCombinationEstimator(WeightingEstimator):
             Number of bootstrap replications. Ignored when ``bootstrap=False``. Defaults
             to 1_000.
          seed : int, list_like, etc
-            A seed for numpy.random.default_rng. Ignored when ``bootstrap=False``.
+            A seed for ``numpy.random.default_rng``. Ignored when ``bootstrap=False``.
 
         Returns
         -------
          lb, ub : float
             Lower and upper bounds on the confidence interval. For one-sided intervals,
             only one of these will be finite.
+
+        Raises
+        ------
+         ValueError
+            If ``gamma`` < 1 or ``alternative`` is not recognized.
 
         """
         if gamma < 1.0:

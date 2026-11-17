@@ -1,15 +1,18 @@
+#!/usr/bin/env python3
 """Test treatment effect estimators."""
 
 import math
 import time
+import unittest
 
 import matplotlib.pyplot as plt
 import numpy as np
 import numpy.typing as npt
-import pytest
 from scipy import stats
 
-from pyrake.estimation.population import SIPWEstimator
+from pyrake.estimation.population import (
+    SIPWEstimator,
+)
 from pyrake.estimation.treatment_effects import (
     ATCEstimator,
     ATEEstimator,
@@ -18,10 +21,14 @@ from pyrake.estimation.treatment_effects import (
     TreatmentEffectEstimator,
     TreatmentEffectRatioEstimator,
 )
-from test.estimation.test_population import TestIPWEstimator
+from test.estimation.test_population import (
+    IPWEstimatorTest,
+)
 
 
-class TestSimpleDifferenceEstimator:
+class SimpleDifferenceEstimatorTest(unittest.TestCase):
+    """Tests for ``SimpleDifferenceEstimator``."""
+
     @staticmethod
     def get_data(
         binary: bool = True,
@@ -31,7 +38,7 @@ class TestSimpleDifferenceEstimator:
         npt.NDArray[np.float64],
         npt.NDArray[np.float64],
     ]:
-        population_size, propensities, outcomes = TestIPWEstimator.get_data(
+        population_size, propensities, outcomes = IPWEstimatorTest.get_data(
             binary=binary
         )
         sample_size = len(propensities)
@@ -48,8 +55,7 @@ class TestSimpleDifferenceEstimator:
             outcomes[treated_mask],
         )
 
-    @staticmethod
-    def test_point_estimate() -> None:
+    def test_point_estimate(self) -> None:
         """Test point estimate."""
 
         (
@@ -57,7 +63,7 @@ class TestSimpleDifferenceEstimator:
             control_outcomes,
             treated_propensities,
             treated_outcomes,
-        ) = TestSimpleDifferenceEstimator.get_data()
+        ) = SimpleDifferenceEstimatorTest.get_data()
 
         estimator = SimpleDifferenceEstimator(
             control_outcomes=control_outcomes,
@@ -66,7 +72,7 @@ class TestSimpleDifferenceEstimator:
 
         expected = float(np.mean(treated_outcomes) - np.mean(control_outcomes))
         actual = estimator.point_estimate()
-        assert actual == pytest.approx(expected)
+        self.assertAlmostEqual(actual, expected)
 
         estimator = SimpleDifferenceEstimator(
             control_outcomes=control_outcomes,
@@ -88,10 +94,9 @@ class TestSimpleDifferenceEstimator:
 
         expected = pate_estimator.point_estimate()
         actual = estimator.point_estimate()
-        assert actual == pytest.approx(expected)
+        self.assertAlmostEqual(actual, expected)
 
-    @staticmethod
-    def test_variance() -> None:
+    def test_variance(self) -> None:
         """Test variance."""
 
         (
@@ -99,7 +104,7 @@ class TestSimpleDifferenceEstimator:
             control_outcomes,
             treated_propensities,
             treated_outcomes,
-        ) = TestSimpleDifferenceEstimator.get_data()
+        ) = SimpleDifferenceEstimatorTest.get_data()
 
         estimator = SimpleDifferenceEstimator(
             control_outcomes=control_outcomes,
@@ -114,7 +119,7 @@ class TestSimpleDifferenceEstimator:
             + mu_c * (1 - mu_c) / len(control_outcomes)
         )
         actual = estimator.variance()
-        assert actual == pytest.approx(expected)
+        self.assertAlmostEqual(actual, expected)
 
         estimator = SimpleDifferenceEstimator(
             control_outcomes=control_outcomes,
@@ -135,10 +140,9 @@ class TestSimpleDifferenceEstimator:
         )
         expected = pate_estimator.variance()
         actual = estimator.variance()
-        assert actual == pytest.approx(expected)
+        self.assertAlmostEqual(actual, expected)
 
-    @staticmethod
-    def test_pvalue() -> None:
+    def test_pvalue(self) -> None:
         """Test pvalue."""
 
         (
@@ -146,7 +150,7 @@ class TestSimpleDifferenceEstimator:
             control_outcomes,
             treated_propensities,
             treated_outcomes,
-        ) = TestSimpleDifferenceEstimator.get_data()
+        ) = SimpleDifferenceEstimatorTest.get_data()
 
         estimator = SimpleDifferenceEstimator(
             control_outcomes=control_outcomes,
@@ -164,7 +168,7 @@ class TestSimpleDifferenceEstimator:
         expected = 2.0 * stats.norm.sf(abs(z))
 
         actual = estimator.pvalue()
-        assert actual == pytest.approx(expected)
+        self.assertAlmostEqual(actual, expected)
 
         estimator = SimpleDifferenceEstimator(
             control_outcomes=control_outcomes,
@@ -185,10 +189,9 @@ class TestSimpleDifferenceEstimator:
         )
         expected = pate_estimator.pvalue()
         actual = estimator.pvalue()
-        assert actual == pytest.approx(expected)
+        self.assertAlmostEqual(actual, expected)
 
-    @staticmethod
-    def test_confidence_interval() -> None:
+    def test_confidence_interval(self) -> None:
         """Test confidence interval."""
 
         (
@@ -196,7 +199,7 @@ class TestSimpleDifferenceEstimator:
             control_outcomes,
             treated_propensities,
             treated_outcomes,
-        ) = TestSimpleDifferenceEstimator.get_data()
+        ) = SimpleDifferenceEstimatorTest.get_data()
 
         estimator = SimpleDifferenceEstimator(
             control_outcomes=control_outcomes,
@@ -215,8 +218,8 @@ class TestSimpleDifferenceEstimator:
         expected_ub = mu_t - mu_c + zcrit * math.sqrt(var_tc)
 
         actual_lb, actual_ub = estimator.confidence_interval(alpha=0.1)
-        assert actual_lb == pytest.approx(expected_lb)
-        assert actual_ub == pytest.approx(expected_ub)
+        self.assertAlmostEqual(actual_lb, expected_lb)
+        self.assertAlmostEqual(actual_ub, expected_ub)
 
         estimator = SimpleDifferenceEstimator(
             control_outcomes=control_outcomes,
@@ -237,11 +240,10 @@ class TestSimpleDifferenceEstimator:
         )
         expected_lb, expected_ub = pate_estimator.confidence_interval(alpha=0.1)
         actual_lb, actual_ub = estimator.confidence_interval(alpha=0.1)
-        assert actual_lb == pytest.approx(expected_lb)
-        assert actual_ub == pytest.approx(expected_ub)
+        self.assertAlmostEqual(actual_lb, expected_lb)
+        self.assertAlmostEqual(actual_ub, expected_ub)
 
-    @staticmethod
-    def test_sensitivity_analysis() -> None:
+    def test_sensitivity_analysis(self) -> None:
         """Test sensitivity analysis."""
 
         (
@@ -249,7 +251,7 @@ class TestSimpleDifferenceEstimator:
             control_outcomes,
             treated_propensities,
             treated_outcomes,
-        ) = TestSimpleDifferenceEstimator.get_data()
+        ) = SimpleDifferenceEstimatorTest.get_data()
 
         estimator = SimpleDifferenceEstimator(
             control_outcomes=control_outcomes,
@@ -263,8 +265,8 @@ class TestSimpleDifferenceEstimator:
         expected_ub = float(mu_t - mu_c)
 
         actual_lb, actual_ub = estimator.sensitivity_analysis()
-        assert actual_lb == pytest.approx(expected_lb)
-        assert actual_ub == pytest.approx(expected_ub)
+        self.assertAlmostEqual(actual_lb, expected_lb)
+        self.assertAlmostEqual(actual_ub, expected_ub)
 
         estimator = SimpleDifferenceEstimator(
             control_outcomes=control_outcomes,
@@ -285,10 +287,9 @@ class TestSimpleDifferenceEstimator:
         )
         expected_lb, expected_ub = pate_estimator.sensitivity_analysis()
         actual_lb, actual_ub = estimator.sensitivity_analysis()
-        assert actual_lb == pytest.approx(expected_lb)
+        self.assertAlmostEqual(actual_lb, expected_lb)
 
-    @staticmethod
-    def test_expanded_confidence_interval() -> None:
+    def test_expanded_confidence_interval(self) -> None:
         """Test confidence interval."""
 
         (
@@ -296,7 +297,7 @@ class TestSimpleDifferenceEstimator:
             control_outcomes,
             treated_propensities,
             treated_outcomes,
-        ) = TestSimpleDifferenceEstimator.get_data()
+        ) = SimpleDifferenceEstimatorTest.get_data()
 
         estimator = SimpleDifferenceEstimator(
             control_outcomes=control_outcomes,
@@ -318,8 +319,8 @@ class TestSimpleDifferenceEstimator:
             alpha=0.1, seed=1234
         )
         # Some differences are expected here, b/c the expanded confidence interval is using a bootstrap.
-        assert actual_lb == pytest.approx(expected_lb, abs=0.001)
-        assert actual_ub == pytest.approx(expected_ub, abs=0.001)
+        self.assertAlmostEqual(actual_lb, expected_lb, delta=0.001)
+        self.assertAlmostEqual(actual_ub, expected_ub, delta=0.001)
 
         estimator = SimpleDifferenceEstimator(
             control_outcomes=control_outcomes,
@@ -344,12 +345,10 @@ class TestSimpleDifferenceEstimator:
         actual_lb, actual_ub = estimator.expanded_confidence_interval(
             alpha=0.1, seed=1234
         )
-        assert actual_lb == pytest.approx(expected_lb)
-        assert actual_ub == pytest.approx(expected_ub)
-        assert actual_ub == pytest.approx(expected_ub)
+        self.assertAlmostEqual(actual_lb, expected_lb)
+        self.assertAlmostEqual(actual_ub, expected_ub)
 
-    @staticmethod
-    def test_adjusted_pvalue() -> None:
+    def test_adjusted_pvalue(self) -> None:
         """Test adjusted p-value for treatment effect estimators."""
 
         (
@@ -357,7 +356,7 @@ class TestSimpleDifferenceEstimator:
             control_outcomes,
             treated_propensities,
             treated_outcomes,
-        ) = TestSimpleDifferenceEstimator.get_data()
+        ) = SimpleDifferenceEstimatorTest.get_data()
 
         pate_estimator = TreatmentEffectEstimator(
             control_estimator=SIPWEstimator(
@@ -373,7 +372,7 @@ class TestSimpleDifferenceEstimator:
         # gamma=1 reduces to the standard p-value (default null_value=0.0)
         std_pvalue = pate_estimator.pvalue()
         actual = pate_estimator.adjusted_pvalue(gamma=1.0)
-        assert actual == pytest.approx(std_pvalue)
+        self.assertAlmostEqual(actual, std_pvalue)
 
         # For gamma > 1, adjusted p-value is >= standard p-value
         print("Point Estimate:", pate_estimator.point_estimate())
@@ -382,20 +381,22 @@ class TestSimpleDifferenceEstimator:
         st = time.time()
         bootstrap = pate_estimator.adjusted_pvalue(gamma=1.05, seed=42)
         print(
-            f"Bootstrap:  {bootstrap:.05f} (calculated in {1000 * (time.time()-st):.03f} ms)"
+            f"Bootstrap:  {bootstrap:.05f} (calculated in {1000 * (time.time() - st):.03f} ms)"
         )
-        assert bootstrap >= std_pvalue
+        self.assertGreaterEqual(bootstrap, std_pvalue)
 
         st = time.time()
         heuristic = pate_estimator.adjusted_pvalue(gamma=1.05, bootstrap=False)
         print(
-            f"Heuristic:  {heuristic:.05f} (calculated in {1000 * (time.time()-st):.03f} ms)"
+            f"Heuristic:  {heuristic:.05f} (calculated in {1000 * (time.time() - st):.03f} ms)"
         )
-        assert heuristic >= std_pvalue
-        assert heuristic == pytest.approx(bootstrap, abs=0.02)
+        self.assertGreaterEqual(heuristic, std_pvalue)
+        self.assertAlmostEqual(heuristic, bootstrap, delta=0.02)
 
 
-class TestATEEstimator:
+class ATEEstimatorTest(unittest.TestCase):
+    """Tests for ``ATEEstimator``."""
+
     @staticmethod
     def get_data() -> tuple[
         npt.NDArray[np.float64],
@@ -417,8 +418,14 @@ class TestATEEstimator:
         s = q * (1 - q) / sigma2 - 1
         alpha = q * s
         beta = (1 - q) * s
-        propensities = rng.beta(alpha, beta, size=sample_size)
-        assignments = rng.binomial(1, propensities, size=sample_size)
+        propensities: npt.NDArray[np.float64] = rng.beta(alpha, beta, size=sample_size)
+        # why: scalar n with array p matches no stub overload; an explicit
+        # ones-array draws identically (same per-element n=1 trials).
+        assignments = rng.binomial(
+            np.ones(sample_size, dtype=np.int64),
+            propensities,
+            size=sample_size,
+        )
         y0 = rng.normal(0.0, 1.0, size=sample_size)
         y1 = rng.normal(0.05, 1.0, size=sample_size)
         outcomes = np.where(assignments == 0, y0, y1)
@@ -458,8 +465,7 @@ class TestATEEstimator:
             treated_sampling_propensities,
         )
 
-    @staticmethod
-    def test_point_estimate() -> None:
+    def test_point_estimate(self) -> None:
         """Test point estimate."""
         (
             control_propensities,
@@ -472,7 +478,7 @@ class TestATEEstimator:
             treated_predicted_outcomes,
             treated_mean_predicted_outcome,
             treated_sampling_propensities,
-        ) = TestATEEstimator.get_data()
+        ) = ATEEstimatorTest.get_data()
 
         estimator = ATEEstimator(
             control_propensity_scores=control_propensities,
@@ -484,7 +490,7 @@ class TestATEEstimator:
         expected = 0.10634476337015086
 
         actual = estimator.point_estimate()
-        assert actual == pytest.approx(expected)
+        self.assertAlmostEqual(actual, expected)
 
         # Test specifying the sampling propensities, but requesting SampleMean
         estimator = ATEEstimator(
@@ -498,7 +504,7 @@ class TestATEEstimator:
         )
 
         actual = estimator.point_estimate()
-        assert actual == pytest.approx(expected)
+        self.assertAlmostEqual(actual, expected)
 
         # Test specifying the sampling propensities, with PopulationMean
         estimator = ATEEstimator(
@@ -513,7 +519,7 @@ class TestATEEstimator:
         expected = 0.10576562237906262
 
         actual = estimator.point_estimate()
-        assert actual == pytest.approx(expected)
+        self.assertAlmostEqual(actual, expected)
 
         # Test with SAIPW estimators
         estimator = ATEEstimator(
@@ -536,10 +542,9 @@ class TestATEEstimator:
         expected = 0.05015618839030087
 
         actual = estimator.point_estimate()
-        assert actual == pytest.approx(expected)
+        self.assertAlmostEqual(actual, expected)
 
-    @staticmethod
-    def test_variance() -> None:
+    def test_variance(self) -> None:
         """Test variance."""
         (
             control_propensities,
@@ -552,7 +557,7 @@ class TestATEEstimator:
             treated_predicted_outcomes,
             treated_mean_predicted_outcome,
             treated_sampling_propensities,
-        ) = TestATEEstimator.get_data()
+        ) = ATEEstimatorTest.get_data()
 
         estimator = ATEEstimator(
             control_propensity_scores=control_propensities,
@@ -561,12 +566,10 @@ class TestATEEstimator:
             treated_outcomes=treated_outcomes,
             estimator_class="SIPW",
         )
-        # Data simulates variance of 1, sample size in each experiment group of ~1000,
-        # so variance is ~ 1/1000 + 1/1000 = 2/1000.
         expected = 0.0020067844455491065
 
         actual = estimator.variance()
-        assert actual == pytest.approx(expected)
+        self.assertAlmostEqual(actual, expected)
 
         # Test specifying the sampling propensities, but requesting SampleMean
         estimator = ATEEstimator(
@@ -580,7 +583,7 @@ class TestATEEstimator:
         )
 
         actual = estimator.variance()
-        assert actual == pytest.approx(expected)
+        self.assertAlmostEqual(actual, expected)
 
         # Test with SAIPW estimators
         estimator = ATEEstimator(
@@ -602,10 +605,9 @@ class TestATEEstimator:
         expected = 1.995112125278196e-07
 
         actual = estimator.variance()
-        assert actual == pytest.approx(expected)
+        self.assertAlmostEqual(actual, expected)
 
-    @staticmethod
-    def test_pvalue() -> None:
+    def test_pvalue(self) -> None:
         """Test p-value calculation."""
         (
             control_propensities,
@@ -618,7 +620,7 @@ class TestATEEstimator:
             treated_predicted_outcomes,
             treated_mean_predicted_outcome,
             treated_sampling_propensities,
-        ) = TestATEEstimator.get_data()
+        ) = ATEEstimatorTest.get_data()
 
         estimator = ATEEstimator(
             control_propensity_scores=control_propensities,
@@ -630,23 +632,15 @@ class TestATEEstimator:
         expected = 0.017600450212022885
 
         actual = estimator.pvalue()
-        assert actual == pytest.approx(expected)
+        self.assertAlmostEqual(actual, expected)
 
         # Test one-sided p-values
         actual = estimator.pvalue(alternative="greater")
-        # The point estimate is positive (and fairly large relative to the variance),
-        # which provides evidence in favor of a positive treatment effect. Thus, when
-        # testing for evidence in favor of a treatment effect greater than 0, we should
-        # get a p-value less than 0.5, and half the two-sided interval.
-        assert actual < 0.5
-        assert actual == pytest.approx(0.5 * expected)
+        self.assertLess(actual, 0.5)
+        self.assertAlmostEqual(actual, 0.5 * expected)
 
         actual = estimator.pvalue(alternative="less")
-        # If for some reason, we wanted to prove the treatment were harmful, this is
-        # what we would do. But in this case, the evidence points in favor of a
-        # beneficial treatment, so the evidence in favor of a harmful treatment is quite
-        # weak, as represented by a p-value > 0.5.
-        assert actual > 0.5
+        self.assertGreater(actual, 0.5)
 
         # Test specifying the sampling propensities, but requesting SampleMean
         estimator = ATEEstimator(
@@ -660,7 +654,7 @@ class TestATEEstimator:
         )
 
         actual = estimator.pvalue()
-        assert actual == pytest.approx(expected)
+        self.assertAlmostEqual(actual, expected)
 
         # Test with SAIPW estimators
         estimator = ATEEstimator(
@@ -679,15 +673,12 @@ class TestATEEstimator:
             },
         )
 
-        # Because our outcome model is artificially amazing, the variance is negligible
-        # and we get a p-value of nearly exactly 0.
         expected = 0.0
 
         actual = estimator.pvalue()
-        assert actual == pytest.approx(expected)
+        self.assertAlmostEqual(actual, expected)
 
-    @staticmethod
-    def test_confidence_interval() -> None:
+    def test_confidence_interval(self) -> None:
         """Test confidence interval."""
         (
             control_propensities,
@@ -700,7 +691,7 @@ class TestATEEstimator:
             treated_predicted_outcomes,
             treated_mean_predicted_outcome,
             treated_sampling_propensities,
-        ) = TestATEEstimator.get_data()
+        ) = ATEEstimatorTest.get_data()
 
         estimator = ATEEstimator(
             control_propensity_scores=control_propensities,
@@ -708,29 +699,28 @@ class TestATEEstimator:
             treated_propensity_scores=treated_propensities,
             treated_outcomes=treated_outcomes,
         )
-        # Data simulates an ATE of 0.05
         lb_expected = 0.03266001243458834
         ub_expected = 0.1800295143057134
 
         lb_actual, ub_actual = estimator.confidence_interval(alpha=0.1)
         print(lb_actual, ub_actual)
-        assert lb_actual == pytest.approx(lb_expected)
-        assert ub_actual == pytest.approx(ub_expected)
+        self.assertAlmostEqual(lb_actual, lb_expected)
+        self.assertAlmostEqual(ub_actual, ub_expected)
 
         # Test one-sided intervals
         lb_actual, ub_actual = estimator.confidence_interval(
             alpha=0.05, alternative="less"
         )
         print(lb_actual, ub_actual)
-        assert lb_actual == -np.inf
-        assert ub_actual == pytest.approx(ub_expected)
+        self.assertEqual(lb_actual, -np.inf)
+        self.assertAlmostEqual(ub_actual, ub_expected)
 
         lb_actual, ub_actual = estimator.confidence_interval(
             alpha=0.05, alternative="greater"
         )
         print(lb_actual, ub_actual)
-        assert lb_actual == pytest.approx(lb_expected)
-        assert ub_actual == np.inf
+        self.assertAlmostEqual(lb_actual, lb_expected)
+        self.assertEqual(ub_actual, np.inf)
 
         # Test specifying the sampling propensities, but requesting SampleMean
         estimator = ATEEstimator(
@@ -744,8 +734,8 @@ class TestATEEstimator:
         )
 
         lb_actual, ub_actual = estimator.confidence_interval(alpha=0.1)
-        assert lb_actual == pytest.approx(lb_expected)
-        assert ub_actual == pytest.approx(ub_expected)
+        self.assertAlmostEqual(lb_actual, lb_expected)
+        self.assertAlmostEqual(ub_actual, ub_expected)
 
         # Test with SAIPW estimators
         estimator = ATEEstimator(
@@ -763,17 +753,15 @@ class TestATEEstimator:
                 "mean_predicted_outcome": treated_mean_predicted_outcome,
             },
         )
-        # Data simulates an ATE of 0.05
         lb_expected = 0.049421486916861976
         ub_expected = 0.05089088986373977
 
         lb_actual, ub_actual = estimator.confidence_interval(alpha=0.1)
         print(lb_actual, ub_actual)
-        assert lb_actual == pytest.approx(lb_expected)
-        assert ub_actual == pytest.approx(ub_expected)
+        self.assertAlmostEqual(lb_actual, lb_expected)
+        self.assertAlmostEqual(ub_actual, ub_expected)
 
-    @staticmethod
-    def test_sensitivity_analysis() -> None:
+    def test_sensitivity_analysis(self) -> None:
         """Test sensitivity analysis."""
         (
             control_propensities,
@@ -786,7 +774,7 @@ class TestATEEstimator:
             treated_predicted_outcomes,
             treated_mean_predicted_outcome,
             treated_sampling_propensities,
-        ) = TestATEEstimator.get_data()
+        ) = ATEEstimatorTest.get_data()
 
         estimator = ATEEstimator(
             control_propensity_scores=control_propensities,
@@ -801,8 +789,8 @@ class TestATEEstimator:
 
         lb_actual, ub_actual = estimator.sensitivity_analysis(gamma=gamma)
         print(lb_actual, ub_actual)
-        assert lb_actual == pytest.approx(lb_expected)
-        assert ub_actual == pytest.approx(ub_expected)
+        self.assertAlmostEqual(lb_actual, lb_expected)
+        self.assertAlmostEqual(ub_actual, ub_expected)
 
         # Test specifying the sampling propensities, but requesting SampleMean
         estimator = ATEEstimator(
@@ -816,8 +804,8 @@ class TestATEEstimator:
         )
 
         lb_actual, ub_actual = estimator.sensitivity_analysis(gamma=gamma)
-        assert lb_actual == pytest.approx(lb_expected)
-        assert ub_actual == pytest.approx(ub_expected)
+        self.assertAlmostEqual(lb_actual, lb_expected)
+        self.assertAlmostEqual(ub_actual, ub_expected)
 
         # Test with SAIPW estimators
         estimator = ATEEstimator(
@@ -841,11 +829,10 @@ class TestATEEstimator:
 
         lb_actual, ub_actual = estimator.sensitivity_analysis(gamma=gamma)
         print(lb_actual, ub_actual)
-        assert lb_actual == pytest.approx(lb_expected)
-        assert ub_actual == pytest.approx(ub_expected)
+        self.assertAlmostEqual(lb_actual, lb_expected)
+        self.assertAlmostEqual(ub_actual, ub_expected)
 
-    @staticmethod
-    def test_expanded_confidence_interval() -> None:
+    def test_expanded_confidence_interval(self) -> None:
         """Test expanded confidence interval."""
         (
             control_propensities,
@@ -858,7 +845,7 @@ class TestATEEstimator:
             treated_predicted_outcomes,
             treated_mean_predicted_outcome,
             treated_sampling_propensities,
-        ) = TestATEEstimator.get_data()
+        ) = ATEEstimatorTest.get_data()
 
         estimator = ATEEstimator(
             control_propensity_scores=control_propensities,
@@ -876,8 +863,8 @@ class TestATEEstimator:
         end_time = time.time()
         print(f"Completed in {end_time - start_time:.03f} seconds")
         print(lb_actual, ub_actual)
-        assert lb_actual == pytest.approx(lb_expected)
-        assert ub_actual == pytest.approx(ub_expected)
+        self.assertAlmostEqual(lb_actual, lb_expected)
+        self.assertAlmostEqual(ub_actual, ub_expected)
 
         # Test one-sided intervals
         start_time = time.time()
@@ -887,8 +874,8 @@ class TestATEEstimator:
         end_time = time.time()
         print(f"Completed in {end_time - start_time:.03f} seconds")
         print(lb_actual, ub_actual)
-        assert lb_actual == -np.inf
-        assert ub_actual == pytest.approx(ub_expected)
+        self.assertEqual(lb_actual, -np.inf)
+        self.assertAlmostEqual(ub_actual, ub_expected)
 
         start_time = time.time()
         lb_actual, ub_actual = estimator.expanded_confidence_interval(
@@ -897,8 +884,8 @@ class TestATEEstimator:
         end_time = time.time()
         print(f"Completed in {end_time - start_time:.03f} seconds")
         print(lb_actual, ub_actual)
-        assert lb_actual == pytest.approx(lb_expected)
-        assert ub_actual == np.inf
+        self.assertAlmostEqual(lb_actual, lb_expected)
+        self.assertEqual(ub_actual, np.inf)
 
         # Test specifying the sampling propensities, but requesting SampleMean
         estimator = ATEEstimator(
@@ -914,8 +901,8 @@ class TestATEEstimator:
         lb_actual, ub_actual = estimator.expanded_confidence_interval(
             alpha=0.1, gamma=6.0, bootstrap=False
         )
-        assert lb_actual == pytest.approx(lb_expected)
-        assert ub_actual == pytest.approx(ub_expected)
+        self.assertAlmostEqual(lb_actual, lb_expected)
+        self.assertAlmostEqual(ub_actual, ub_expected)
 
         # Test specifying the sampling propensities, but requesting PopulationMean
         estimator = ATEEstimator(
@@ -933,8 +920,8 @@ class TestATEEstimator:
         lb_actual, ub_actual = estimator.expanded_confidence_interval(
             alpha=0.1, gamma=6.0, bootstrap=False
         )
-        assert lb_actual == pytest.approx(lb_expected)
-        assert ub_actual == pytest.approx(ub_expected)
+        self.assertAlmostEqual(lb_actual, lb_expected)
+        self.assertAlmostEqual(ub_actual, ub_expected)
 
         # Test with SAIPW estimators
         estimator = ATEEstimator(
@@ -962,11 +949,10 @@ class TestATEEstimator:
         end_time = time.time()
         print(f"Completed in {end_time - start_time:.03f} seconds")
         print(lb_actual, ub_actual)
-        assert lb_actual == pytest.approx(lb_expected)
-        assert ub_actual == pytest.approx(ub_expected)
+        self.assertAlmostEqual(lb_actual, lb_expected)
+        self.assertAlmostEqual(ub_actual, ub_expected)
 
-    @staticmethod
-    def test_plot_sensitivity() -> None:
+    def test_plot_sensitivity(self) -> None:
         """Test sensitivity analysis."""
         (
             control_propensities,
@@ -979,7 +965,7 @@ class TestATEEstimator:
             treated_predicted_outcomes,
             treated_mean_predicted_outcome,
             treated_sampling_propensities,
-        ) = TestATEEstimator.get_data()
+        ) = ATEEstimatorTest.get_data()
 
         estimator = ATEEstimator(
             control_propensity_scores=control_propensities,
@@ -1017,14 +1003,15 @@ class TestATEEstimator:
             ytick_format=".02%",
         )
         # plt.show()
-        assert set(df.columns) == set(expected_columns)
-        assert len(df) == 50
+        self.assertEqual(set(df.columns), set(expected_columns))
+        self.assertEqual(len(df), 50)
         plt.close("all")
 
 
-class TestATTEstimator:
-    @staticmethod
-    def test_point_estimate() -> None:
+class ATTEstimatorTest(unittest.TestCase):
+    """Tests for ``ATTEstimator``."""
+
+    def test_point_estimate(self) -> None:
         """Test point estimate."""
         (
             control_propensities,
@@ -1037,18 +1024,17 @@ class TestATTEstimator:
             treated_predicted_outcomes,
             treated_mean_predicted_outcome,
             treated_sampling_propensities,
-        ) = TestATEEstimator.get_data()
+        ) = ATEEstimatorTest.get_data()
 
         estimator: TreatmentEffectEstimator = ATTEstimator(
             control_propensity_scores=control_propensities,
             control_outcomes=control_outcomes,
             treated_outcomes=treated_outcomes,
         )
-        # Data simulates an ATE of 0.05
         expected = 0.10130356555998879
 
         actual = estimator.point_estimate()
-        assert actual == pytest.approx(expected)
+        self.assertAlmostEqual(actual, expected)
 
         # Test that ATC == -ATT when we interchange treated/control units
         estimator = ATCEstimator(
@@ -1058,10 +1044,9 @@ class TestATTEstimator:
             control_outcomes=treated_outcomes,
         )
         actual = -estimator.point_estimate()
-        assert actual == pytest.approx(expected)
+        self.assertAlmostEqual(actual, expected)
 
-    @staticmethod
-    def test_variance() -> None:
+    def test_variance(self) -> None:
         """Test variance."""
         (
             control_propensities,
@@ -1074,7 +1059,7 @@ class TestATTEstimator:
             treated_predicted_outcomes,
             treated_mean_predicted_outcome,
             treated_sampling_propensities,
-        ) = TestATEEstimator.get_data()
+        ) = ATEEstimatorTest.get_data()
 
         estimator = ATTEstimator(
             control_propensity_scores=control_propensities,
@@ -1082,15 +1067,12 @@ class TestATTEstimator:
             treated_outcomes=treated_outcomes,
             estimator_class="SIPW",
         )
-        # Data simulates variance of 1, sample size in each experiment group of ~1000,
-        # so variance is ~ 1/1000 + 1/1000 = 2/1000.
         expected = 0.0020332556235972184
 
         actual = estimator.variance()
-        assert actual == pytest.approx(expected)
+        self.assertAlmostEqual(actual, expected)
 
-    @staticmethod
-    def test_sensitivity_analysis() -> None:
+    def test_sensitivity_analysis(self) -> None:
         """Test sensitivity analysis."""
         (
             control_propensities,
@@ -1103,7 +1085,7 @@ class TestATTEstimator:
             treated_predicted_outcomes,
             treated_mean_predicted_outcome,
             treated_sampling_propensities,
-        ) = TestATEEstimator.get_data()
+        ) = ATEEstimatorTest.get_data()
 
         estimator: TreatmentEffectEstimator = ATTEstimator(
             control_propensity_scores=control_propensities,
@@ -1117,8 +1099,8 @@ class TestATTEstimator:
 
         lb_actual, ub_actual = estimator.sensitivity_analysis(gamma=gamma)
         print(lb_actual, ub_actual)
-        assert lb_actual == pytest.approx(lb_expected)
-        assert ub_actual == pytest.approx(ub_expected)
+        self.assertAlmostEqual(lb_actual, lb_expected)
+        self.assertAlmostEqual(ub_actual, ub_expected)
 
         # Test that ATC == -ATT when we interchange treated/control units
         estimator = ATCEstimator(
@@ -1129,11 +1111,10 @@ class TestATTEstimator:
         )
         lb_actual, ub_actual = estimator.sensitivity_analysis(gamma=gamma)
         print(lb_actual, ub_actual)
-        assert lb_actual == pytest.approx(-ub_expected)
-        assert ub_actual == pytest.approx(-lb_expected)
+        self.assertAlmostEqual(lb_actual, -ub_expected)
+        self.assertAlmostEqual(ub_actual, -lb_expected)
 
-    @staticmethod
-    def test_plot_sensitivity() -> None:
+    def test_plot_sensitivity(self) -> None:
         """Test sensitivity analysis."""
         (
             control_propensities,
@@ -1146,7 +1127,7 @@ class TestATTEstimator:
             treated_predicted_outcomes,
             treated_mean_predicted_outcome,
             treated_sampling_propensities,
-        ) = TestATEEstimator.get_data()
+        ) = ATEEstimatorTest.get_data()
 
         estimator = ATTEstimator(
             control_propensity_scores=control_propensities,
@@ -1183,14 +1164,15 @@ class TestATTEstimator:
             ytick_format=".02%",
         )
         # plt.show()
-        assert set(df.columns) == set(expected_columns)
-        assert len(df) == 50
+        self.assertEqual(set(df.columns), set(expected_columns))
+        self.assertEqual(len(df), 50)
         plt.close("all")
 
 
-class TestATCEstimator:
-    @staticmethod
-    def test_point_estimate() -> None:
+class ATCEstimatorTest(unittest.TestCase):
+    """Tests for ``ATCEstimator``."""
+
+    def test_point_estimate(self) -> None:
         """Test point estimate."""
         (
             control_propensities,
@@ -1203,21 +1185,19 @@ class TestATCEstimator:
             treated_predicted_outcomes,
             treated_mean_predicted_outcome,
             treated_sampling_propensities,
-        ) = TestATEEstimator.get_data()
+        ) = ATEEstimatorTest.get_data()
 
         estimator = ATCEstimator(
             control_outcomes=control_outcomes,
             treated_propensity_scores=treated_propensities,
             treated_outcomes=treated_outcomes,
         )
-        # Data simulates an ATE of 0.05
         expected = 0.11139202188516385
 
         actual = estimator.point_estimate()
-        assert actual == pytest.approx(expected)
+        self.assertAlmostEqual(actual, expected)
 
-    @staticmethod
-    def test_variance() -> None:
+    def test_variance(self) -> None:
         """Test variance."""
         (
             control_propensities,
@@ -1230,7 +1210,7 @@ class TestATCEstimator:
             treated_predicted_outcomes,
             treated_mean_predicted_outcome,
             treated_sampling_propensities,
-        ) = TestATEEstimator.get_data()
+        ) = ATEEstimatorTest.get_data()
 
         estimator = ATCEstimator(
             control_outcomes=control_outcomes,
@@ -1238,15 +1218,12 @@ class TestATCEstimator:
             treated_outcomes=treated_outcomes,
             estimator_class="SIPW",
         )
-        # Data simulates variance of 1, sample size in each experiment group of ~1000,
-        # so variance is ~ 1/1000 + 1/1000 = 2/1000.
         expected = 0.0020194493137473046
 
         actual = estimator.variance()
-        assert actual == pytest.approx(expected)
+        self.assertAlmostEqual(actual, expected)
 
-    @staticmethod
-    def test_sensitivity_analysis() -> None:
+    def test_sensitivity_analysis(self) -> None:
         """Test sensitivity analysis."""
         (
             control_propensities,
@@ -1259,7 +1236,7 @@ class TestATCEstimator:
             treated_predicted_outcomes,
             treated_mean_predicted_outcome,
             treated_sampling_propensities,
-        ) = TestATEEstimator.get_data()
+        ) = ATEEstimatorTest.get_data()
 
         estimator = ATCEstimator(
             control_outcomes=control_outcomes,
@@ -1273,11 +1250,10 @@ class TestATCEstimator:
 
         lb_actual, ub_actual = estimator.sensitivity_analysis(gamma=gamma)
         print(lb_actual, ub_actual)
-        assert lb_actual == pytest.approx(lb_expected)
-        assert ub_actual == pytest.approx(ub_expected)
+        self.assertAlmostEqual(lb_actual, lb_expected)
+        self.assertAlmostEqual(ub_actual, ub_expected)
 
-    @staticmethod
-    def test_plot_sensitivity() -> None:
+    def test_plot_sensitivity(self) -> None:
         """Test sensitivity analysis."""
         (
             control_propensities,
@@ -1290,7 +1266,7 @@ class TestATCEstimator:
             treated_predicted_outcomes,
             treated_mean_predicted_outcome,
             treated_sampling_propensities,
-        ) = TestATEEstimator.get_data()
+        ) = ATEEstimatorTest.get_data()
 
         estimator = ATCEstimator(
             control_outcomes=control_outcomes,
@@ -1327,12 +1303,14 @@ class TestATCEstimator:
             ytick_format=".02%",
         )
         # plt.show()
-        assert set(df.columns) == set(expected_columns)
-        assert len(df) == 50
+        self.assertEqual(set(df.columns), set(expected_columns))
+        self.assertEqual(len(df), 50)
         plt.close("all")
 
 
-class TestTreatmentEffectRatioEstimator:
+class TreatmentEffectRatioEstimatorTest(unittest.TestCase):
+    """Tests for ``TreatmentEffectRatioEstimator``."""
+
     @staticmethod
     def get_data() -> tuple[
         npt.NDArray[np.float64],
@@ -1349,15 +1327,19 @@ class TestTreatmentEffectRatioEstimator:
         s = q * (1 - q) / sigma2 - 1
         alpha = q * s
         beta = (1 - q) * s
-        propensities = rng.beta(alpha, beta, size=sample_size)
-        assignments = rng.binomial(1, propensities, size=sample_size)
+        propensities: npt.NDArray[np.float64] = rng.beta(alpha, beta, size=sample_size)
+        # why: scalar n with array p matches no stub overload; an explicit
+        # ones-array draws identically (same per-element n=1 trials).
+        assignments = rng.binomial(
+            np.ones(sample_size, dtype=np.int64),
+            propensities,
+            size=sample_size,
+        )
 
-        # Numerator outcomes: simulate treatment effect ~0.05
         y0_num = rng.normal(0.0, 1.0, size=sample_size)
         y1_num = rng.normal(0.05, 1.0, size=sample_size)
         numerator_outcomes = np.where(assignments == 0, y0_num, y1_num)
 
-        # Denominator outcomes: simulate treatment effect ~0.1
         y0_den = rng.normal(1.0, 1.0, size=sample_size)
         y1_den = rng.normal(1.1, 1.0, size=sample_size)
         denominator_outcomes = np.where(assignments == 0, y0_den, y1_den)
@@ -1374,8 +1356,8 @@ class TestTreatmentEffectRatioEstimator:
             denominator_outcomes[treated_mask],
         )
 
-    @staticmethod
-    def test_point_estimate() -> None:
+    def test_point_estimate(self) -> None:
+        """Verify the ratio point estimate matches numerator over denominator."""
         (
             control_propensities,
             treated_propensities,
@@ -1383,7 +1365,7 @@ class TestTreatmentEffectRatioEstimator:
             numerator_treated_outcomes,
             denominator_control_outcomes,
             denominator_treated_outcomes,
-        ) = TestTreatmentEffectRatioEstimator.get_data()
+        ) = TreatmentEffectRatioEstimatorTest.get_data()
 
         estimator = TreatmentEffectRatioEstimator(
             control_propensity_scores=control_propensities,
@@ -1396,7 +1378,6 @@ class TestTreatmentEffectRatioEstimator:
             treatment_effect_estimator_class="ATE",
         )
 
-        # Calculate expected ratio of treatment effects manually
         numerator_estimator = ATEEstimator(
             control_propensity_scores=control_propensities,
             treated_propensity_scores=treated_propensities,
@@ -1418,10 +1399,10 @@ class TestTreatmentEffectRatioEstimator:
             / denominator_estimator.point_estimate()
         )
         actual = estimator.point_estimate()
-        assert actual == pytest.approx(expected, rel=1e-1)
+        self.assertAlmostEqual(actual, expected, delta=1e-1 * abs(expected))
 
-    @staticmethod
-    def test_variance() -> None:
+    def test_variance(self) -> None:
+        """Verify the ratio variance matches the golden value."""
         (
             control_propensities,
             treated_propensities,
@@ -1429,7 +1410,7 @@ class TestTreatmentEffectRatioEstimator:
             numerator_treated_outcomes,
             denominator_control_outcomes,
             denominator_treated_outcomes,
-        ) = TestTreatmentEffectRatioEstimator.get_data()
+        ) = TreatmentEffectRatioEstimatorTest.get_data()
 
         estimator = TreatmentEffectRatioEstimator(
             control_propensity_scores=control_propensities,
@@ -1446,13 +1427,12 @@ class TestTreatmentEffectRatioEstimator:
 
         actual = estimator.variance()
 
-        # Variance should be positive and finite
-        assert actual > 0
-        assert np.isfinite(actual)
-        assert actual == pytest.approx(expected)
+        self.assertGreater(actual, 0)
+        self.assertTrue(np.isfinite(actual))
+        self.assertAlmostEqual(actual, expected)
 
-    @staticmethod
-    def test_pvalue() -> None:
+    def test_pvalue(self) -> None:
+        """Verify ratio p-values match the normal approximation."""
         (
             control_propensities,
             treated_propensities,
@@ -1460,7 +1440,7 @@ class TestTreatmentEffectRatioEstimator:
             numerator_treated_outcomes,
             denominator_control_outcomes,
             denominator_treated_outcomes,
-        ) = TestTreatmentEffectRatioEstimator.get_data()
+        ) = TreatmentEffectRatioEstimatorTest.get_data()
 
         estimator = TreatmentEffectRatioEstimator(
             control_propensity_scores=control_propensities,
@@ -1478,26 +1458,29 @@ class TestTreatmentEffectRatioEstimator:
         null = pe - 0.05
         t = (pe - null) / se
 
-        # two-sided
         expected_p = min(1.0, 2 * min(stats.norm.sf(t), stats.norm.cdf(t)))
-        assert estimator.pvalue(
-            null_value=null, alternative="two-sided"
-        ) == pytest.approx(expected_p, rel=1e-8)
-
-        # greater
-        expected_pg = stats.norm.sf(t)
-        assert estimator.pvalue(
-            null_value=null, alternative="greater"
-        ) == pytest.approx(expected_pg, rel=1e-8)
-
-        # less
-        expected_pl = stats.norm.cdf(t)
-        assert estimator.pvalue(null_value=null, alternative="less") == pytest.approx(
-            expected_pl, rel=1e-8
+        self.assertAlmostEqual(
+            estimator.pvalue(null_value=null, alternative="two-sided"),
+            expected_p,
+            delta=1e-8 * abs(expected_p),
         )
 
-    @staticmethod
-    def test_confidence_interval() -> None:
+        expected_pg = stats.norm.sf(t)
+        self.assertAlmostEqual(
+            estimator.pvalue(null_value=null, alternative="greater"),
+            expected_pg,
+            delta=1e-8 * abs(expected_pg),
+        )
+
+        expected_pl = stats.norm.cdf(t)
+        self.assertAlmostEqual(
+            estimator.pvalue(null_value=null, alternative="less"),
+            expected_pl,
+            delta=1e-8 * abs(expected_pl),
+        )
+
+    def test_confidence_interval(self) -> None:
+        """Verify ratio intervals match the normal approximation."""
         (
             control_propensities,
             treated_propensities,
@@ -1505,7 +1488,7 @@ class TestTreatmentEffectRatioEstimator:
             numerator_treated_outcomes,
             denominator_control_outcomes,
             denominator_treated_outcomes,
-        ) = TestTreatmentEffectRatioEstimator.get_data()
+        ) = TreatmentEffectRatioEstimatorTest.get_data()
 
         estimator = TreatmentEffectRatioEstimator(
             control_propensity_scores=control_propensities,
@@ -1521,30 +1504,27 @@ class TestTreatmentEffectRatioEstimator:
         pe = estimator.point_estimate()
         se = np.sqrt(estimator.variance())
 
-        # Two-sided 90%
         lower, upper = estimator.confidence_interval(
             alpha=0.10, alternative="two-sided"
         )
         z = stats.norm.isf(0.10 / 2)
         expected_lb, expected_ub = pe - z * se, pe + z * se
-        assert lower == pytest.approx(expected_lb, rel=1e-12)
-        assert upper == pytest.approx(expected_ub, rel=1e-12)
+        self.assertAlmostEqual(lower, expected_lb, delta=1e-12 * abs(expected_lb))
+        self.assertAlmostEqual(upper, expected_ub, delta=1e-12 * abs(expected_ub))
 
-        # Greater
         lower, upper = estimator.confidence_interval(alpha=0.05, alternative="greater")
         z = stats.norm.isf(0.05)
         expected_ub = pe + z * se
-        assert lower == pytest.approx(pe - z * se, rel=1e-12)
-        assert upper == np.inf
+        self.assertAlmostEqual(lower, pe - z * se, delta=1e-12 * abs(pe - z * se))
+        self.assertEqual(upper, np.inf)
 
-        # Less
         lower, upper = estimator.confidence_interval(alpha=0.05, alternative="less")
-        assert upper == pytest.approx(pe + z * se, rel=1e-12)
-        assert lower == -np.inf
+        self.assertAlmostEqual(upper, pe + z * se, delta=1e-12 * abs(pe + z * se))
+        self.assertEqual(lower, -np.inf)
 
 
-class TestOutcomeProxyTreatmentEffect:
-    """Tests for outcome-proxy-constrained sensitivity analysis in treatment-effect estimators."""
+class OutcomeProxyTreatmentEffectTest(unittest.TestCase):
+    """Tests for outcome-proxy-constrained sensitivity in treatment-effect estimators."""
 
     @staticmethod
     def _make_proxies(
@@ -1569,8 +1549,7 @@ class TestOutcomeProxyTreatmentEffect:
         proxy_mean = float(np.mean(all_proxies))
         return ctrl_proxies, trt_proxies, proxy_mean
 
-    @staticmethod
-    def test_treatment_effect_proxy_tightens_interval() -> None:
+    def test_treatment_effect_proxy_tightens_interval(self) -> None:
         """Proxy-constrained TreatmentEffectEstimator interval is contained in unconstrained."""
         (
             control_propensities,
@@ -1583,7 +1562,7 @@ class TestOutcomeProxyTreatmentEffect:
             _,
             _,
             _,
-        ) = TestATEEstimator.get_data()
+        ) = ATEEstimatorTest.get_data()
 
         estimator = TreatmentEffectEstimator(
             control_estimator=SIPWEstimator(
@@ -1598,7 +1577,7 @@ class TestOutcomeProxyTreatmentEffect:
 
         gamma = 3.0
         ctrl_proxies, trt_proxies, proxy_mean = (
-            TestOutcomeProxyTreatmentEffect._make_proxies(
+            OutcomeProxyTreatmentEffectTest._make_proxies(
                 control_outcomes, treated_outcomes
             )
         )
@@ -1611,13 +1590,11 @@ class TestOutcomeProxyTreatmentEffect:
             proxy_mean=proxy_mean,
         )
 
-        # Constrained interval is a subset of unconstrained.
-        assert lb1 >= lb0 - 1e-10
-        assert ub1 <= ub0 + 1e-10
-        assert ub1 - lb1 < ub0 - lb0
+        self.assertGreaterEqual(lb1, lb0 - 1e-10)
+        self.assertLessEqual(ub1, ub0 + 1e-10)
+        self.assertLess(ub1 - lb1, ub0 - lb0)
 
-    @staticmethod
-    def test_treatment_effect_proxy_gamma_one() -> None:
+    def test_treatment_effect_proxy_gamma_one(self) -> None:
         """gamma=1 returns point estimate regardless of proxy."""
         (
             control_propensities,
@@ -1630,7 +1607,7 @@ class TestOutcomeProxyTreatmentEffect:
             _,
             _,
             _,
-        ) = TestATEEstimator.get_data()
+        ) = ATEEstimatorTest.get_data()
 
         estimator = TreatmentEffectEstimator(
             control_estimator=SIPWEstimator(
@@ -1643,7 +1620,7 @@ class TestOutcomeProxyTreatmentEffect:
             ),
         )
         ctrl_proxies, trt_proxies, proxy_mean = (
-            TestOutcomeProxyTreatmentEffect._make_proxies(
+            OutcomeProxyTreatmentEffectTest._make_proxies(
                 control_outcomes, treated_outcomes
             )
         )
@@ -1655,5 +1632,5 @@ class TestOutcomeProxyTreatmentEffect:
             proxy_mean=proxy_mean,
         )
         pe = estimator.point_estimate()
-        assert lb == pytest.approx(pe, rel=1e-6)
-        assert ub == pytest.approx(pe, rel=1e-6)
+        self.assertAlmostEqual(lb, pe, delta=1e-6 * abs(pe))
+        self.assertAlmostEqual(ub, pe, delta=1e-6 * abs(pe))

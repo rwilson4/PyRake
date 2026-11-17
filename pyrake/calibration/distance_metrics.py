@@ -1,54 +1,231 @@
-"""Distance metrics."""
+"""Distance penalties for PyRake's calibration objectives.
+
+The calibration problem minimizes a distance D(w, v) between the weight vector w and a
+baseline v, subject to balance constraints. ``Distance`` is the abstract base class,
+itself a Cvxium ``Objective``; ``SquaredL2``, ``KLDivergence`` and ``Huber`` are the
+concrete penalties. Every distance is convex in w and additive across components, so its
+Hessian is diagonal and ``hessian_contribution`` wraps ``hessian_diagonal`` in a
+``DiagonalSystem`` for the solver.
+
+"""
+
+from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
 import numpy as np
 import numpy.typing as npt
+from cvxium import (
+    DiagonalSystem,
+    MatrixSystem,
+    Objective,
+)
 
 
-class Distance(ABC):
-    r"""Abstract base class for distance metrics.
+class Distance(Objective, ABC):
+    """Abstract distance penalty between weights and a baseline, as a Cvxium objective.
 
-    A distance metric is a function D(w, v), such as EuclideanDistance, \| w - v \|_2^2.
-    This function need not satisfy the mathematical definition of a distance metric
-    (e.g. no need for the triangle inequality to apply), but it should be convex in w
-    (so we can minimize over it) and additive in the components of w (so that the
-    Hessian is diagonal).
+    A distance is a function D(w, v), for example the averaged squared error
+       D(w, v) = (1 / M) ‖w - v‖₂².
+    It need not satisfy the mathematical definition of a distance (no triangle
+    inequality required), but it should be convex in w, so it can be minimized, and
+    additive in the components of w, so that its Hessian is diagonal.
+
+    A ``Distance`` subclasses Cvxium's ``Objective``, so it can be passed directly
+    anywhere Cvxium expects one, for example as the objective of a ``Problem``. The full
+    ``Objective`` interface comes from defaults built on the diagonal Hessian:
+    ``hessian_contribution`` returns a ``DiagonalSystem``.
 
     Parameters
     ----------
-     v : npt.NDArray[np.float64], optional
-        The baseline against which distance is measured. If not specified, we will
-        assume that v is a vector of all ones.
+     v : npt.NDArray[np.float64] | None
+        Baseline the distance is measured against. When omitted, v is the vector of all
+        ones. When given, its length pins the decision-variable dimension M.
+     dimension : int | None
+        Decision-variable dimension M. Used only when ``v`` is omitted; it may be given
+        here or deferred and bound later with ``bind_dimension`` (as ``Rake`` does from
+        its data).
+
+    Raises
+    ------
+     ValueError
+        When an explicit ``dimension`` disagrees with ``len(v)``.
 
     """
 
-    def __init__(self, v: npt.NDArray[np.float64] | None = None) -> None:
+    def __init__(
+        self,
+        v: npt.NDArray[np.float64] | None = None,
+        dimension: int | None = None,
+    ) -> None:
         self.v = v
+        if v is not None:
+            M = len(v)
+            if dimension is not None and dimension != M:
+                raise ValueError(
+                    f"Explicit `dimension` ({dimension}) disagrees with `len(v)` ({M})."
+                )
+            self._dimension: int | None = M
+        else:
+            # ``dimension`` may be deferred: a bare distance (no ``v``, no
+            # ``dimension``) carries no length on its own, but a consumer that
+            # owns the data (e.g. ``Rake``) binds ``M`` via ``bind_dimension``
+            # before the distance is used as a ``Problem`` objective. Accessing
+            # ``dimension`` while still unbound raises (see the property below).
+            self._dimension = dimension
+
+    @property
+    def dimension(self) -> int:
+        """Return the decision-variable dimension M.
+
+        Returns
+        -------
+         M : int
+            The dimension set at construction or bound later with ``bind_dimension``.
+
+        Raises
+        ------
+         ValueError
+            When the dimension was deferred (bare construction) and not yet bound.
+
+        """
+        if self._dimension is None:
+            raise ValueError(
+                "Distance dimension is unset: construct with `v=` or `dimension=`, "
+                "or bind it via `bind_dimension` (as `Rake` does) before using the "
+                "distance as a `Problem` objective."
+            )
+        return self._dimension
+
+    def bind_dimension(self, dimension: int) -> None:
+        """Bind the decision-variable dimension M deferred at construction.
+
+        A bare distance (no ``v``, no ``dimension``) carries no length until a consumer
+        that owns the data binds M here, before the distance serves as a ``Problem``
+        objective. Rebinding to the same value is a no-op.
+
+        Parameters
+        ----------
+         dimension : int
+            Decision-variable dimension M to bind.
+
+        Raises
+        ------
+         ValueError
+            When a different dimension was already set.
+
+        """
+        if self._dimension is not None and self._dimension != dimension:
+            raise ValueError(
+                f"Distance dimension already set to {self._dimension}; cannot "
+                f"rebind to {dimension}."
+            )
+        self._dimension = dimension
 
     @abstractmethod
     def evaluate(self, w: npt.NDArray[np.float64]) -> float:
-        """Evaluate distance metric."""
+        """Evaluate the distance at w.
+
+        Parameters
+        ----------
+         w : npt.NDArray[np.float64]
+            Weight vector, of length M.
+
+        Returns
+        -------
+         d : float
+            The distance D(w, v).
+
+        """
 
     @abstractmethod
     def gradient(self, w: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
-        """Calculate gradient."""
+        """Compute the gradient of the distance at w.
+
+        Parameters
+        ----------
+         w : npt.NDArray[np.float64]
+            Weight vector, of length M.
+
+        Returns
+        -------
+         grad : npt.NDArray[np.float64]
+            The gradient ∇D(w), of length M.
+
+        """
 
     @abstractmethod
     def hessian_diagonal(self, w: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
-        """Calculate diagonal component of Hessian."""
+        """Compute the diagonal of the Hessian at w.
+
+        Parameters
+        ----------
+         w : npt.NDArray[np.float64]
+            Weight vector, of length M.
+
+        Returns
+        -------
+         diag : npt.NDArray[np.float64]
+            The Hessian diagonal, of length M.
+
+        """
+
+    def hessian_contribution(
+        self,
+        w: npt.NDArray[np.float64],
+    ) -> MatrixSystem:
+        """Return the Hessian as a diagonal system for Cvxium.
+
+        The distance is additive in the components of ``w``, so its Hessian is diagonal;
+        this wraps ``hessian_diagonal`` in a ``DiagonalSystem`` (a ``MatrixSystem``)
+        that a ``Problem`` assembles via ``build_hessian_system``.
+
+        Parameters
+        ----------
+         w : npt.NDArray[np.float64]
+            Weight vector, of length M.
+
+        Returns
+        -------
+         system : MatrixSystem
+            The Hessian of the distance at w, as a ``DiagonalSystem``.
+
+        """
+        return DiagonalSystem(self.hessian_diagonal(w))
 
 
 class SquaredL2(Distance):
-    r"""Distance metric with D(w, v) = (1 / M) * \| w - v \|_2^2.
+    """Squared L2 distance, averaged over components.
 
-    In this case, the gradient of D(w, v) is (2 / M) * (w - v), and the Hessian is
-    (2 / M) * I.
+    The distance, gradient and Hessian diagonal are
+       D(w, v) = (1 / M) ‖w - v‖₂²,
+       ∇D(w) = (2 / M) (w - v),
+       diag(∇²D) = (2 / M) 1.
+    When ``v`` is omitted it defaults to the vector of all ones.
+
+    Parameters
+    ----------
+     v : npt.NDArray[np.float64] | None
+        Baseline; see ``Distance``.
+     dimension : int | None
+        Decision-variable dimension M; see ``Distance``.
 
     """
 
     def evaluate(self, w: npt.NDArray[np.float64]) -> float:
-        """Evaluate distance metric."""
+        """Evaluate the squared L2 distance at w.
+
+        Parameters
+        ----------
+         w : npt.NDArray[np.float64]
+            Weight vector, of length M.
+
+        Returns
+        -------
+         d : float
+            The distance (1 / M) ‖w - v‖₂².
+
+        """
         M = len(w)
         if self.v is None:
             d = w - 1.0
@@ -58,30 +235,82 @@ class SquaredL2(Distance):
             return np.dot(d, d) / M
 
     def gradient(self, w: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
-        """Calculate gradient of D(w, v)."""
+        """Compute the gradient of the squared L2 distance at w.
+
+        Parameters
+        ----------
+         w : npt.NDArray[np.float64]
+            Weight vector, of length M.
+
+        Returns
+        -------
+         grad : npt.NDArray[np.float64]
+            The gradient (2 / M) (w - v), of length M.
+
+        """
         M = len(w)
         v = self.v
         if v is None:
-            return (2.0 / M) * (w - 1.0)
+            return np.asarray((2.0 / M) * (w - 1.0))
         else:
-            return (2.0 / M) * (w - v)
+            return np.asarray((2.0 / M) * (w - v))
 
     def hessian_diagonal(self, w: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
-        """Calculate diagonal component of Hessian of D(w, v)."""
+        """Compute the Hessian diagonal of the squared L2 distance at w.
+
+        Parameters
+        ----------
+         w : npt.NDArray[np.float64]
+            Weight vector, of length M.
+
+        Returns
+        -------
+         diag : npt.NDArray[np.float64]
+            The constant diagonal (2 / M) 1, of length M.
+
+        """
         M = len(w)
         return np.full_like(w, 2.0 / M)
 
 
 class KLDivergence(Distance):
-    r"""Distance metric with D(w, v) = KL Divergence.
+    """Kullback-Leibler divergence, averaged over components.
 
-    In this case, D(w, v) = (1 / M) * \sum_{i=1}^M w_i * log(w_i / v_i) - w_i + v_i, so
-    the gradient is (1 / M) * log(w / v) and the Hessian is (1 / M) * diag(1 / w).
+    The distance, gradient and Hessian diagonal are
+       D(w, v) = (1 / M) Σᵢ (wᵢ log(wᵢ / vᵢ) - wᵢ + vᵢ),
+       ∇D(w) = (1 / M) log(w / v),
+       diag(∇²D) = (1 / M) / w,
+    with operations understood componentwise. When ``v`` is omitted it defaults to the
+    vector of all ones.
+
+    Parameters
+    ----------
+     v : npt.NDArray[np.float64] | None
+        Baseline; see ``Distance``.
+     dimension : int | None
+        Decision-variable dimension M; see ``Distance``.
+
+    Notes
+    -----
+    Requires strictly positive weights (and baseline); the code does not check this, and
+    nonpositive inputs propagate nan through the logarithm.
 
     """
 
     def evaluate(self, w: npt.NDArray[np.float64]) -> float:
-        """Evaluate distance metric."""
+        """Evaluate the KL divergence at w.
+
+        Parameters
+        ----------
+         w : npt.NDArray[np.float64]
+            Weight vector, of length M, strictly positive.
+
+        Returns
+        -------
+         d : float
+            The divergence (1 / M) Σᵢ (wᵢ log(wᵢ / vᵢ) - wᵢ + vᵢ).
+
+        """
         M = len(w)
         v = self.v
         if v is None:
@@ -90,44 +319,89 @@ class KLDivergence(Distance):
             return (1.0 / M) * np.sum(w * (np.log(w) - np.log(v)) - w + v)
 
     def gradient(self, w: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
-        """Calculate gradient of ft."""
+        """Compute the gradient of the KL divergence at w.
+
+        Parameters
+        ----------
+         w : npt.NDArray[np.float64]
+            Weight vector, of length M, strictly positive.
+
+        Returns
+        -------
+         grad : npt.NDArray[np.float64]
+            The gradient (1 / M) log(w / v), of length M.
+
+        """
         M = len(w)
         v = self.v
         if v is None:
-            return (1.0 / M) * np.log(w)
+            return np.asarray((1.0 / M) * np.log(w))
         else:
-            return (1.0 / M) * (np.log(w) - np.log(v))
+            return np.asarray((1.0 / M) * (np.log(w) - np.log(v)))
 
     def hessian_diagonal(self, w: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
-        """Calculate diagonal component of Hessian of D(w, v)."""
+        """Compute the Hessian diagonal of the KL divergence at w.
+
+        Parameters
+        ----------
+         w : npt.NDArray[np.float64]
+            Weight vector, of length M, strictly positive.
+
+        Returns
+        -------
+         diag : npt.NDArray[np.float64]
+            The diagonal (1 / M) / w, of length M.
+
+        """
         M = len(w)
         return (1.0 / M) / w
 
 
 class Huber(Distance):
-    r"""Distance metric with Huber penalty.
+    """Huber penalty, averaged over components.
 
-    In this case, D(w, v) = (1 / M) * \sum_{i=1}^M h( w_i - v_i), where
-       h(x) =           x^2               if |x| \leq \delta
-              \delta * (2 * |x| - \delta) if |x| > \delta.
+    The distance applies the Huber function h to each residual:
+       D(w, v) = (1 / M) Σᵢ h(wᵢ - vᵢ),
+       h(x) = x², if |x| ≤ δ,
+       h(x) = δ (2|x| - δ), if |x| > δ.
+    The gradient is (2 / M) (wᵢ - vᵢ) within δ of the baseline and (2 / M) δ sign(wᵢ
+    - vᵢ) outside it; the Hessian diagonal is 2 / M within δ and 0 outside it. When
+    ``v`` is omitted it defaults to the vector of all ones.
 
-    In this case, the ith element of the gradient of D(w, v) is
-    (2 / M) * (w_i - v_i) if |w_i - v_i| \leq \delta and
-    (2 / M) * \delta * sign(w_i - v_i) if |w_i - v_i| > \delta.
-
-    The ith diagonal element of the Hessian of D(w, v) is 2 / M if |w_i - v_i| \leq
-    \delta and 0 if |w_i - v_i| > \delta.
+    Parameters
+    ----------
+     v : npt.NDArray[np.float64] | None
+        Baseline; see ``Distance``.
+     delta : float
+        Knee δ where the penalty switches from quadratic to linear.
+     dimension : int | None
+        Decision-variable dimension M; see ``Distance``.
 
     """
 
     def __init__(
-        self, v: npt.NDArray[np.float64] | None = None, delta: float = 0.1
+        self,
+        v: npt.NDArray[np.float64] | None = None,
+        delta: float = 0.1,
+        dimension: int | None = None,
     ) -> None:
-        super().__init__(v=v)
+        super().__init__(v=v, dimension=dimension)
         self.delta = delta
 
     def evaluate(self, w: npt.NDArray[np.float64]) -> float:
-        """Evaluate distance metric."""
+        """Evaluate the Huber penalty at w.
+
+        Parameters
+        ----------
+         w : npt.NDArray[np.float64]
+            Weight vector, of length M.
+
+        Returns
+        -------
+         d : float
+            The penalty (1 / M) Σᵢ h(wᵢ - vᵢ).
+
+        """
         M = len(w)
         if self.v is None:
             d = w - 1.0
@@ -143,7 +417,20 @@ class Huber(Distance):
         )
 
     def gradient(self, w: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
-        """Calculate gradient of ft."""
+        """Compute the gradient of the Huber penalty at w.
+
+        Parameters
+        ----------
+         w : npt.NDArray[np.float64]
+            Weight vector, of length M.
+
+        Returns
+        -------
+         grad : npt.NDArray[np.float64]
+            The gradient, of length M: (2 / M) (wᵢ - vᵢ) within δ of the baseline, (2 /
+            M) δ sign(wᵢ - vᵢ) outside it.
+
+        """
         M = len(w)
         if self.v is None:
             d = w - 1.0
@@ -156,7 +443,19 @@ class Huber(Distance):
         return grad_dist
 
     def hessian_diagonal(self, w: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
-        """Calculate diagonal component of Hessian of ft."""
+        """Compute the Hessian diagonal of the Huber penalty at w.
+
+        Parameters
+        ----------
+         w : npt.NDArray[np.float64]
+            Weight vector, of length M.
+
+        Returns
+        -------
+         diag : npt.NDArray[np.float64]
+            The diagonal, of length M: 2 / M within δ of the baseline, 0 outside.
+
+        """
         M = len(w)
         if self.v is None:
             d = w - 1.0

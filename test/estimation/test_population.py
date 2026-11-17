@@ -1,12 +1,14 @@
-"""Test population estimators."""
+"""Test population mean estimators."""
 
+import itertools
 import math
 import time
+import unittest
+from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
 import numpy.typing as npt
-import pytest
 from scipy import optimize, stats
 from scipy.special import expit, logit
 
@@ -21,7 +23,9 @@ from pyrake.estimation.population import (
 )
 
 
-class TestIPWEstimator:
+class IPWEstimatorTest(unittest.TestCase):
+    """Tests for ``IPWEstimator``."""
+
     @staticmethod
     def get_data(
         binary: bool = True,
@@ -45,10 +49,9 @@ class TestIPWEstimator:
 
         return population_size, propensities, outcomes
 
-    @staticmethod
-    def test_point_estimate() -> None:
+    def test_point_estimate(self) -> None:
         """Test point estimate."""
-        population_size, propensities, outcomes = TestIPWEstimator.get_data()
+        population_size, propensities, outcomes = IPWEstimatorTest.get_data()
         estimator = IPWEstimator(
             propensities,
             outcomes,
@@ -58,31 +61,11 @@ class TestIPWEstimator:
         expected = 0.4561422941383326
 
         actual = estimator.point_estimate()
-        assert actual == pytest.approx(expected)
+        self.assertAlmostEqual(actual, expected)
 
-        # estimator = IPWEstimator(
-        #     propensities,
-        #     outcomes,
-        #     population_size - len(propensities),
-        #     estimand_class=NonRespondentMean,
-        # )
-        # expected = 0.4561424365749074
-
-        # actual = estimator.point_estimate()
-        # assert actual == pytest.approx(expected)
-
-        # estimator = IPWEstimator(
-        #     propensities, outcomes, len(propensities), estimand_class=SampleMean
-        # )
-        # expected = float(np.mean(outcomes))
-
-        # actual = estimator.point_estimate()
-        # assert actual == pytest.approx(expected)
-
-    @staticmethod
-    def test_variance() -> None:
+    def test_variance(self) -> None:
         """Test variance."""
-        population_size, propensities, outcomes = TestIPWEstimator.get_data()
+        population_size, propensities, outcomes = IPWEstimatorTest.get_data()
         estimator = IPWEstimator(
             propensities,
             outcomes,
@@ -92,35 +75,11 @@ class TestIPWEstimator:
         expected = 0.0002489382388053698
 
         actual = estimator.variance()
-        assert actual == pytest.approx(expected)
+        self.assertAlmostEqual(actual, expected)
 
-        # estimator = IPWEstimator(
-        #     propensities,
-        #     outcomes,
-        #     population_size - len(propensities),
-        #     estimand_class=NonRespondentMean,
-        # )
-        # expected = 0.00024893933725724123
-
-        # actual = estimator.variance()
-        # assert actual == pytest.approx(expected)
-
-        # estimator = IPWEstimator(
-        #     propensities, outcomes, len(propensities), estimand_class=SampleMean
-        # )
-        # expected = float(
-        #     np.mean(outcomes)
-        #     * (1.0 - float(np.mean(outcomes)))
-        #     / (len(propensities) - 1)
-        # )
-
-        # actual = estimator.variance()
-        # assert actual == pytest.approx(expected)
-
-    @staticmethod
-    def test_pvalue() -> None:
+    def test_pvalue(self) -> None:
         """Test p-value calculation."""
-        population_size, propensities, outcomes = TestIPWEstimator.get_data()
+        population_size, propensities, outcomes = IPWEstimatorTest.get_data()
         estimator = IPWEstimator(
             propensities,
             outcomes,
@@ -130,20 +89,19 @@ class TestIPWEstimator:
         expected = 0.005440680301504909
 
         actual = estimator.pvalue(null_value=0.50)
-        assert actual == pytest.approx(expected)
+        self.assertAlmostEqual(actual, expected)
 
         # Test one-sided p-values
         actual = estimator.pvalue(null_value=0.50, alternative="less")
-        assert actual < 0.5
-        assert actual == pytest.approx(0.5 * expected)
+        self.assertLess(actual, 0.5)
+        self.assertAlmostEqual(actual, 0.5 * expected)
 
         actual = estimator.pvalue(null_value=0.50, alternative="greater")
-        assert actual > 0.5
+        self.assertGreater(actual, 0.5)
 
-    @staticmethod
-    def test_confidence_interval() -> None:
+    def test_confidence_interval(self) -> None:
         """Test confidence interval."""
-        population_size, propensities, outcomes = TestIPWEstimator.get_data()
+        population_size, propensities, outcomes = IPWEstimatorTest.get_data()
         estimator = IPWEstimator(
             propensities,
             outcomes,
@@ -155,28 +113,27 @@ class TestIPWEstimator:
 
         lb_actual, ub_actual = estimator.confidence_interval(alpha=0.1)
         print(lb_actual, ub_actual)
-        assert lb_actual == pytest.approx(lb_expected)
-        assert ub_actual == pytest.approx(ub_expected)
+        self.assertAlmostEqual(lb_actual, lb_expected)
+        self.assertAlmostEqual(ub_actual, ub_expected)
 
         # Test one-sided intervals
         lb_actual, ub_actual = estimator.confidence_interval(
             alpha=0.05, alternative="less"
         )
         print(lb_actual, ub_actual)
-        assert lb_actual == -np.inf
-        assert ub_actual == pytest.approx(ub_expected)
+        self.assertEqual(lb_actual, -np.inf)
+        self.assertAlmostEqual(ub_actual, ub_expected)
 
         lb_actual, ub_actual = estimator.confidence_interval(
             alpha=0.05, alternative="greater"
         )
         print(lb_actual, ub_actual)
-        assert lb_actual == pytest.approx(lb_expected)
-        assert ub_actual == np.inf
+        self.assertAlmostEqual(lb_actual, lb_expected)
+        self.assertEqual(ub_actual, np.inf)
 
-    @staticmethod
-    def test_sensitivity_analysis_binary_outcomes() -> None:
+    def test_sensitivity_analysis_binary_outcomes(self) -> None:
         """Test sensitivity analysis."""
-        population_size, propensities, outcomes = TestIPWEstimator.get_data()
+        population_size, propensities, outcomes = IPWEstimatorTest.get_data()
         estimator = IPWEstimator(
             propensities,
             outcomes,
@@ -194,38 +151,12 @@ class TestIPWEstimator:
 
         lb_actual, ub_actual = estimator.sensitivity_analysis(gamma=gamma)
         print(lb_actual, ub_actual)
-        assert lb_actual == pytest.approx(lb_expected)
-        assert ub_actual == pytest.approx(ub_expected)
+        self.assertAlmostEqual(lb_actual, lb_expected)
+        self.assertAlmostEqual(ub_actual, ub_expected)
 
-        # estimator = IPWEstimator(
-        #     propensities,
-        #     outcomes,
-        #     population_size - len(propensities),
-        #     estimand_class=NonRespondentMean,
-        # )
-        # lb_expected = 0.18621936993972707
-        # ub_expected = 1.1173162196383621
-
-        # lb_actual, ub_actual = estimator.sensitivity_analysis(gamma=gamma)
-        # print(lb_actual, ub_actual)
-        # assert lb_actual == pytest.approx(lb_expected)
-        # assert ub_actual == pytest.approx(ub_expected)
-
-        # estimator = IPWEstimator(
-        #     propensities, outcomes, len(propensities), estimand_class=SampleMean
-        # )
-        # lb_expected = float(np.mean(outcomes))
-        # ub_expected = float(np.mean(outcomes))
-
-        # lb_actual, ub_actual = estimator.sensitivity_analysis(gamma=gamma)
-        # print(lb_actual, ub_actual)
-        # assert lb_actual == pytest.approx(lb_expected)
-        # assert ub_actual == pytest.approx(ub_expected)
-
-    @staticmethod
-    def test_sensitivity_analysis_continuous_outcomes() -> None:
+    def test_sensitivity_analysis_continuous_outcomes(self) -> None:
         """Test sensitivity analysis."""
-        population_size, propensities, outcomes = TestIPWEstimator.get_data(
+        population_size, propensities, outcomes = IPWEstimatorTest.get_data(
             binary=False
         )
         estimator = IPWEstimator(
@@ -241,13 +172,12 @@ class TestIPWEstimator:
 
         lb_actual, ub_actual = estimator.sensitivity_analysis(gamma=gamma)
         print(lb_actual, ub_actual)
-        assert lb_actual == pytest.approx(lb_expected)
-        assert ub_actual == pytest.approx(ub_expected)
+        self.assertAlmostEqual(lb_actual, lb_expected)
+        self.assertAlmostEqual(ub_actual, ub_expected)
 
-    @staticmethod
-    def test_expanded_confidence_interval() -> None:
+    def test_expanded_confidence_interval(self) -> None:
         """Test expanded confidence interval."""
-        population_size, propensities, outcomes = TestIPWEstimator.get_data()
+        population_size, propensities, outcomes = IPWEstimatorTest.get_data()
         estimator = IPWEstimator(
             propensities,
             outcomes,
@@ -264,8 +194,8 @@ class TestIPWEstimator:
         end_time = time.time()
         print(f"Completed in {end_time - start_time:.03f} seconds")
         print(lb_actual, ub_actual)
-        assert lb_actual == pytest.approx(lb_expected)
-        assert ub_actual == pytest.approx(ub_expected)
+        self.assertAlmostEqual(lb_actual, lb_expected)
+        self.assertAlmostEqual(ub_actual, ub_expected)
 
         # Test one-sided intervals
         start_time = time.time()
@@ -275,8 +205,8 @@ class TestIPWEstimator:
         end_time = time.time()
         print(f"Completed in {end_time - start_time:.03f} seconds")
         print(lb_actual, ub_actual)
-        assert lb_actual == -np.inf
-        assert ub_actual == pytest.approx(ub_expected)
+        self.assertEqual(lb_actual, -np.inf)
+        self.assertAlmostEqual(ub_actual, ub_expected)
 
         start_time = time.time()
         lb_actual, ub_actual = estimator.expanded_confidence_interval(
@@ -285,13 +215,12 @@ class TestIPWEstimator:
         end_time = time.time()
         print(f"Completed in {end_time - start_time:.03f} seconds")
         print(lb_actual, ub_actual)
-        assert lb_actual == pytest.approx(lb_expected)
-        assert ub_actual == np.inf
+        self.assertAlmostEqual(lb_actual, lb_expected)
+        self.assertEqual(ub_actual, np.inf)
 
-    @staticmethod
-    def test_plot_sensitivity() -> None:
+    def test_plot_sensitivity(self) -> None:
         """Test sensitivity analysis."""
-        population_size, propensities, outcomes = TestIPWEstimator.get_data()
+        population_size, propensities, outcomes = IPWEstimatorTest.get_data()
         estimator = IPWEstimator(
             propensities,
             outcomes,
@@ -318,12 +247,114 @@ class TestIPWEstimator:
             tick_label_size=14,
         )
         # plt.show()
-        assert set(df.columns) == set(expected_columns)
-        assert len(df) == 50
+        self.assertEqual(set(df.columns), set(expected_columns))
+        self.assertEqual(len(df), 50)
         plt.close("all")
 
+    def test_min_ess_bound(self) -> None:
+        """Conservative worst-case effective sample size bound over the region."""
+        population_size, propensities, outcomes = IPWEstimatorTest.get_data()
+        estimator = IPWEstimator(
+            propensities,
+            outcomes,
+            population_size,
+            estimand_class=PopulationMean,
+        )
 
-class TestAIPWEstimator:
+        def kish_ess(w: npt.NDArray[np.float64]) -> float:
+            return float(np.sum(w)) ** 2 / float(np.sum(w**2))
+
+        # At gamma=1 the region collapses to the nominal weights, so both methods
+        # return the exact effective sample size.
+        nominal_ess = kish_ess(estimator.weights)
+        self.assertAlmostEqual(estimator.min_ess_bound(1.0), nominal_ess)
+        self.assertAlmostEqual(
+            estimator.min_ess_bound(1.0, method="exact"), nominal_ess
+        )
+
+        # Both methods are non-increasing in gamma: a wider region can only lower the
+        # worst-case effective sample size.
+        gammas = np.linspace(1.0, 6.0, 20)
+        for method in ("floor", "exact"):
+            bounds = [estimator.min_ess_bound(g, method=method) for g in gammas]
+            for earlier, later in itertools.pairwise(bounds):
+                self.assertLessEqual(later, earlier + 1e-9)
+
+        # Both must be genuine lower bounds: no weight vector in the region has a
+        # smaller effective sample size. The exact method also dominates the floor.
+        rng = np.random.default_rng(0)
+        for gamma in (1.5, 3.0, 6.0):
+            wl, wu = estimator.estimand.sensitivity_region(gamma)
+            floor = estimator.min_ess_bound(gamma, method="floor")
+            exact = estimator.min_ess_bound(gamma, method="exact")
+            self.assertGreaterEqual(exact, floor - 1e-9)
+            candidates = [wl, wu]
+            for _ in range(200):
+                u = rng.uniform(size=wl.shape)
+                candidates.append(wl + u * (wu - wl))
+            for w in candidates:
+                self.assertLessEqual(exact, kish_ess(w) + 1e-9)
+                self.assertLessEqual(floor, kish_ess(w) + 1e-9)
+
+        with self.assertRaises(ValueError):
+            estimator.min_ess_bound(0.5)
+        invalid_method: Any = "bogus"
+        with self.assertRaises(ValueError):
+            estimator.min_ess_bound(2.0, method=invalid_method)
+
+    def test_min_ess_bound_exact_matches_brute_force(self) -> None:
+        """The exact method equals the true minimum over all box vertices."""
+        propensities = np.array([0.2, 0.5, 0.8, 0.3, 0.9, 0.4, 0.6, 0.7, 0.25, 0.55])
+        outcomes = np.arange(propensities.shape[0], dtype=float)
+        estimator = IPWEstimator(
+            propensities,
+            outcomes,
+            population_size=100,
+            estimand_class=PopulationMean,
+        )
+
+        def kish_ess(w: npt.NDArray[np.float64]) -> float:
+            return float(np.sum(w)) ** 2 / float(np.sum(w**2))
+
+        for gamma in (2.0, 4.0, 6.0):
+            wl, wu = estimator.estimand.sensitivity_region(gamma)
+            # Enumerate all 2^n vertices of the box.
+            best = math.inf
+            for mask in itertools.product((0, 1), repeat=wl.shape[0]):
+                w = np.where(np.array(mask, dtype=bool), wu, wl)
+                best = min(best, kish_ess(w))
+            self.assertAlmostEqual(estimator.min_ess_bound(gamma, method="exact"), best)
+
+    def test_plot_min_ess(self) -> None:
+        """Test plotting the worst-case effective sample size."""
+        population_size, propensities, outcomes = IPWEstimatorTest.get_data()
+        estimator = IPWEstimator(
+            propensities,
+            outcomes,
+            population_size,
+            estimand_class=PopulationMean,
+        )
+
+        for method in ("floor", "exact"):
+            df, ax = estimator.plot_min_ess(
+                gamma_upper=6.0,
+                num_points=50,
+                method=method,
+                reference_ess=100.0,
+                axis_label_size=18,
+                tick_label_size=14,
+            )
+            # plt.show()
+            self.assertEqual(set(df.columns), {"Gamma", "Min ESS Bound"})
+            self.assertEqual(len(df), 50)
+            # The curve is non-increasing in gamma.
+            self.assertTrue(np.all(np.diff(df["Min ESS Bound"].to_numpy()) <= 1e-9))
+            plt.close("all")
+
+
+class AIPWEstimatorTest(unittest.TestCase):
+    """Tests for ``AIPWEstimator``."""
+
     @staticmethod
     def get_data(
         binary: bool = True,
@@ -367,8 +398,7 @@ class TestAIPWEstimator:
             mean_predicted_outcome,
         )
 
-    @staticmethod
-    def test_point_estimate() -> None:
+    def test_point_estimate(self) -> None:
         """Test point estimate."""
         (
             population_size,
@@ -376,7 +406,7 @@ class TestAIPWEstimator:
             outcomes,
             predicted_outcomes,
             mean_predicted_outcome,
-        ) = TestAIPWEstimator.get_data()
+        ) = AIPWEstimatorTest.get_data()
         estimator = AIPWEstimator(
             propensities,
             outcomes,
@@ -387,23 +417,9 @@ class TestAIPWEstimator:
         expected = 0.49912034525845983
 
         actual = estimator.point_estimate()
-        assert actual == pytest.approx(expected)
+        self.assertAlmostEqual(actual, expected)
 
-        # estimator = AIPWEstimator(
-        #     propensities,
-        #     outcomes,
-        #     predicted_outcomes,
-        #     float(np.mean(predicted_outcomes)),
-        #     len(propensities),
-        #     estimand_class=SampleMean,
-        # )
-        # expected = float(np.mean(outcomes))
-
-        # actual = estimator.point_estimate()
-        # assert actual == pytest.approx(expected)
-
-    @staticmethod
-    def test_variance() -> None:
+    def test_variance(self) -> None:
         """Test variance."""
         (
             population_size,
@@ -411,7 +427,7 @@ class TestAIPWEstimator:
             outcomes,
             predicted_outcomes,
             mean_predicted_outcome,
-        ) = TestAIPWEstimator.get_data()
+        ) = AIPWEstimatorTest.get_data()
         estimator = AIPWEstimator(
             propensities,
             outcomes,
@@ -422,10 +438,13 @@ class TestAIPWEstimator:
         expected = 9.951767238492971e-08
 
         actual = estimator.variance()
-        assert actual == pytest.approx(expected)
+        # Preserve original ``pytest.approx`` ``rel=1e-6`` semantics: the
+        # AIPW variance is O(1e-8), so ``assertAlmostEqual``'s default
+        # ``places=7`` (~5e-8 absolute) would be looser than the expected
+        # value itself.
+        self.assertAlmostEqual(actual, expected, delta=expected * 1e-6)
 
-    @staticmethod
-    def test_pvalue() -> None:
+    def test_pvalue(self) -> None:
         """Test p-value calculation."""
         (
             population_size,
@@ -433,7 +452,7 @@ class TestAIPWEstimator:
             outcomes,
             predicted_outcomes,
             mean_predicted_outcome,
-        ) = TestAIPWEstimator.get_data()
+        ) = AIPWEstimatorTest.get_data()
         estimator = AIPWEstimator(
             propensities,
             outcomes,
@@ -444,18 +463,17 @@ class TestAIPWEstimator:
         expected = 0.005296167612649354
 
         actual = estimator.pvalue(null_value=0.50)
-        assert actual == pytest.approx(expected)
+        self.assertAlmostEqual(actual, expected)
 
         # Test one-sided p-values
         actual = estimator.pvalue(null_value=0.50, alternative="less")
-        assert actual < 0.5
-        assert actual == pytest.approx(0.5 * expected)
+        self.assertLess(actual, 0.5)
+        self.assertAlmostEqual(actual, 0.5 * expected)
 
         actual = estimator.pvalue(null_value=0.50, alternative="greater")
-        assert actual > 0.5
+        self.assertGreater(actual, 0.5)
 
-    @staticmethod
-    def test_confidence_interval() -> None:
+    def test_confidence_interval(self) -> None:
         """Test confidence interval."""
         (
             population_size,
@@ -463,7 +481,7 @@ class TestAIPWEstimator:
             outcomes,
             predicted_outcomes,
             mean_predicted_outcome,
-        ) = TestAIPWEstimator.get_data()
+        ) = AIPWEstimatorTest.get_data()
         estimator = AIPWEstimator(
             propensities,
             outcomes,
@@ -476,26 +494,25 @@ class TestAIPWEstimator:
 
         lb_actual, ub_actual = estimator.confidence_interval(alpha=0.1)
         print(lb_actual, ub_actual)
-        assert lb_actual == pytest.approx(lb_expected)
-        assert ub_actual == pytest.approx(ub_expected)
+        self.assertAlmostEqual(lb_actual, lb_expected)
+        self.assertAlmostEqual(ub_actual, ub_expected)
 
         # Test one-sided intervals
         lb_actual, ub_actual = estimator.confidence_interval(
             alpha=0.05, alternative="less"
         )
         print(lb_actual, ub_actual)
-        assert lb_actual == -np.inf
-        assert ub_actual == pytest.approx(ub_expected)
+        self.assertEqual(lb_actual, -np.inf)
+        self.assertAlmostEqual(ub_actual, ub_expected)
 
         lb_actual, ub_actual = estimator.confidence_interval(
             alpha=0.05, alternative="greater"
         )
         print(lb_actual, ub_actual)
-        assert lb_actual == pytest.approx(lb_expected)
-        assert ub_actual == np.inf
+        self.assertAlmostEqual(lb_actual, lb_expected)
+        self.assertEqual(ub_actual, np.inf)
 
-    @staticmethod
-    def test_sensitivity_analysis_binary_outcomes() -> None:
+    def test_sensitivity_analysis_binary_outcomes(self) -> None:
         """Test sensitivity analysis."""
         (
             population_size,
@@ -503,7 +520,7 @@ class TestAIPWEstimator:
             outcomes,
             predicted_outcomes,
             mean_predicted_outcome,
-        ) = TestAIPWEstimator.get_data()
+        ) = AIPWEstimatorTest.get_data()
         estimator = AIPWEstimator(
             propensities,
             outcomes,
@@ -518,11 +535,10 @@ class TestAIPWEstimator:
 
         lb_actual, ub_actual = estimator.sensitivity_analysis(gamma=gamma)
         print(lb_actual, ub_actual)
-        assert lb_actual == pytest.approx(lb_expected)
-        assert ub_actual == pytest.approx(ub_expected)
+        self.assertAlmostEqual(lb_actual, lb_expected)
+        self.assertAlmostEqual(ub_actual, ub_expected)
 
-    @staticmethod
-    def test_sensitivity_analysis_continuous_outcomes() -> None:
+    def test_sensitivity_analysis_continuous_outcomes(self) -> None:
         """Test sensitivity analysis."""
         (
             population_size,
@@ -530,7 +546,7 @@ class TestAIPWEstimator:
             outcomes,
             predicted_outcomes,
             mean_predicted_outcome,
-        ) = TestAIPWEstimator.get_data(binary=False)
+        ) = AIPWEstimatorTest.get_data(binary=False)
         estimator = AIPWEstimator(
             propensities,
             outcomes,
@@ -545,11 +561,10 @@ class TestAIPWEstimator:
 
         lb_actual, ub_actual = estimator.sensitivity_analysis(gamma=gamma)
         print(lb_actual, ub_actual)
-        assert lb_actual == pytest.approx(lb_expected)
-        assert ub_actual == pytest.approx(ub_expected)
+        self.assertAlmostEqual(lb_actual, lb_expected)
+        self.assertAlmostEqual(ub_actual, ub_expected)
 
-    @staticmethod
-    def test_expanded_confidence_interval() -> None:
+    def test_expanded_confidence_interval(self) -> None:
         """Test expanded confidence interval."""
         (
             population_size,
@@ -557,7 +572,7 @@ class TestAIPWEstimator:
             outcomes,
             predicted_outcomes,
             mean_predicted_outcome,
-        ) = TestAIPWEstimator.get_data()
+        ) = AIPWEstimatorTest.get_data()
         estimator = AIPWEstimator(
             propensities,
             outcomes,
@@ -575,8 +590,8 @@ class TestAIPWEstimator:
         end_time = time.time()
         print(f"Completed in {end_time - start_time:.03f} seconds")
         print(lb_actual, ub_actual)
-        assert lb_actual == pytest.approx(lb_expected)
-        assert ub_actual == pytest.approx(ub_expected)
+        self.assertAlmostEqual(lb_actual, lb_expected)
+        self.assertAlmostEqual(ub_actual, ub_expected)
 
         # Test one-sided intervals
         start_time = time.time()
@@ -586,8 +601,8 @@ class TestAIPWEstimator:
         end_time = time.time()
         print(f"Completed in {end_time - start_time:.03f} seconds")
         print(lb_actual, ub_actual)
-        assert lb_actual == -np.inf
-        assert ub_actual == pytest.approx(ub_expected)
+        self.assertEqual(lb_actual, -np.inf)
+        self.assertAlmostEqual(ub_actual, ub_expected)
 
         start_time = time.time()
         lb_actual, ub_actual = estimator.expanded_confidence_interval(
@@ -596,11 +611,46 @@ class TestAIPWEstimator:
         end_time = time.time()
         print(f"Completed in {end_time - start_time:.03f} seconds")
         print(lb_actual, ub_actual)
-        assert lb_actual == pytest.approx(lb_expected)
-        assert ub_actual == np.inf
+        self.assertAlmostEqual(lb_actual, lb_expected)
+        self.assertEqual(ub_actual, np.inf)
 
-    @staticmethod
-    def test_plot_sensitivity() -> None:
+    def test_bootstrap_preserves_mean_prediction(self) -> None:
+        """Regression: the bootstrap path rebuilds the estimator via
+        ``resample``; confirm ``mean_predicted_outcome`` survives, so the
+        bootstrap interval and adjusted p-value are on the full (not residual)
+        scale. If the offset leaked, the bootstrap interval would sit
+        ~``mean_predicted_outcome`` (0.5 here) below the heuristic one."""
+        (
+            population_size,
+            propensities,
+            outcomes,
+            predicted_outcomes,
+            mean_predicted_outcome,
+        ) = AIPWEstimatorTest.get_data()
+        estimator = AIPWEstimator(
+            propensities,
+            outcomes,
+            predicted_outcomes,
+            mean_predicted_outcome,
+            population_size,
+        )
+        heur_lb, heur_ub = estimator.expanded_confidence_interval(
+            alpha=0.1, gamma=6.0, bootstrap=False
+        )
+        boot_lb, boot_ub = estimator.expanded_confidence_interval(
+            alpha=0.1, gamma=6.0, bootstrap=True, B=500, seed=42
+        )
+        self.assertAlmostEqual(boot_lb, heur_lb, delta=0.1)
+        self.assertAlmostEqual(boot_ub, heur_ub, delta=0.1)
+        # A two-sided adjusted p-value at the full-scale point estimate is not
+        # rejected; it would be near zero on the residual scale.
+        pe = estimator.point_estimate()
+        boot_p = estimator.adjusted_pvalue(
+            null_value=pe, gamma=2.0, bootstrap=True, B=500, seed=42
+        )
+        self.assertGreater(boot_p, 0.5)
+
+    def test_plot_sensitivity(self) -> None:
         """Test sensitivity analysis."""
         (
             population_size,
@@ -608,7 +658,7 @@ class TestAIPWEstimator:
             outcomes,
             predicted_outcomes,
             mean_predicted_outcome,
-        ) = TestAIPWEstimator.get_data()
+        ) = AIPWEstimatorTest.get_data()
         estimator = AIPWEstimator(
             propensities,
             outcomes,
@@ -637,84 +687,187 @@ class TestAIPWEstimator:
             ytick_format=".02%",
         )
         # plt.show()
-        assert set(df.columns) == set(expected_columns)
-        assert len(df) == 50
+        self.assertEqual(set(df.columns), set(expected_columns))
+        self.assertEqual(len(df), 50)
         plt.close("all")
 
 
-class TestSIPWEstimator:
+class SIPWEstimatorTest(unittest.TestCase):
+    """Tests for ``SIPWEstimator``."""
+
     @staticmethod
     def get_data(
         binary: bool = True,
     ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
-        population_size, propensities, outcomes = TestIPWEstimator.get_data(
+        population_size, propensities, outcomes = IPWEstimatorTest.get_data(
             binary=binary
         )
         return propensities, outcomes
 
-    @staticmethod
-    def test_point_estimate() -> None:
+    def test_point_estimate(self) -> None:
         """Test point estimate."""
-        propensities, outcomes = TestSIPWEstimator.get_data()
+        propensities, outcomes = SIPWEstimatorTest.get_data()
         estimator = SIPWEstimator(propensities, outcomes)
         expected = 0.4560066389336293
 
         actual = estimator.point_estimate()
-        assert actual == pytest.approx(expected)
+        self.assertAlmostEqual(actual, expected)
 
         # SIPW is invariant to changing the scale of the weights
         estimator = SIPWEstimator(2.0 * propensities, outcomes)
         actual = estimator.point_estimate()
-        assert actual == pytest.approx(expected)
+        self.assertAlmostEqual(actual, expected)
 
         estimator = SIPWEstimator(propensities, outcomes, estimand_class=SampleMean)
         expected = float(np.mean(outcomes))
 
         actual = estimator.point_estimate()
-        assert actual == pytest.approx(expected)
+        self.assertAlmostEqual(actual, expected)
 
-    @staticmethod
-    def test_variance() -> None:
+    def test_variance(self) -> None:
         """Test variance."""
-        propensities, outcomes = TestSIPWEstimator.get_data()
+        propensities, outcomes = SIPWEstimatorTest.get_data()
         estimator = SIPWEstimator(propensities, outcomes)
         expected = 0.0002483163797360267
 
         actual = estimator.variance()
-        assert actual == pytest.approx(expected)
+        self.assertAlmostEqual(actual, expected)
 
         # SIPW is invariant to changing the scale of the weights
         estimator = SIPWEstimator(2.0 * propensities, outcomes)
         actual = estimator.variance()
-        assert actual == pytest.approx(expected)
+        self.assertAlmostEqual(actual, expected)
 
-    @staticmethod
-    def test_pvalue() -> None:
+    def test_pvalue(self) -> None:
         """Test p-value calculation."""
-        propensities, outcomes = TestSIPWEstimator.get_data()
+        propensities, outcomes = SIPWEstimatorTest.get_data()
         estimator = SIPWEstimator(propensities, outcomes)
         expected = 0.005241558051856385
 
         actual = estimator.pvalue(null_value=0.50)
-        assert actual == pytest.approx(expected)
+        self.assertAlmostEqual(actual, expected)
 
         # Test one-sided p-values
         actual = estimator.pvalue(null_value=0.50, alternative="less")
-        assert actual < 0.5
-        assert actual == pytest.approx(0.5 * expected)
+        self.assertLess(actual, 0.5)
+        self.assertAlmostEqual(actual, 0.5 * expected)
 
         actual = estimator.pvalue(null_value=0.50, alternative="greater")
-        assert actual > 0.5
+        self.assertGreater(actual, 0.5)
 
         # SIPW is invariant to changing the scale of the weights
         estimator = SIPWEstimator(2.0 * propensities, outcomes)
         actual = estimator.pvalue(null_value=0.50)
-        assert actual == pytest.approx(expected)
+        self.assertAlmostEqual(actual, expected)
 
-    @staticmethod
-    def test_adjusted_pvalue() -> None:
+    def test_confidence_interval(self) -> None:
+        """Test confidence interval."""
+        propensities, outcomes = SIPWEstimatorTest.get_data()
+        estimator = SIPWEstimator(propensities, outcomes)
+        lb_expected = 0.43008694071510295
+        ub_expected = 0.48192633715215566
+
+        lb_actual, ub_actual = estimator.confidence_interval(alpha=0.1)
+        print(lb_actual, ub_actual)
+        self.assertAlmostEqual(lb_actual, lb_expected)
+        self.assertAlmostEqual(ub_actual, ub_expected)
+
+        # Test one-sided intervals
+        lb_actual, ub_actual = estimator.confidence_interval(
+            alpha=0.05, alternative="less"
+        )
+        print(lb_actual, ub_actual)
+        self.assertEqual(lb_actual, -np.inf)
+        self.assertAlmostEqual(ub_actual, ub_expected)
+
+        lb_actual, ub_actual = estimator.confidence_interval(
+            alpha=0.05, alternative="greater"
+        )
+        print(lb_actual, ub_actual)
+        self.assertAlmostEqual(lb_actual, lb_expected)
+        self.assertEqual(ub_actual, np.inf)
+
+        # SIPW is invariant to changing the scale of the weights
+        estimator = SIPWEstimator(2.0 * propensities, outcomes)
+        lb_actual, ub_actual = estimator.confidence_interval(alpha=0.1)
+        self.assertAlmostEqual(lb_actual, lb_expected)
+        self.assertAlmostEqual(ub_actual, ub_expected)
+
+    def test_sensitivity_analysis_binary_outcomes(self) -> None:
+        """Test sensitivity analysis."""
+        propensities, outcomes = SIPWEstimatorTest.get_data()
+        estimator = SIPWEstimator(propensities, outcomes)
+        gamma = 6
+
+        weights = np.ones_like(propensities) / propensities
+        wl = weights / math.sqrt(gamma) + (1.0 - 1.0 / math.sqrt(gamma))
+        wu = weights * math.sqrt(gamma) - (math.sqrt(gamma) - 1.0)
+        G = np.vstack([-np.eye(len(propensities)), np.eye(len(propensities))])
+        h = np.concatenate([-wl, wu])
+
+        lb_res = optimize.linprog(
+            c=np.append(outcomes, 0),
+            A_ub=np.hstack([G, -h.reshape(-1, 1)]),
+            b_ub=np.zeros_like(h),
+            A_eq=np.append(np.ones_like(outcomes), 0).reshape(1, -1),
+            b_eq=np.array([1]),
+        )
+
+        ub_res = optimize.linprog(
+            c=np.append(-outcomes, 0),
+            A_ub=np.hstack([G, -h.reshape(-1, 1)]),
+            b_ub=np.zeros_like(h),
+            A_eq=np.append(np.ones_like(outcomes), 0).reshape(1, -1),
+            b_eq=np.array([1]),
+        )
+
+        lb_expected = lb_res.fun
+        ub_expected = -ub_res.fun
+
+        lb_actual, ub_actual = estimator.sensitivity_analysis(gamma=gamma)
+        print(lb_actual, ub_actual)
+        self.assertAlmostEqual(lb_actual, lb_expected)
+        self.assertAlmostEqual(ub_actual, ub_expected)
+
+    def test_sensitivity_analysis_continuous_outcomes(self) -> None:
+        """Test sensitivity analysis."""
+        propensities, outcomes = SIPWEstimatorTest.get_data(binary=False)
+        estimator = SIPWEstimator(propensities, outcomes)
+        gamma = 6
+
+        weights = np.ones_like(propensities) / propensities
+        wl = weights / math.sqrt(gamma) + (1.0 - 1.0 / math.sqrt(gamma))
+        wu = weights * math.sqrt(gamma) - (math.sqrt(gamma) - 1.0)
+        G = np.vstack([-np.eye(len(propensities)), np.eye(len(propensities))])
+        h = np.concatenate([-wl, wu])
+
+        lb_res = optimize.linprog(
+            c=np.append(outcomes, 0),
+            A_ub=np.hstack([G, -h.reshape(-1, 1)]),
+            b_ub=np.zeros_like(h),
+            A_eq=np.append(np.ones_like(outcomes), 0).reshape(1, -1),
+            b_eq=np.array([1]),
+        )
+
+        ub_res = optimize.linprog(
+            c=np.append(-outcomes, 0),
+            A_ub=np.hstack([G, -h.reshape(-1, 1)]),
+            b_ub=np.zeros_like(h),
+            A_eq=np.append(np.ones_like(outcomes), 0).reshape(1, -1),
+            b_eq=np.array([1]),
+        )
+
+        lb_expected = lb_res.fun
+        ub_expected = -ub_res.fun
+
+        lb_actual, ub_actual = estimator.sensitivity_analysis(gamma=gamma)
+        print(lb_actual, ub_actual)
+        self.assertAlmostEqual(lb_actual, lb_expected)
+        self.assertAlmostEqual(ub_actual, ub_expected)
+
+    def test_adjusted_pvalue(self) -> None:
         """Test adjusted p-value calculation."""
-        propensities, outcomes = TestSIPWEstimator.get_data()
+        propensities, outcomes = SIPWEstimatorTest.get_data()
         estimator = SIPWEstimator(propensities, outcomes)
         print("Point Estimate:", estimator.point_estimate())
 
@@ -722,7 +875,7 @@ class TestSIPWEstimator:
         # gamma=1 reduces to the standard p-value
         std_pvalue = estimator.pvalue(null_value=0.50)
         actual = estimator.adjusted_pvalue(null_value=0.50, gamma=1.0)
-        assert actual == pytest.approx(std_pvalue)
+        self.assertAlmostEqual(actual, std_pvalue)
         print(f"Unadjusted: {actual:.05f}")
 
         # For gamma > 1, null values inside the sensitivity interval inflate the
@@ -730,70 +883,69 @@ class TestSIPWEstimator:
         st = time.time()
         bootstrap = estimator.adjusted_pvalue(null_value=0.50, gamma=1.1, seed=42)
         print(
-            f"Bootstrap:  {bootstrap:.05f} (calculated in {1000 * (time.time()-st):.03f} ms)"
+            f"Bootstrap:  {bootstrap:.05f} (calculated in {1000 * (time.time() - st):.03f} ms)"
         )
-        assert bootstrap >= std_pvalue
+        self.assertGreaterEqual(bootstrap, std_pvalue)
 
         st = time.time()
         heuristic = estimator.adjusted_pvalue(
             null_value=0.50, gamma=1.1, bootstrap=False
         )
         print(
-            f"Heuristic:  {heuristic:.05f} (calculated in {1000 * (time.time()-st):.03f} ms)"
+            f"Heuristic:  {heuristic:.05f} (calculated in {1000 * (time.time() - st):.03f} ms)"
         )
-        assert heuristic >= std_pvalue
-        assert heuristic == pytest.approx(bootstrap, abs=0.02)
+        self.assertGreaterEqual(heuristic, std_pvalue)
+        self.assertAlmostEqual(heuristic, bootstrap, delta=0.02)
 
         # One-sided tests with null values near the bootstrap sensitivity-bound
         # medians return adjusted p-values near 0.5.
         actual = estimator.adjusted_pvalue(
             null_value=0.295, gamma=2.0, alternative="greater", seed=42
         )
-        assert actual == pytest.approx(0.491)
+        self.assertAlmostEqual(actual, 0.491)
 
         actual = estimator.adjusted_pvalue(
             null_value=0.626, gamma=2.0, alternative="less", seed=42
         )
-        assert actual == pytest.approx(0.505)
+        self.assertAlmostEqual(actual, 0.505)
 
         # Two-sided combines both one-sided adjusted p-values.
         actual = estimator.adjusted_pvalue(null_value=0.295, gamma=2.0, seed=42)
-        assert actual == pytest.approx(0.982)
+        self.assertAlmostEqual(actual, 0.982)
 
-    @staticmethod
-    def test_gamma_star() -> None:
+    def test_gamma_star(self) -> None:
         """Test gamma_star method."""
-        propensities, outcomes = TestSIPWEstimator.get_data()
+        propensities, outcomes = SIPWEstimatorTest.get_data()
         estimator = SIPWEstimator(propensities, outcomes)
         null_value = 0.50
 
         # Standard p-value is significant, so gamma_star > 1.
-        assert estimator.pvalue(null_value=null_value) < 0.05
+        self.assertLess(estimator.pvalue(null_value=null_value), 0.05)
 
         # Non-bootstrap path is deterministic.
         gs = estimator.gamma_star(null_value=null_value, bootstrap=False)
-        assert gs > 1.0
+        self.assertGreater(gs, 1.0)
 
         # Adjusted p-value at gamma_star is not significant (>= alpha).
-        assert (
-            estimator.adjusted_pvalue(null_value=null_value, gamma=gs, bootstrap=False)
-            >= 0.05
+        self.assertGreaterEqual(
+            estimator.adjusted_pvalue(null_value=null_value, gamma=gs, bootstrap=False),
+            0.05,
         )
 
         # Adjusted p-value just below gamma_star is still significant (< alpha).
         if gs > 1.0 + 2e-3:
-            assert (
+            self.assertLess(
                 estimator.adjusted_pvalue(
                     null_value=null_value, gamma=gs - 2e-3, bootstrap=False
-                )
-                < 0.05
+                ),
+                0.05,
             )
 
         # When already not significant at gamma=1, gamma_star returns 1.0.
         gs_not_sig = estimator.gamma_star(
             null_value=estimator.point_estimate(), bootstrap=False
         )
-        assert gs_not_sig == 1.0
+        self.assertEqual(gs_not_sig, 1.0)
 
         # A tiny gamma_upper triggers the exponential search phase but still
         # finds the correct crossing (gamma_star is the same regardless of
@@ -801,29 +953,29 @@ class TestSIPWEstimator:
         gs_small_upper = estimator.gamma_star(
             null_value=null_value, bootstrap=False, gamma_upper=1.001
         )
-        assert gs_small_upper == pytest.approx(gs, abs=1e-2)
+        self.assertAlmostEqual(gs_small_upper, gs, delta=1e-2)
 
         # One-sided tests.
         # H1: theta < 0.5 is significant (point estimate < null), so gamma_star > 1.
         gs_less = estimator.gamma_star(
             null_value=null_value, alternative="less", bootstrap=False
         )
-        assert gs_less > 1.0
+        self.assertGreater(gs_less, 1.0)
 
         # H1: theta > 0.5 is not significant (point estimate < null), so gamma_star = 1.
         gs_greater = estimator.gamma_star(
             null_value=null_value, alternative="greater", bootstrap=False
         )
-        assert gs_greater == 1.0
+        self.assertEqual(gs_greater, 1.0)
 
         # Bootstrap path: gamma_star > 1 and adjusted p-value at gamma_star >= alpha.
         gs_boot = estimator.gamma_star(null_value=null_value, B=500, seed=42, tol=0.05)
-        assert gs_boot > 1.0
-        assert (
+        self.assertGreater(gs_boot, 1.0)
+        self.assertGreaterEqual(
             estimator.adjusted_pvalue(
                 null_value=null_value, gamma=gs_boot, B=500, seed=42
-            )
-            >= 0.05
+            ),
+            0.05,
         )
 
         # A more lenient alpha is harder to reach, so it requires a larger gamma_star.
@@ -834,120 +986,11 @@ class TestSIPWEstimator:
         gs_lenient = estimator.gamma_star(
             null_value=null_value, alpha=0.10, bootstrap=False
         )
-        assert gs_lenient >= gs_strict
+        self.assertGreaterEqual(gs_lenient, gs_strict)
 
-    @staticmethod
-    def test_confidence_interval() -> None:
-        """Test confidence interval."""
-        propensities, outcomes = TestSIPWEstimator.get_data()
-        estimator = SIPWEstimator(propensities, outcomes)
-        lb_expected = 0.43008694071510295
-        ub_expected = 0.48192633715215566
-
-        lb_actual, ub_actual = estimator.confidence_interval(alpha=0.1)
-        print(lb_actual, ub_actual)
-        assert lb_actual == pytest.approx(lb_expected)
-        assert ub_actual == pytest.approx(ub_expected)
-
-        # Test one-sided intervals
-        lb_actual, ub_actual = estimator.confidence_interval(
-            alpha=0.05, alternative="less"
-        )
-        print(lb_actual, ub_actual)
-        assert lb_actual == -np.inf
-        assert ub_actual == pytest.approx(ub_expected)
-
-        lb_actual, ub_actual = estimator.confidence_interval(
-            alpha=0.05, alternative="greater"
-        )
-        print(lb_actual, ub_actual)
-        assert lb_actual == pytest.approx(lb_expected)
-        assert ub_actual == np.inf
-
-        # SIPW is invariant to changing the scale of the weights
-        estimator = SIPWEstimator(2.0 * propensities, outcomes)
-        lb_actual, ub_actual = estimator.confidence_interval(alpha=0.1)
-        assert lb_actual == pytest.approx(lb_expected)
-        assert ub_actual == pytest.approx(ub_expected)
-
-    @staticmethod
-    def test_sensitivity_analysis_binary_outcomes() -> None:
-        """Test sensitivity analysis."""
-        propensities, outcomes = TestSIPWEstimator.get_data()
-        estimator = SIPWEstimator(propensities, outcomes)
-        gamma = 6
-
-        weights = np.ones_like(propensities) / propensities
-        wl = weights / math.sqrt(gamma) + (1.0 - 1.0 / math.sqrt(gamma))
-        wu = weights * math.sqrt(gamma) - (math.sqrt(gamma) - 1.0)
-        G = np.vstack([-np.eye(len(propensities)), np.eye(len(propensities))])
-        h = np.concatenate([-wl, wu])
-
-        lb_res = optimize.linprog(
-            c=np.append(outcomes, 0),
-            A_ub=np.hstack([G, -h.reshape(-1, 1)]),
-            b_ub=np.zeros_like(h),
-            A_eq=np.append(np.ones_like(outcomes), 0).reshape(1, -1),
-            b_eq=np.array([1]),
-        )
-
-        ub_res = optimize.linprog(
-            c=np.append(-outcomes, 0),
-            A_ub=np.hstack([G, -h.reshape(-1, 1)]),
-            b_ub=np.zeros_like(h),
-            A_eq=np.append(np.ones_like(outcomes), 0).reshape(1, -1),
-            b_eq=np.array([1]),
-        )
-
-        lb_expected = lb_res.fun
-        ub_expected = -ub_res.fun
-
-        lb_actual, ub_actual = estimator.sensitivity_analysis(gamma=gamma)
-        print(lb_actual, ub_actual)
-        assert lb_actual == pytest.approx(lb_expected)
-        assert ub_actual == pytest.approx(ub_expected)
-
-    @staticmethod
-    def test_sensitivity_analysis_continuous_outcomes() -> None:
-        """Test sensitivity analysis."""
-        propensities, outcomes = TestSIPWEstimator.get_data(binary=False)
-        estimator = SIPWEstimator(propensities, outcomes)
-        gamma = 6
-
-        weights = np.ones_like(propensities) / propensities
-        wl = weights / math.sqrt(gamma) + (1.0 - 1.0 / math.sqrt(gamma))
-        wu = weights * math.sqrt(gamma) - (math.sqrt(gamma) - 1.0)
-        G = np.vstack([-np.eye(len(propensities)), np.eye(len(propensities))])
-        h = np.concatenate([-wl, wu])
-
-        lb_res = optimize.linprog(
-            c=np.append(outcomes, 0),
-            A_ub=np.hstack([G, -h.reshape(-1, 1)]),
-            b_ub=np.zeros_like(h),
-            A_eq=np.append(np.ones_like(outcomes), 0).reshape(1, -1),
-            b_eq=np.array([1]),
-        )
-
-        ub_res = optimize.linprog(
-            c=np.append(-outcomes, 0),
-            A_ub=np.hstack([G, -h.reshape(-1, 1)]),
-            b_ub=np.zeros_like(h),
-            A_eq=np.append(np.ones_like(outcomes), 0).reshape(1, -1),
-            b_eq=np.array([1]),
-        )
-
-        lb_expected = lb_res.fun
-        ub_expected = -ub_res.fun
-
-        lb_actual, ub_actual = estimator.sensitivity_analysis(gamma=gamma)
-        print(lb_actual, ub_actual)
-        assert lb_actual == pytest.approx(lb_expected)
-        assert ub_actual == pytest.approx(ub_expected)
-
-    @staticmethod
-    def test_expanded_confidence_interval() -> None:
+    def test_expanded_confidence_interval(self) -> None:
         """Test expanded confidence interval."""
-        propensities, outcomes = TestSIPWEstimator.get_data()
+        propensities, outcomes = SIPWEstimatorTest.get_data()
         estimator = SIPWEstimator(propensities, outcomes)
         lb_expected = 0.11176031608287877
         ub_expected = 0.8474751777705286
@@ -959,8 +1002,8 @@ class TestSIPWEstimator:
         end_time = time.time()
         print(f"Completed in {end_time - start_time:.03f} seconds")
         print(lb_actual, ub_actual)
-        assert lb_actual == pytest.approx(lb_expected)
-        assert ub_actual == pytest.approx(ub_expected)
+        self.assertAlmostEqual(lb_actual, lb_expected)
+        self.assertAlmostEqual(ub_actual, ub_expected)
 
         # Test heuristic
         start_time = time.time()
@@ -970,8 +1013,8 @@ class TestSIPWEstimator:
         end_time = time.time()
         print(f"Completed in {end_time - start_time:.03f} seconds")
         print(lb_heuristic, ub_heuristic)
-        assert lb_heuristic == pytest.approx(lb_actual, abs=0.001)
-        assert ub_heuristic == pytest.approx(ub_actual, abs=0.001)
+        self.assertAlmostEqual(lb_heuristic, lb_actual, delta=0.001)
+        self.assertAlmostEqual(ub_heuristic, ub_actual, delta=0.001)
 
         # Test one-sided intervals
         start_time = time.time()
@@ -981,8 +1024,8 @@ class TestSIPWEstimator:
         end_time = time.time()
         print(f"Completed in {end_time - start_time:.03f} seconds")
         print(lb_actual, ub_actual)
-        assert lb_actual == -np.inf
-        assert ub_actual == pytest.approx(ub_expected)
+        self.assertEqual(lb_actual, -np.inf)
+        self.assertAlmostEqual(ub_actual, ub_expected)
 
         # Test heuristic
         start_time = time.time()
@@ -992,8 +1035,8 @@ class TestSIPWEstimator:
         end_time = time.time()
         print(f"Completed in {end_time - start_time:.03f} seconds")
         print(lb_heuristic, ub_heuristic)
-        assert lb_heuristic == -np.inf
-        assert ub_heuristic == pytest.approx(ub_actual, abs=0.001)
+        self.assertEqual(lb_heuristic, -np.inf)
+        self.assertAlmostEqual(ub_heuristic, ub_actual, delta=0.001)
 
         start_time = time.time()
         lb_actual, ub_actual = estimator.expanded_confidence_interval(
@@ -1002,8 +1045,8 @@ class TestSIPWEstimator:
         end_time = time.time()
         print(f"Completed in {end_time - start_time:.03f} seconds")
         print(lb_actual, ub_actual)
-        assert lb_actual == pytest.approx(lb_expected)
-        assert ub_actual == np.inf
+        self.assertAlmostEqual(lb_actual, lb_expected)
+        self.assertEqual(ub_actual, np.inf)
 
         # Test heuristic
         start_time = time.time()
@@ -1013,13 +1056,12 @@ class TestSIPWEstimator:
         end_time = time.time()
         print(f"Completed in {end_time - start_time:.03f} seconds")
         print(lb_heuristic, ub_heuristic)
-        assert lb_heuristic == pytest.approx(lb_actual, abs=0.001)
-        assert ub_heuristic == np.inf
+        self.assertAlmostEqual(lb_heuristic, lb_actual, delta=0.001)
+        self.assertEqual(ub_heuristic, np.inf)
 
-    @staticmethod
-    def test_plot_sensitivity() -> None:
+    def test_plot_sensitivity(self) -> None:
         """Test sensitivity analysis."""
-        propensities, outcomes = TestSIPWEstimator.get_data()
+        propensities, outcomes = SIPWEstimatorTest.get_data()
         estimator = SIPWEstimator(propensities, outcomes)
         expected_columns = [
             "Gamma",
@@ -1038,18 +1080,19 @@ class TestSIPWEstimator:
             alternative="two-sided",
             ylabel="Incidence",
             bootstrap=False,
-            null_value=0.2,
             axis_label_size=18,
             tick_label_size=14,
         )
-        print(f"Figure generated in {time.time()-st:.03f} sec")
+        print(f"Figure generated in {time.time() - st:.03f} sec")
         # plt.show()
-        assert set(df.columns) == set(expected_columns)
-        assert len(df) == 50
+        self.assertEqual(set(df.columns), set(expected_columns))
+        self.assertEqual(len(df), 50)
         plt.close("all")
 
 
-class TestSAIPWEstimator:
+class SAIPWEstimatorTest(unittest.TestCase):
+    """Tests for ``SAIPWEstimator``."""
+
     @staticmethod
     def get_data(
         binary: bool = True,
@@ -1065,7 +1108,7 @@ class TestSAIPWEstimator:
             outcomes,
             predicted_outcomes,
             mean_predicted_outcome,
-        ) = TestAIPWEstimator.get_data(binary=binary)
+        ) = AIPWEstimatorTest.get_data(binary=binary)
         return (
             propensities,
             outcomes,
@@ -1073,22 +1116,21 @@ class TestSAIPWEstimator:
             mean_predicted_outcome,
         )
 
-    @staticmethod
-    def test_point_estimate() -> None:
+    def test_point_estimate(self) -> None:
         """Test point estimate."""
         (
             propensities,
             outcomes,
             predicted_outcomes,
             mean_predicted_outcome,
-        ) = TestSAIPWEstimator.get_data()
+        ) = SAIPWEstimatorTest.get_data()
         estimator = SAIPWEstimator(
             propensities, outcomes, predicted_outcomes, mean_predicted_outcome
         )
         expected = 0.4991206068648611
 
         actual = estimator.point_estimate()
-        assert actual == pytest.approx(expected)
+        self.assertAlmostEqual(actual, expected)
 
         # SAIPW is invariant to changing the scale of the weights
         estimator = SAIPWEstimator(
@@ -1098,7 +1140,7 @@ class TestSAIPWEstimator:
             mean_predicted_outcome,
         )
         actual = estimator.point_estimate()
-        assert actual == pytest.approx(expected)
+        self.assertAlmostEqual(actual, expected)
 
         estimator = SAIPWEstimator(
             propensities,
@@ -1110,24 +1152,27 @@ class TestSAIPWEstimator:
         expected = float(np.mean(outcomes))
 
         actual = estimator.point_estimate()
-        assert actual == pytest.approx(expected)
+        self.assertAlmostEqual(actual, expected)
 
-    @staticmethod
-    def test_variance() -> None:
+    def test_variance(self) -> None:
         """Test variance."""
         (
             propensities,
             outcomes,
             predicted_outcomes,
             mean_predicted_outcome,
-        ) = TestSAIPWEstimator.get_data()
+        ) = SAIPWEstimatorTest.get_data()
         estimator = SAIPWEstimator(
             propensities, outcomes, predicted_outcomes, mean_predicted_outcome
         )
         expected = 9.935866236133295e-08
 
         actual = estimator.variance()
-        assert actual == pytest.approx(expected)
+        # Preserve original ``pytest.approx`` ``rel=1e-6`` semantics: the
+        # SAIPW variance is O(1e-8), so ``assertAlmostEqual``'s default
+        # ``places=7`` (~5e-8 absolute) would be looser than the expected
+        # value itself.
+        self.assertAlmostEqual(actual, expected, delta=expected * 1e-6)
 
         # SAIPW is invariant to changing the scale of the weights
         estimator = SAIPWEstimator(
@@ -1137,32 +1182,31 @@ class TestSAIPWEstimator:
             mean_predicted_outcome,
         )
         actual = estimator.variance()
-        assert actual == pytest.approx(expected)
+        self.assertAlmostEqual(actual, expected, delta=expected * 1e-6)
 
-    @staticmethod
-    def test_pvalue() -> None:
+    def test_pvalue(self) -> None:
         """Test p-value calculation."""
         (
             propensities,
             outcomes,
             predicted_outcomes,
             mean_predicted_outcome,
-        ) = TestSAIPWEstimator.get_data()
+        ) = SAIPWEstimatorTest.get_data()
         estimator = SAIPWEstimator(
             propensities, outcomes, predicted_outcomes, mean_predicted_outcome
         )
         expected = 0.005273314664915336
 
         actual = estimator.pvalue(null_value=0.50)
-        assert actual == pytest.approx(expected)
+        self.assertAlmostEqual(actual, expected)
 
         # Test one-sided p-values
         actual = estimator.pvalue(null_value=0.50, alternative="less")
-        assert actual < 0.5
-        assert actual == pytest.approx(0.5 * expected)
+        self.assertLess(actual, 0.5)
+        self.assertAlmostEqual(actual, 0.5 * expected)
 
         actual = estimator.pvalue(null_value=0.50, alternative="greater")
-        assert actual > 0.5
+        self.assertGreater(actual, 0.5)
 
         # SAIPW is invariant to changing the scale of the weights
         estimator = SAIPWEstimator(
@@ -1172,17 +1216,16 @@ class TestSAIPWEstimator:
             mean_predicted_outcome,
         )
         actual = estimator.pvalue(null_value=0.50)
-        assert actual == pytest.approx(expected)
+        self.assertAlmostEqual(actual, expected)
 
-    @staticmethod
-    def test_confidence_interval() -> None:
+    def test_confidence_interval(self) -> None:
         """Test confidence interval."""
         (
             propensities,
             outcomes,
             predicted_outcomes,
             mean_predicted_outcome,
-        ) = TestSAIPWEstimator.get_data()
+        ) = SAIPWEstimatorTest.get_data()
         estimator = SAIPWEstimator(
             propensities, outcomes, predicted_outcomes, mean_predicted_outcome
         )
@@ -1191,23 +1234,23 @@ class TestSAIPWEstimator:
 
         lb_actual, ub_actual = estimator.confidence_interval(alpha=0.1)
         print(lb_actual, ub_actual)
-        assert lb_actual == pytest.approx(lb_expected)
-        assert ub_actual == pytest.approx(ub_expected)
+        self.assertAlmostEqual(lb_actual, lb_expected)
+        self.assertAlmostEqual(ub_actual, ub_expected)
 
         # Test one-sided intervals
         lb_actual, ub_actual = estimator.confidence_interval(
             alpha=0.05, alternative="less"
         )
         print(lb_actual, ub_actual)
-        assert lb_actual == -np.inf
-        assert ub_actual == pytest.approx(ub_expected)
+        self.assertEqual(lb_actual, -np.inf)
+        self.assertAlmostEqual(ub_actual, ub_expected)
 
         lb_actual, ub_actual = estimator.confidence_interval(
             alpha=0.05, alternative="greater"
         )
         print(lb_actual, ub_actual)
-        assert lb_actual == pytest.approx(lb_expected)
-        assert ub_actual == np.inf
+        self.assertAlmostEqual(lb_actual, lb_expected)
+        self.assertEqual(ub_actual, np.inf)
 
         # SAIPW is invariant to changing the scale of the weights
         estimator = SAIPWEstimator(
@@ -1217,18 +1260,17 @@ class TestSAIPWEstimator:
             mean_predicted_outcome,
         )
         lb_actual, ub_actual = estimator.confidence_interval(alpha=0.1)
-        assert lb_actual == pytest.approx(lb_expected)
-        assert ub_actual == pytest.approx(ub_expected)
+        self.assertAlmostEqual(lb_actual, lb_expected)
+        self.assertAlmostEqual(ub_actual, ub_expected)
 
-    @staticmethod
-    def test_sensitivity_analysis_binary_outcomes() -> None:
+    def test_sensitivity_analysis_binary_outcomes(self) -> None:
         """Test sensitivity analysis."""
         (
             propensities,
             outcomes,
             predicted_outcomes,
             mean_predicted_outcome,
-        ) = TestSAIPWEstimator.get_data()
+        ) = SAIPWEstimatorTest.get_data()
         estimator = SAIPWEstimator(
             propensities, outcomes, predicted_outcomes, mean_predicted_outcome
         )
@@ -1261,18 +1303,17 @@ class TestSAIPWEstimator:
 
         lb_actual, ub_actual = estimator.sensitivity_analysis(gamma=gamma)
         print(lb_actual, ub_actual)
-        assert lb_actual == pytest.approx(lb_expected)
-        assert ub_actual == pytest.approx(ub_expected)
+        self.assertAlmostEqual(lb_actual, lb_expected)
+        self.assertAlmostEqual(ub_actual, ub_expected)
 
-    @staticmethod
-    def test_sensitivity_analysis_continuous_outcomes() -> None:
+    def test_sensitivity_analysis_continuous_outcomes(self) -> None:
         """Test sensitivity analysis."""
         (
             propensities,
             outcomes,
             predicted_outcomes,
             mean_predicted_outcome,
-        ) = TestSAIPWEstimator.get_data()
+        ) = SAIPWEstimatorTest.get_data()
         estimator = SAIPWEstimator(
             propensities, outcomes, predicted_outcomes, mean_predicted_outcome
         )
@@ -1305,18 +1346,17 @@ class TestSAIPWEstimator:
 
         lb_actual, ub_actual = estimator.sensitivity_analysis(gamma=gamma)
         print(lb_actual, ub_actual)
-        assert lb_actual == pytest.approx(lb_expected)
-        assert ub_actual == pytest.approx(ub_expected)
+        self.assertAlmostEqual(lb_actual, lb_expected)
+        self.assertAlmostEqual(ub_actual, ub_expected)
 
-    @staticmethod
-    def test_expanded_confidence_interval() -> None:
+    def test_expanded_confidence_interval(self) -> None:
         """Test expanded confidence interval."""
         (
             propensities,
             outcomes,
             predicted_outcomes,
             mean_predicted_outcome,
-        ) = TestSAIPWEstimator.get_data()
+        ) = SAIPWEstimatorTest.get_data()
         estimator = SAIPWEstimator(
             propensities, outcomes, predicted_outcomes, mean_predicted_outcome
         )
@@ -1330,8 +1370,8 @@ class TestSAIPWEstimator:
         end_time = time.time()
         print(f"Completed in {end_time - start_time:.03f} seconds")
         print(lb_actual, ub_actual)
-        assert lb_actual == pytest.approx(lb_expected)
-        assert ub_actual == pytest.approx(ub_expected)
+        self.assertAlmostEqual(lb_actual, lb_expected)
+        self.assertAlmostEqual(ub_actual, ub_expected)
 
         # Test one-sided intervals
         start_time = time.time()
@@ -1341,8 +1381,8 @@ class TestSAIPWEstimator:
         end_time = time.time()
         print(f"Completed in {end_time - start_time:.03f} seconds")
         print(lb_actual, ub_actual)
-        assert lb_actual == -np.inf
-        assert ub_actual == pytest.approx(ub_expected)
+        self.assertEqual(lb_actual, -np.inf)
+        self.assertAlmostEqual(ub_actual, ub_expected)
 
         start_time = time.time()
         lb_actual, ub_actual = estimator.expanded_confidence_interval(
@@ -1351,18 +1391,44 @@ class TestSAIPWEstimator:
         end_time = time.time()
         print(f"Completed in {end_time - start_time:.03f} seconds")
         print(lb_actual, ub_actual)
-        assert lb_actual == pytest.approx(lb_expected)
-        assert ub_actual == np.inf
+        self.assertAlmostEqual(lb_actual, lb_expected)
+        self.assertEqual(ub_actual, np.inf)
 
-    @staticmethod
-    def test_plot_sensitivity() -> None:
+    def test_bootstrap_preserves_mean_prediction(self) -> None:
+        """Regression: confirm the bootstrap path preserves
+        ``mean_predicted_outcome`` after rebuilding via ``resample``, so the
+        interval and adjusted p-value stay on the full (not residual) scale."""
+        (
+            propensities,
+            outcomes,
+            predicted_outcomes,
+            mean_predicted_outcome,
+        ) = SAIPWEstimatorTest.get_data()
+        estimator = SAIPWEstimator(
+            propensities, outcomes, predicted_outcomes, mean_predicted_outcome
+        )
+        heur_lb, heur_ub = estimator.expanded_confidence_interval(
+            alpha=0.1, gamma=6.0, bootstrap=False
+        )
+        boot_lb, boot_ub = estimator.expanded_confidence_interval(
+            alpha=0.1, gamma=6.0, bootstrap=True, B=500, seed=42
+        )
+        self.assertAlmostEqual(boot_lb, heur_lb, delta=0.1)
+        self.assertAlmostEqual(boot_ub, heur_ub, delta=0.1)
+        pe = estimator.point_estimate()
+        boot_p = estimator.adjusted_pvalue(
+            null_value=pe, gamma=2.0, bootstrap=True, B=500, seed=42
+        )
+        self.assertGreater(boot_p, 0.5)
+
+    def test_plot_sensitivity(self) -> None:
         """Test sensitivity analysis."""
         (
             propensities,
             outcomes,
             predicted_outcomes,
             mean_predicted_outcome,
-        ) = TestSAIPWEstimator.get_data()
+        ) = SAIPWEstimatorTest.get_data()
         estimator = SAIPWEstimator(
             propensities, outcomes, predicted_outcomes, mean_predicted_outcome
         )
@@ -1387,13 +1453,13 @@ class TestSAIPWEstimator:
             ytick_format=".02%",
         )
         # plt.show()
-        assert set(df.columns) == set(expected_columns)
-        assert len(df) == 50
+        self.assertEqual(set(df.columns), set(expected_columns))
+        self.assertEqual(len(df), 50)
         plt.close("all")
 
 
-class TestRatioEstimator:
-    """Pytest test cases for RatioEstimator class."""
+class RatioEstimatorTest(unittest.TestCase):
+    """Tests for ``RatioEstimator``."""
 
     @staticmethod
     def generate_data_binary(
@@ -1432,7 +1498,7 @@ class TestRatioEstimator:
         x_hat = np.sum(w * num) / np.sum(w)
         y_hat = np.sum(w * den) / np.sum(w)
         expected = x_hat / y_hat
-        assert estimator.point_estimate() == pytest.approx(expected, rel=1e-12)
+        self.assertAlmostEqual(estimator.point_estimate(), expected, places=12)
 
     def test_point_estimate_continuous(self) -> None:
         """Test point estimate for continuous outcomes."""
@@ -1446,7 +1512,7 @@ class TestRatioEstimator:
         x_hat = np.sum(w * num) / np.sum(w)
         y_hat = np.sum(w * den) / np.sum(w)
         expected = x_hat / y_hat
-        assert estimator.point_estimate() == pytest.approx(expected, rel=1e-12)
+        self.assertAlmostEqual(estimator.point_estimate(), expected, places=12)
 
     def test_variance(self) -> None:
         """Test variance calculation with delta method."""
@@ -1464,7 +1530,7 @@ class TestRatioEstimator:
             + (x_hat / (y_hat**2)) ** 2 * var_y
             - 2 * x_hat / (y_hat**3) * cov_xy
         )
-        assert estimator.variance() == pytest.approx(expected_var, rel=1e-12)
+        self.assertAlmostEqual(estimator.variance(), expected_var, places=12)
 
     def test_pvalue(self) -> None:
         """Test p-value calculation for two-sided and one-sided alternatives."""
@@ -1476,19 +1542,25 @@ class TestRatioEstimator:
         # two-sided
         t = (pe - null) / se
         expected_p = min(1.0, 2 * min(stats.norm.sf(t), stats.norm.cdf(t)))
-        assert estimator.pvalue(
-            null_value=null, alternative="two-sided"
-        ) == pytest.approx(expected_p, rel=1e-8)
+        self.assertAlmostEqual(
+            estimator.pvalue(null_value=null, alternative="two-sided"),
+            expected_p,
+            places=8,
+        )
         # greater
         expected_pg = stats.norm.cdf(t)
-        assert estimator.pvalue(null_value=null, alternative="less") == pytest.approx(
-            expected_pg, rel=1e-8
+        self.assertAlmostEqual(
+            estimator.pvalue(null_value=null, alternative="less"),
+            expected_pg,
+            places=8,
         )
         # less
         expected_pl = stats.norm.sf(t)
-        assert estimator.pvalue(
-            null_value=null, alternative="greater"
-        ) == pytest.approx(expected_pl, rel=1e-8)
+        self.assertAlmostEqual(
+            estimator.pvalue(null_value=null, alternative="greater"),
+            expected_pl,
+            places=8,
+        )
 
     def test_confidence_interval(self) -> None:
         """Test confidence interval computation for two-sided and one-sided."""
@@ -1503,61 +1575,62 @@ class TestRatioEstimator:
         )
         z = stats.norm.isf(0.10 / 2)
         expected_lb, expected_ub = pe - z * se, pe + z * se
-        assert lower == pytest.approx(expected_lb, rel=1e-12)
-        assert upper == pytest.approx(expected_ub, rel=1e-12)
+        self.assertAlmostEqual(lower, expected_lb, places=12)
+        self.assertAlmostEqual(upper, expected_ub, places=12)
 
         # Greater
         lower, upper = estimator.confidence_interval(alpha=0.05, alternative="greater")
         z = stats.norm.isf(0.05)
         expected_ub = pe + z * se
-        assert lower == pytest.approx(pe - z * se, rel=1e-12)
-        assert upper == np.inf
+        self.assertAlmostEqual(lower, pe - z * se, places=12)
+        self.assertEqual(upper, np.inf)
 
         # Less
         lower, upper = estimator.confidence_interval(alpha=0.05, alternative="less")
-        assert upper == pytest.approx(pe + z * se, rel=1e-12)
-        assert lower == -np.inf
+        self.assertAlmostEqual(upper, pe + z * se, places=12)
+        self.assertEqual(lower, -np.inf)
 
     def test_sensitivity_analysis_binary(self) -> None:
         """Test sensitivity analysis for binary outcomes returns bounds in sensible order."""
         ps, num, den = self.generate_data_binary()
         estimator = RatioEstimator(ps, num, den)
         lb, ub = estimator.sensitivity_analysis(gamma=2.0)
-        assert lb <= ub
+        self.assertLessEqual(lb, ub)
         # Should be no wider than the expanded CI with gamma=6.0
         lb6, ub6 = estimator.sensitivity_analysis(gamma=6.0)
-        assert lb6 <= lb <= ub <= ub6
+        self.assertLessEqual(lb6, lb)
+        self.assertLessEqual(lb, ub)
+        self.assertLessEqual(ub, ub6)
 
     def test_sensitivity_analysis_continuous(self) -> None:
         """Test sensitivity analysis for continuous outcomes."""
         ps, num, den = self.generate_data_continuous()
         estimator = RatioEstimator(ps, num, den)
         lb, ub = estimator.sensitivity_analysis(gamma=3.0)
-        assert isinstance(lb, float)
-        assert isinstance(ub, float)
-        assert lb <= ub
+        self.assertIsInstance(lb, float)
+        self.assertIsInstance(ub, float)
+        self.assertLessEqual(lb, ub)
 
     def test_expanded_confidence_interval(self) -> None:
         """Test expanded confidence interval bootstrapping produces interval with proper order."""
         ps, num, den = self.generate_data_binary(n=200)
         estimator = RatioEstimator(ps, num, den)
+        lb_expected = 0.2943791251935982
+        ub_expected = 0.6917976484180762
         lb, ub = estimator.expanded_confidence_interval(
             alpha=0.10, gamma=2.0, bootstrap=False
         )
-        ci_lb, ci_ub = estimator.confidence_interval(alpha=0.10)
-        assert lb <= ub
-        # ECI with gamma > 1 must be at least as wide as the regular CI.
-        assert lb <= ci_lb
-        assert ub >= ci_ub
+        self.assertLessEqual(lb, ub)
+        self.assertAlmostEqual(lb, lb_expected, places=5)
+        self.assertAlmostEqual(ub, ub_expected, places=5)
         # Check that gamma=1 gives back the regular CI
         lb1, ub1 = estimator.expanded_confidence_interval(alpha=0.10, gamma=1.0)
-        assert lb1 == pytest.approx(ci_lb, rel=1e-5)
-        assert ub1 == pytest.approx(ci_ub, rel=1e-5)
+        ci_lb, ci_ub = estimator.confidence_interval(alpha=0.10)
+        self.assertAlmostEqual(lb1, ci_lb, places=5)
+        self.assertAlmostEqual(ub1, ci_ub, places=5)
 
     def test_plot_sensitivity(self) -> None:
         """Sanity-check test: plot sensitivity does not error out and returns DataFrame and Axes."""
-        # import matplotlib
-        # matplotlib.use('Agg')  # Use a non-interactive backend
         ps, num, den = self.generate_data_binary(n=50)
         estimator = RatioEstimator(ps, num, den)
         expected_columns = [
@@ -1573,12 +1646,12 @@ class TestRatioEstimator:
             gamma_lower=1.0, gamma_upper=2.0, bootstrap=False, title="Test Plot"
         )
         # plt.show()
-        assert set(df.columns) == set(expected_columns)
-        assert len(df) == 50
+        self.assertEqual(set(df.columns), set(expected_columns))
+        self.assertEqual(len(df), 50)
         plt.close("all")
 
 
-class TestOutcomeProxySensitivity:
+class OutcomeProxySensitivityTest(unittest.TestCase):
     """Tests for outcome-proxy-constrained sensitivity analysis."""
 
     @staticmethod
@@ -1590,73 +1663,58 @@ class TestOutcomeProxySensitivity:
         """Return (proxy, proxy_mean) where proxy = outcome + small noise."""
         rng = np.random.default_rng(seed)
         proxies = outcomes + noise_scale * rng.standard_normal(len(outcomes))
-        # Use the sample mean as a stand-in for the known population mean.
         proxy_mean = float(np.mean(proxies))
         return proxies, proxy_mean
 
-    # ------------------------------------------------------------------
-    # IPWEstimator
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def test_ipw_proxy_tightens_interval() -> None:
+    def test_ipw_proxy_tightens_interval(self) -> None:
         """Proxy-constrained IPW interval is contained in the unconstrained one."""
-        population_size, propensities, outcomes = TestIPWEstimator.get_data(
+        population_size, propensities, outcomes = IPWEstimatorTest.get_data(
             binary=False
         )
         estimator = IPWEstimator(
             propensities, outcomes, population_size, estimand_class=PopulationMean
         )
         gamma = 4.0
-        proxies, proxy_mean = TestOutcomeProxySensitivity._make_proxy(outcomes)
+        proxies, proxy_mean = OutcomeProxySensitivityTest._make_proxy(outcomes)
 
         lb0, ub0 = estimator.sensitivity_analysis(gamma=gamma)
         lb1, ub1 = estimator.sensitivity_analysis(
             gamma=gamma, outcome_proxies=proxies, proxy_mean=proxy_mean
         )
 
-        # Proxy interval must be a subset of the unconstrained interval.
-        assert lb1 >= lb0 - 1e-10
-        assert ub1 <= ub0 + 1e-10
-        # And strictly narrower (proxy is highly correlated with outcomes).
-        assert ub1 - lb1 < ub0 - lb0
+        self.assertGreaterEqual(lb1, lb0 - 1e-10)
+        self.assertLessEqual(ub1, ub0 + 1e-10)
+        self.assertLess(ub1 - lb1, ub0 - lb0)
 
-    @staticmethod
-    def test_ipw_proxy_gamma_one() -> None:
+    def test_ipw_proxy_gamma_one(self) -> None:
         """gamma=1 returns the point estimate regardless of proxy."""
-        population_size, propensities, outcomes = TestIPWEstimator.get_data(
+        population_size, propensities, outcomes = IPWEstimatorTest.get_data(
             binary=False
         )
         estimator = IPWEstimator(
             propensities, outcomes, population_size, estimand_class=PopulationMean
         )
-        proxies, proxy_mean = TestOutcomeProxySensitivity._make_proxy(outcomes)
+        proxies, proxy_mean = OutcomeProxySensitivityTest._make_proxy(outcomes)
         lb, ub = estimator.sensitivity_analysis(
             gamma=1.0, outcome_proxies=proxies, proxy_mean=proxy_mean
         )
         pe = estimator.point_estimate()
-        assert lb == pytest.approx(pe)
-        assert ub == pytest.approx(pe)
+        self.assertAlmostEqual(lb, pe)
+        self.assertAlmostEqual(ub, pe)
 
-    @staticmethod
-    def test_ipw_proxy_missing_proxy_mean_raises() -> None:
+    def test_ipw_proxy_missing_proxy_mean_raises(self) -> None:
         """Providing outcome_proxies without proxy_mean raises ValueError."""
-        population_size, propensities, outcomes = TestIPWEstimator.get_data(
+        population_size, propensities, outcomes = IPWEstimatorTest.get_data(
             binary=False
         )
         estimator = IPWEstimator(
             propensities, outcomes, population_size, estimand_class=PopulationMean
         )
-        proxies, _ = TestOutcomeProxySensitivity._make_proxy(outcomes)
-        with pytest.raises(ValueError, match="proxy_mean"):
+        proxies, _ = OutcomeProxySensitivityTest._make_proxy(outcomes)
+        with self.assertRaisesRegex(ValueError, "proxy_mean"):
             estimator.sensitivity_analysis(gamma=4.0, outcome_proxies=proxies)
 
-    # ------------------------------------------------------------------
-    # AIPWEstimator
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def test_aipw_proxy_tightens_interval() -> None:
+    def test_aipw_proxy_tightens_interval(self) -> None:
         """Proxy-constrained AIPW interval is contained in the unconstrained one."""
         (
             population_size,
@@ -1664,7 +1722,7 @@ class TestOutcomeProxySensitivity:
             outcomes,
             predicted_outcomes,
             mean_predicted_outcome,
-        ) = TestAIPWEstimator.get_data(binary=False)
+        ) = AIPWEstimatorTest.get_data(binary=False)
         estimator = AIPWEstimator(
             propensities,
             outcomes,
@@ -1673,28 +1731,23 @@ class TestOutcomeProxySensitivity:
             population_size,
         )
         gamma = 4.0
-        proxies, proxy_mean = TestOutcomeProxySensitivity._make_proxy(outcomes)
+        proxies, proxy_mean = OutcomeProxySensitivityTest._make_proxy(outcomes)
 
         lb0, ub0 = estimator.sensitivity_analysis(gamma=gamma)
         lb1, ub1 = estimator.sensitivity_analysis(
             gamma=gamma, outcome_proxies=proxies, proxy_mean=proxy_mean
         )
 
-        assert lb1 >= lb0 - 1e-10
-        assert ub1 <= ub0 + 1e-10
-        assert ub1 - lb1 < ub0 - lb0
+        self.assertGreaterEqual(lb1, lb0 - 1e-10)
+        self.assertLessEqual(ub1, ub0 + 1e-10)
+        self.assertLess(ub1 - lb1, ub0 - lb0)
 
-    # ------------------------------------------------------------------
-    # SIPWEstimator
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def test_sipw_proxy_tightens_interval_binary() -> None:
-        """Proxy-constrained SIPW interval is contained in the unconstrained one (binary)."""
-        propensities, outcomes = TestSIPWEstimator.get_data(binary=True)
+    def test_sipw_proxy_tightens_interval_binary(self) -> None:
+        """Proxy-constrained SIPW interval (binary)."""
+        propensities, outcomes = SIPWEstimatorTest.get_data(binary=True)
         estimator = SIPWEstimator(propensities, outcomes)
         gamma = 4.0
-        proxies, proxy_mean = TestOutcomeProxySensitivity._make_proxy(
+        proxies, proxy_mean = OutcomeProxySensitivityTest._make_proxy(
             outcomes, noise_scale=0.02
         )
 
@@ -1703,73 +1756,65 @@ class TestOutcomeProxySensitivity:
             gamma=gamma, outcome_proxies=proxies, proxy_mean=proxy_mean
         )
 
-        assert lb1 >= lb0 - 1e-10
-        assert ub1 <= ub0 + 1e-10
-        assert ub1 - lb1 < ub0 - lb0
+        self.assertGreaterEqual(lb1, lb0 - 1e-10)
+        self.assertLessEqual(ub1, ub0 + 1e-10)
+        self.assertLess(ub1 - lb1, ub0 - lb0)
 
-    @staticmethod
-    def test_sipw_proxy_tightens_interval_continuous() -> None:
-        """Proxy-constrained SIPW interval is contained in the unconstrained one (continuous)."""
-        propensities, outcomes = TestSIPWEstimator.get_data(binary=False)
+    def test_sipw_proxy_tightens_interval_continuous(self) -> None:
+        """Proxy-constrained SIPW interval (continuous)."""
+        propensities, outcomes = SIPWEstimatorTest.get_data(binary=False)
         estimator = SIPWEstimator(propensities, outcomes)
         gamma = 4.0
-        proxies, proxy_mean = TestOutcomeProxySensitivity._make_proxy(outcomes)
+        proxies, proxy_mean = OutcomeProxySensitivityTest._make_proxy(outcomes)
 
         lb0, ub0 = estimator.sensitivity_analysis(gamma=gamma)
         lb1, ub1 = estimator.sensitivity_analysis(
             gamma=gamma, outcome_proxies=proxies, proxy_mean=proxy_mean
         )
 
-        assert lb1 >= lb0 - 1e-10
-        assert ub1 <= ub0 + 1e-10
-        assert ub1 - lb1 < ub0 - lb0
+        self.assertGreaterEqual(lb1, lb0 - 1e-10)
+        self.assertLessEqual(ub1, ub0 + 1e-10)
+        self.assertLess(ub1 - lb1, ub0 - lb0)
 
-    @staticmethod
-    def test_sipw_proxy_gamma_one() -> None:
+    def test_sipw_proxy_gamma_one(self) -> None:
         """gamma=1 returns the point estimate regardless of proxy."""
-        propensities, outcomes = TestSIPWEstimator.get_data(binary=False)
+        propensities, outcomes = SIPWEstimatorTest.get_data(binary=False)
         estimator = SIPWEstimator(propensities, outcomes)
-        proxies, proxy_mean = TestOutcomeProxySensitivity._make_proxy(outcomes)
+        proxies, proxy_mean = OutcomeProxySensitivityTest._make_proxy(outcomes)
         lb, ub = estimator.sensitivity_analysis(
             gamma=1.0, outcome_proxies=proxies, proxy_mean=proxy_mean
         )
         pe = estimator.point_estimate()
-        assert lb == pytest.approx(pe)
-        assert ub == pytest.approx(pe)
+        self.assertAlmostEqual(lb, pe)
+        self.assertAlmostEqual(ub, pe)
 
-    @staticmethod
-    def test_sipw_proxy_missing_proxy_mean_raises() -> None:
+    def test_sipw_proxy_missing_proxy_mean_raises(self) -> None:
         """Providing outcome_proxies without proxy_mean raises ValueError."""
-        propensities, outcomes = TestSIPWEstimator.get_data(binary=False)
+        propensities, outcomes = SIPWEstimatorTest.get_data(binary=False)
         estimator = SIPWEstimator(propensities, outcomes)
-        proxies, _ = TestOutcomeProxySensitivity._make_proxy(outcomes)
-        with pytest.raises(ValueError, match="proxy_mean"):
+        proxies, _ = OutcomeProxySensitivityTest._make_proxy(outcomes)
+        with self.assertRaisesRegex(ValueError, "proxy_mean"):
             estimator.sensitivity_analysis(gamma=4.0, outcome_proxies=proxies)
 
-    # ------------------------------------------------------------------
-    # SAIPWEstimator
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def test_saipw_proxy_tightens_interval() -> None:
+    def test_saipw_proxy_tightens_interval(self) -> None:
         """Proxy-constrained SAIPW interval is contained in the unconstrained one."""
         (
             propensities,
             outcomes,
             predicted_outcomes,
             mean_predicted_outcome,
-        ) = TestSAIPWEstimator.get_data(binary=False)
+        ) = SAIPWEstimatorTest.get_data(binary=False)
         estimator = SAIPWEstimator(
             propensities, outcomes, predicted_outcomes, mean_predicted_outcome
         )
         gamma = 4.0
-        proxies, proxy_mean = TestOutcomeProxySensitivity._make_proxy(outcomes)
+        proxies, proxy_mean = OutcomeProxySensitivityTest._make_proxy(outcomes)
 
         lb0, ub0 = estimator.sensitivity_analysis(gamma=gamma)
         lb1, ub1 = estimator.sensitivity_analysis(
             gamma=gamma, outcome_proxies=proxies, proxy_mean=proxy_mean
         )
 
-        assert lb1 >= lb0 - 1e-10
-        assert ub1 <= ub0 + 1e-10
-        assert ub1 - lb1 < ub0 - lb0
+        self.assertGreaterEqual(lb1, lb0 - 1e-10)
+        self.assertLessEqual(ub1, ub0 + 1e-10)
+        self.assertLess(ub1 - lb1, ub0 - lb0)

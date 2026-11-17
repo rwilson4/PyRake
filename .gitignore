@@ -1,1 +1,8 @@
 __pycache__
+.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+dist/
+# Written by the Cvxium perf guard while regenerating the baseline
+test/perf_baseline.json.lock

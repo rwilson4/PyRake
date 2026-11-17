@@ -1,352 +1,416 @@
 """Cvxium solver for RatioEstimator sensitivity analysis."""
 
-from typing import Any
+from __future__ import annotations
 
 import numpy as np
 import numpy.typing as npt
 from cvxium import (
-    EqualityConstrainedInteriorPointMethodSolver,
-    FeasibilitySolver,
-    InteriorPointMethodSolver,
-    OptimizationResult,
+    ArrowSystem,
+    BarrierSolver,
+    DiagonalSystem,
+    EqualityConstraintLayer,
+    LinearObjective,
+    LineSearchSettings,
+    MatrixSystem,
     OptimizationSettings,
-    multiply_arrow_sparsity_pattern,
-    solve_arrow_sparsity_pattern,
-    solve_kkt_system,
+    Problem,
+    SlackConstraintLayer,
+    SolveResult,
+    ZeroSystem,
 )
 
 
-class _PrecomputedFeasibility(FeasibilitySolver):
-    """Trivial feasibility solver that returns a pre-computed feasible point."""
+class CharnesCooperBoundsLayer(SlackConstraintLayer):
+    """Charnes-Cooper bound constraints for the sensitivity LFP, as a Cvxium layer.
 
-    def __init__(self, x0: npt.NDArray[np.float64]) -> None:
-        self._x0 = x0
-        super().__init__()
+    Encodes the ``2n`` inequality constraints of the linear-fractional sensitivity
+    program over the homogenized variable ``x = [w; s]`` (the ``n`` weights plus the
+    Charnes-Cooper scaling variable ``s``):
 
-    @property
-    def num_eq_constraints(self) -> int:
-        """No equality constraints in the feasibility problem."""
-        return 0
+       f1ᵢ(x) = wlᵢs − wᵢ ≤ 0, i = 1, ..., n (lower-bound block)
+       f2ᵢ(x) = wᵢ − wuᵢs ≤ 0, i = 1, ..., n (upper-bound block)
 
-    @property
-    def num_ineq_constraints(self) -> int:
-        """No inequality constraints in the feasibility problem."""
-        return 0
+    laid out as ``[lower-block, upper-block]``. These reformulate ``wlᵢ ≤ wᵢ/s ≤ wuᵢ``
+    under the Charnes-Cooper transformation of ``min (cᵀw)/(yᵀw)``.
 
-    def solve(
-        self,
-        x0: npt.NDArray[np.float64] | None = None,
-        fully_optimize: bool = False,
-        **kwargs: Any,
-    ) -> OptimizationResult:
-        """Return the pre-computed feasible point."""
-        return OptimizationResult(solution=self._x0)
-
-
-class LinearFractionalProgramSolver(
-    EqualityConstrainedInteriorPointMethodSolver,
-    InteriorPointMethodSolver,
-):
-    r"""Solve a linear fractional program via its Charnes-Cooper LP reformulation.
-
-    Solves:
-        minimize    c^T [w; s]
-        subject to  y^T w = 1
-                    wl_i * s - w_i <= 0,  i = 1, ..., n
-                    w_i - wu_i * s <= 0,  i = 1, ..., n
-
-    This is the Charnes-Cooper transformation of the linear fractional program
-
-        minimize    (c^T w) / (y^T w)
-        subject to  wl_i <= w_i <= wu_i
-
-    where w are weights and wl, wu are the bounds from the sensitivity region.
-
-    The Hessian of the barrier objective has an arrow sparsity pattern (diagonal
-    upper-left block plus a single dense row/column), enabling O(n) Newton steps.
+    Each constraint is affine in ``x`` (``wl``, ``wu`` are data), so the layer carries
+    zero second-derivative curvature. Its barrier Hessian is NOT diagonal, however:
+    because every bound couples ``wᵢ`` to the shared scaling variable ``s``, the
+    Jacobian-outer term ``Gᵀ diag(1/c²)G`` has an arrow sparsity pattern -- a diagonal
+    block over the weights plus a dense border row/column for ``s``.
+    ``hessian_contribution`` therefore returns an ``ArrowSystem``, whose solve runs in
+    O(n). A generic low-rank form would Woodbury over ``2n`` rank-1 updates and lose the
+    structure, regressing the Newton step.
 
     Parameters
     ----------
-     c : (n,) array
-        Objective vector for the weight variables. The scaling variable s has
-        coefficient zero.
-     y : (n,) array
-        Denominator outcomes; defines the equality constraint y^T w = 1.
      wl, wu : (n,) array
         Lower and upper bounds on the original weights from the sensitivity region.
-     settings : OptimizationSettings, optional
-        Optimization settings.
-
-    Attributes
-    ----------
-     x0 : (n+1,) array
-        A strictly feasible starting point, computed analytically in __init__.
+        Pairs with ``wuᵢ − wlᵢ < 1e-10`` (degenerate; occurs when a weight is pinned to
+        1.0) are widened symmetrically by ``1e-6`` so the log-barrier has an interior;
+        the feasible band for ``wᵢ/s`` is then at most ``2e-6`` wide, so the optimum is
+        unaffected to within tolerance.
 
     Notes
     -----
-    Hessian structure (barrier only; the objective is linear so its Hessian is zero):
+    Barrier Hessian, with the slacks ``s_loᵢ = wᵢ − wlᵢs + shift`` and ``s_upᵢ = wuᵢs −
+    wᵢ + shift`` and per-constraint weights ``lmbda = [lmbda_lo; lmbda_up]``:
 
-        H = diag(eta)  zeta
-            zeta^T     theta
+       g_loᵢ = lmbda_loᵢ/s_loᵢ, g_upᵢ = lmbda_upᵢ/s_upᵢ
+       etaᵢ = g_loᵢ + g_upᵢ
+       zetaᵢ = −wlᵢ × g_loᵢ − wuᵢ × g_upᵢ
+       theta = Σᵢ(wlᵢ² × g_loᵢ + wuᵢ² × g_upᵢ)
 
-    where, with alpha_i = w_i - wl_i * s and beta_i = wu_i * s - w_i:
+       H = diag(eta)  zeta
+           zetaᵀ      theta
 
-        eta_j   = 1/alpha_j^2 + 1/beta_j^2
-        zeta_j  = -wl_j/alpha_j^2 - wu_j/beta_j^2
-        theta   = sum_j [wl_j^2/alpha_j^2 + wu_j^2/beta_j^2]
+    On the central path ``lmbdaᵢ = −1/fᵢ = 1/sᵢ`` gives ``g_loᵢ = 1/s_loᵢ²``, recovering
+    the bespoke solver's barrier Hessian (eta, zeta, theta) exactly.
 
     """
 
     def __init__(
         self,
-        c: npt.NDArray[np.float64],
-        y: npt.NDArray[np.float64],
         wl: npt.NDArray[np.float64],
         wu: npt.NDArray[np.float64],
-        settings: OptimizationSettings | None = None,
     ) -> None:
-        """Initialize solver and compute a strictly feasible starting point."""
-        self.c = np.asarray(c, dtype=float)
-        self.y = np.asarray(y, dtype=float)
-        self.wl = np.asarray(wl, dtype=float)
-        self.wu = np.asarray(wu, dtype=float)
+        """Store the (degeneracy-widened) sensitivity bounds.
 
-        n = len(self.c)
-        # A x = b: [y^T, 0] @ [w; s] = 1
-        self._A: npt.NDArray[np.float64] = np.append(self.y, 0.0).reshape(1, n + 1)
-        self._b: npt.NDArray[np.float64] = np.array([1.0])
+        Raises
+        ------
+         ValueError
+            If ``wl`` and ``wu`` are not 1-D arrays of equal length.
 
-        # Feasible starting point: w0 = midpoint of bounds with a small inward push,
-        # s0 chosen to satisfy y^T w = 1.  The nudge ensures strict feasibility even
-        # when wl_i == wu_i (degenerate sensitivity region).
-        w0 = (self.wl + self.wu) / 2.0 + 1e-8 * (self.wu - self.wl + 1e-10)
-        sum0 = float(self.y @ w0)
-        self.x0: npt.NDArray[np.float64] = np.append(w0 / sum0, 1.0 / sum0)
+        """
+        wl_arr = np.asarray(wl, dtype=np.float64).copy()
+        wu_arr = np.asarray(wu, dtype=np.float64).copy()
+        if wl_arr.ndim != 1 or wl_arr.shape != wu_arr.shape:
+            raise ValueError(
+                "wl and wu must be 1-D arrays of equal length; got "
+                f"{wl_arr.shape} and {wu_arr.shape}."
+            )
+        # Widen degenerate bounds (wl_i == wu_i, e.g. when weight_i == 1.0) so the
+        # log-barrier has an interior; the band for w_i/s is at most 2e-6 wide.
+        degenerate = (wu_arr - wl_arr) < 1e-10
+        if np.any(degenerate):
+            wl_arr[degenerate] -= 1e-6
+            wu_arr[degenerate] += 1e-6
+        self.wl: npt.NDArray[np.float64] = wl_arr
+        self.wu: npt.NDArray[np.float64] = wu_arr
+        self.n: int = len(wl_arr)
 
-        super().__init__(
-            phase1_solver=_PrecomputedFeasibility(self.x0),
-            settings=settings,
+    @property
+    def dimension(self) -> int:
+        """Homogenized decision-variable dimension ``M = n + 1`` (weights plus ``s``).
+
+        Returns
+        -------
+         dimension : int
+            Number of homogenized decision variables.
+
+        """
+        return self.n + 1
+
+    def num_constraints(self, M: int) -> int:
+        """Two bounds per weight: ``2 n`` (independent of ``M = n + 1``).
+
+        Parameters
+        ----------
+         M : int
+            Homogenized decision-variable dimension (unused; the count depends only on
+            ``n``).
+
+        Returns
+        -------
+         count : int
+            Number of inequality constraints.
+
+        """
+        return 2 * self.n
+
+    def constraints(
+        self,
+        w: npt.NDArray[np.float64],
+        shift: float = 0.0,
+    ) -> npt.NDArray[np.float64]:
+        """Evaluate the stacked bound constraints.
+
+        Parameters
+        ----------
+         w : (n+1,) ``npt.NDArray[np.float64]``
+            Homogenized variable ``[w; s]``.
+         shift : float, optional
+            Barrier shift. Defaults to 0.0.
+
+        Returns
+        -------
+         values : (2n,) ``npt.NDArray[np.float64]``
+            ``[wl*s − w, w − wu*s]`` minus ``shift``.
+
+        """
+        weights, s = w[:-1], w[-1]
+        return np.concatenate(
+            [self.wl * s - weights - shift, weights - self.wu * s - shift]
         )
 
-    # ------------------------------------------------------------------
-    # Equality constraint properties
+    def grad_constraints(
+        self,
+        w: npt.NDArray[np.float64],
+    ) -> npt.NDArray[np.float64]:
+        """Evaluate the constant constraint Jacobian.
 
-    @property
-    def A(self) -> npt.NDArray[np.float64]:  # noqa: N802
-        """Equality constraint matrix [y^T, 0], shape (1, n+1)."""
-        return self._A
+        Parameters
+        ----------
+         w : (n+1,) ``npt.NDArray[np.float64]``
+            Homogenized variable ``[w; s]`` (unused; the Jacobian is constant).
 
-    @property
-    def b(self) -> npt.NDArray[np.float64]:
-        """Equality constraint right-hand side [1]."""
-        return self._b
+        Returns
+        -------
+         jacobian : (2n, n+1) ``npt.NDArray[np.float64]``
+            ``[[-I, wl], [I, -wu]]``.
 
-    # ------------------------------------------------------------------
-    # Constraint counts
-
-    @property
-    def num_eq_constraints(self) -> int:
-        """Number of equality constraints."""
-        return 1
-
-    @property
-    def num_ineq_constraints(self) -> int:
-        """Number of inequality constraints (2n: lower and upper bounds)."""
-        return 2 * len(self.c)
-
-    # ------------------------------------------------------------------
-    # Objective
-
-    def evaluate_objective(self, x: npt.NDArray[np.float64]) -> float:
-        """Evaluate c^T w (the s variable has zero objective coefficient)."""
-        return float(self.c @ x[:-1])
-
-    def gradient(self, x: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
-        """Gradient of objective: [c; 0]."""
-        return np.append(self.c, 0.0)
-
-    # ------------------------------------------------------------------
-    # Inequality constraints
-
-    def constraints(self, x: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
-        r"""Evaluate all inequality constraints fi(x) <= 0.
-
-        Returns a (2n,) array:
-            f1_i = wl_i * s - w_i  (lower-bound constraint)
-            f2_i = w_i - wu_i * s  (upper-bound constraint)
         """
-        w, s = x[:-1], x[-1]
-        return np.concatenate([self.wl * s - w, w - self.wu * s])
-
-    def grad_constraints(self, x: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
-        """Jacobian of constraints, shape (2n, n+1).
-
-        The Jacobian is constant (does not depend on x):
-            d(f1_i)/d(w_j) = -delta_{ij},  d(f1_i)/d(s) = wl_i
-            d(f2_i)/d(w_j) = +delta_{ij},  d(f2_i)/d(s) = -wu_i
-        """
-        n = len(self.c)
+        n = self.n
         top = np.hstack([-np.eye(n), self.wl.reshape(-1, 1)])
         bottom = np.hstack([np.eye(n), -self.wu.reshape(-1, 1)])
         return np.vstack([top, bottom])
 
     def grad_constraints_multiply(
         self,
-        x: npt.NDArray[np.float64],
+        w: npt.NDArray[np.float64],
         v: npt.NDArray[np.float64],
     ) -> npt.NDArray[np.float64]:
-        r"""Compute J @ v without forming the full (2n, n+1) Jacobian.
+        """Compute ``Gv`` without forming ``G``.
 
-        For v = [v_w; v_s] where v_w has length n and v_s is a scalar:
-            (J v)[:n] = -v_w + v_s * wl
-            (J v)[n:] =  v_w - v_s * wu
+        Parameters
+        ----------
+         w : (n+1,) ``npt.NDArray[np.float64]``
+            Homogenized variable ``[w; s]`` (unused).
+         v : (n+1,) ``npt.NDArray[np.float64]``
+            Vector ``[v_w; v_s]`` to multiply.
+
+        Returns
+        -------
+         product : (2n,) ``npt.NDArray[np.float64]``
+            Jacobian-vector product.
+
         """
         v_w, v_s = v[:-1], v[-1]
         return np.concatenate([-v_w + v_s * self.wl, v_w - v_s * self.wu])
 
     def grad_constraints_transpose_multiply(
         self,
-        x: npt.NDArray[np.float64],
-        v: npt.NDArray[np.float64],
+        w: npt.NDArray[np.float64],
+        u: npt.NDArray[np.float64],
     ) -> npt.NDArray[np.float64]:
-        r"""Compute J^T @ v without forming the full (2n, n+1) Jacobian.
+        """Compute ``Gᵀu`` without forming ``G``.
 
-        For v = [v1; v2] (each of length n):
-            (J^T v)[:n] = -v1 + v2
-            (J^T v)[n]  = wl^T v1 - wu^T v2
+        Parameters
+        ----------
+         w : (n+1,) ``npt.NDArray[np.float64]``
+            Homogenized variable ``[w; s]`` (unused).
+         u : (2n,) ``npt.NDArray[np.float64]``
+            Vector ``[u_lo; u_up]`` to multiply.
+
+        Returns
+        -------
+         product : (n+1,) ``npt.NDArray[np.float64]``
+            Transposed-Jacobian-vector product.
+
         """
-        n = len(self.c)
-        v1, v2 = v[:n], v[n:]
-        return np.append(-v1 + v2, float(self.wl @ v1 - self.wu @ v2))
+        n = self.n
+        u_lo, u_up = u[:n], u[n:]
+        return np.append(-u_lo + u_up, float(self.wl @ u_lo - self.wu @ u_up))
 
-    # ------------------------------------------------------------------
-    # Hessian
-
-    def _hessian_components(self, x: npt.NDArray[np.float64]) -> tuple[
-        npt.NDArray[np.float64],
-        npt.NDArray[np.float64],
-        float,
-    ]:
-        """Compute arrow-sparsity-pattern Hessian components eta, zeta, theta."""
-        w, s = x[:-1], x[-1]
-        alpha = w - self.wl * s  # > 0 at feasible points
-        beta = self.wu * s - w  # > 0 at feasible points
-        inv_alpha2 = 1.0 / (alpha * alpha)
-        inv_beta2 = 1.0 / (beta * beta)
-        eta = inv_alpha2 + inv_beta2
-        zeta = -self.wl * inv_alpha2 - self.wu * inv_beta2
-        theta = float(
-            np.sum(self.wl * self.wl * inv_alpha2 + self.wu * self.wu * inv_beta2)
-        )
-        return eta, zeta, theta
-
-    def hessian_multiply(
+    def hessian_contribution(
         self,
-        x: npt.NDArray[np.float64],
-        t: float,
-        y_vec: npt.NDArray[np.float64],
-    ) -> npt.NDArray[np.float64]:
-        """Compute H_ft @ y_vec using the arrow sparsity pattern.
+        w: npt.NDArray[np.float64],
+        lmbda: npt.NDArray[np.float64] | None = None,
+        shift: float = 0.0,
+    ) -> MatrixSystem:
+        """Return weighted barrier curvature as an ``ArrowSystem`` (see class Notes).
 
-        The objective is linear so H_f0 = 0 and H_ft = H_barrier.
+        ``lmbda`` defaults to ``None`` only for signature compatibility with
+        ``Objective.hessian_contribution``; it is required here.
+
+        Parameters
+        ----------
+         w : (n+1,) ``npt.NDArray[np.float64]``
+            Homogenized variable ``[w; s]``.
+         lmbda : (2n,) ``npt.NDArray[np.float64]``, optional
+            Per-constraint weights. Required here despite the default.
+         shift : float, optional
+            Barrier shift. Defaults to 0.0.
+
+        Returns
+        -------
+         system : ``MatrixSystem``
+            Arrow-structured barrier Hessian contribution.
+
+        Raises
+        ------
+         ValueError
+            If ``lmbda`` is None.
+
         """
-        eta, zeta, theta = self._hessian_components(x)
-        return multiply_arrow_sparsity_pattern(y_vec, eta, zeta, theta)
+        if lmbda is None:
+            raise ValueError(
+                "CharnesCooperBoundsLayer.hessian_contribution requires `lmbda`."
+            )
+        n = self.n
+        weights, s = w[:-1], w[-1]
+        s_lo = weights - self.wl * s + shift  # = alpha + shift > 0, shape (n,)
+        s_up = self.wu * s - weights + shift  # = beta  + shift > 0, shape (n,)
+        g_lo = lmbda[:n] / s_lo
+        g_up = lmbda[n:] / s_up
+        eta = g_lo + g_up  # diagonal block, shape (n,)
+        zeta = -self.wl * g_lo - self.wu * g_up  # border to s, shape (n,)
+        theta = float(np.sum(self.wl * self.wl * g_lo + self.wu * self.wu * g_up))
+        return ArrowSystem(DiagonalSystem(eta), zeta, theta)
 
-    # ------------------------------------------------------------------
-    # Newton step
-
-    def calculate_newton_step(
+    def hessian_curvature(
         self,
-        x: npt.NDArray[np.float64],
-        t: float,
-    ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
-        """Solve the KKT system for the Newton step.
-
-        Exploits the arrow sparsity pattern of the Hessian to solve
-        the (n+2) x (n+2) KKT system in O(n) time.
-        """
-        eta, zeta, theta = self._hessian_components(x)
-
-        def hessian_solve(b: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
-            return solve_arrow_sparsity_pattern(b, eta, zeta, theta)
-
-        return solve_kkt_system(
-            A=self._A,
-            g=-self.gradient_barrier(x, t),
-            hessian_solve=hessian_solve,
-        )
-
-    # ------------------------------------------------------------------
-    # Dual
-
-    def evaluate_dual(
-        self,
+        w: npt.NDArray[np.float64],
         lmbda: npt.NDArray[np.float64],
-        nu: npt.NDArray[np.float64],
-        x_star: npt.NDArray[np.float64],
-    ) -> float:
-        r"""Evaluate the dual function g(lmbda, nu).
+    ) -> MatrixSystem:
+        """Return zero curvature: every constraint is affine in ``[w; s]``.
 
-        The Lagrangian is linear in (w, s):
+        Parameters
+        ----------
+         w : (n+1,) ``npt.NDArray[np.float64]``
+            Homogenized variable ``[w; s]`` (unused).
+         lmbda : (2n,) ``npt.NDArray[np.float64]``
+            Per-constraint weights (unused).
 
-            L = c^T w + lmbda1^T(wl*s - w) + lmbda2^T(w - wu*s) + nu*(y^T w - 1)
+        Returns
+        -------
+         system : ``MatrixSystem``
+            Zero system of dimension ``len(w)``.
 
-        Collecting coefficients:
-            coeff_w_j = c_j - lmbda1_j + lmbda2_j + nu * y_j
-            coeff_s   = wl^T lmbda1 - wu^T lmbda2
-
-        The infimum of a linear function over all (w, s) is -inf unless
-        both coefficient vectors are zero; when stationarity holds the dual
-        collapses to the constant term g = -nu.
         """
-        n = len(self.c)
-        lmbda1, lmbda2 = lmbda[:n], lmbda[n:]
-        nu_scalar = float(nu[0])
+        return ZeroSystem(len(w))
 
-        coeff_w = self.c - lmbda1 + lmbda2 + nu_scalar * self.y
-        coeff_s = float(self.wl @ lmbda1 - self.wu @ lmbda2)
-
-        tol = 1e-6
-        if np.max(np.abs(coeff_w)) > tol or abs(coeff_s) > tol:
-            return -np.inf
-
-        return -nu_scalar
-
-    # ------------------------------------------------------------------
-    # Backtracking line search
-
-    def btls_keep_feasible(
+    def btls_max_step(
         self,
-        x: npt.NDArray[np.float64],
-        delta_x: npt.NDArray[np.float64],
+        w: npt.NDArray[np.float64],
+        dw: npt.NDArray[np.float64],
+        shift: float = 0.0,
+        ds: float = 0.0,
+        line_search: LineSearchSettings | None = None,
     ) -> float:
-        """Compute the largest step such that x + s*delta_x is strictly feasible.
+        """Take the largest step keeping the shifted constraints negative.
 
-        Feasibility requires alpha_i(x + s*dx) > 0 and beta_i(x + s*dx) > 0:
-            alpha_i + s * d_alpha_i > 0,  where d_alpha_i = dw_i - wl_i * ds
-            beta_i  + s * d_beta_i  > 0,  where d_beta_i  = wu_i * ds - dw_i
+        Closed-form; ``line_search`` is ignored. ``ds_var = dw[-1]`` is the motion of
+        the scaling variable ``s``, while ``ds`` is the Phase I slack motion. The lower
+        constraint can bite when ``wlᵢ ds_var − dwᵢ − ds > 0``; the upper when ``dwᵢ −
+        wuᵢ ds_var − ds > 0``.
+
+        Parameters
+        ----------
+         w : (n+1,) ``npt.NDArray[np.float64]``
+            Current homogenized variable ``[w; s]``.
+         dw : (n+1,) ``npt.NDArray[np.float64]``
+            Search direction.
+         shift : float, optional
+            Barrier shift. Defaults to 0.0.
+         ds : float, optional
+            Phase I slack motion. Defaults to 0.0.
+         line_search : ``LineSearchSettings``, optional
+            Ignored; present for signature compatibility. Defaults to None.
+
+        Returns
+        -------
+         alpha : float
+            Largest feasible step length (possibly infinite).
+
         """
-        w, s = x[:-1], x[-1]
-        dw, ds = delta_x[:-1], delta_x[-1]
+        weights, s = w[:-1], w[-1]
+        dw_w, dw_s = dw[:-1], dw[-1]
+        alpha = np.inf
 
-        alpha = w - self.wl * s
-        beta = self.wu * s - w
+        s_lo = weights - self.wl * s + shift  # current -c_lo > 0
+        coeff_lo = self.wl * dw_s - dw_w - ds
+        mask_lo = coeff_lo > 0
+        if np.any(mask_lo):
+            alpha = min(alpha, float(np.min(s_lo[mask_lo] / coeff_lo[mask_lo])))
 
-        d_alpha = dw - self.wl * ds
-        d_beta = self.wu * ds - dw
+        s_up = self.wu * s - weights + shift  # current -c_up > 0
+        coeff_up = dw_w - self.wu * dw_s - ds
+        mask_up = coeff_up > 0
+        if np.any(mask_up):
+            alpha = min(alpha, float(np.min(s_up[mask_up] / coeff_up[mask_up])))
 
-        max_step = np.inf
-        mask_alpha = d_alpha < 0
-        if np.any(mask_alpha):
-            max_step = min(
-                max_step, float(np.min(alpha[mask_alpha] / (-d_alpha[mask_alpha])))
-            )
+        return alpha
 
-        mask_beta = d_beta < 0
-        if np.any(mask_beta):
-            max_step = min(
-                max_step, float(np.min(beta[mask_beta] / (-d_beta[mask_beta])))
-            )
 
-        return max_step
+def solve_bounded_linear_fractional_program(
+    c: npt.NDArray[np.float64],
+    y: npt.NDArray[np.float64],
+    wl: npt.NDArray[np.float64],
+    wu: npt.NDArray[np.float64],
+    settings: OptimizationSettings | None = None,
+) -> SolveResult:
+    """Solve the sensitivity linear fractional program via a Cvxium Problem.
+
+    Minimizes the linear fractional objective
+
+       (cᵀw)/(yᵀw) subject to wlᵢ ≤ wᵢ ≤ wuᵢ
+
+    through its Charnes-Cooper transform into the linear program
+
+       minimize cᵀ[w; s] subject to yᵀw = 1, wlᵢs − wᵢ ≤ 0, wᵢ − wuᵢs ≤ 0,
+
+    assembled as a structured ``Problem`` -- a ``LinearObjective`` over ``[w; s]``, a
+    ``CharnesCooperBoundsLayer`` for the ``2n`` bounds, and an
+    ``EqualityConstraintLayer`` for ``yᵀw = 1`` -- and solved with ``BarrierSolver``.
+    The bound layer emits an ``ArrowSystem`` Hessian, so the Newton step stays O(n).
+
+    Parameters
+    ----------
+     c : (n,) array
+        Numerator outcomes. Pass ``-c`` to maximize (the supremum bound).
+     y : (n,) array
+        Denominator outcomes; defines the equality constraint ``yᵀw = 1``.
+     wl, wu : (n,) array
+        Lower and upper bounds on the weights from the sensitivity region.
+     settings : OptimizationSettings, optional
+        Optimization settings.
+
+    Returns
+    -------
+     result : SolveResult
+        ``result.objective_value`` is the optimal fractional value (at the optimum ``yᵀw
+        = 1``, so ``cᵀw = (cᵀw)/(yᵀw)``); ``result.solution`` is the optimal ``[w; s]``.
+
+    Raises
+    ------
+     ValueError
+        If the denominator outcomes have non-positive dot product with the midpoint of
+        the sensitivity bounds.
+
+    """
+    c = np.asarray(c, dtype=np.float64)
+    y = np.asarray(y, dtype=np.float64)
+    n = len(c)
+
+    layer = CharnesCooperBoundsLayer(wl, wu)
+    problem = Problem.minimize(LinearObjective(np.append(c, 0.0))).subject_to(
+        eq=EqualityConstraintLayer(
+            A=np.append(y, 0.0).reshape(1, n + 1),  # [y^T, 0] @ [w; s] = 1
+            b=np.array([1.0]),
+        ),
+        ineq=[layer],
+    )
+
+    # Analytic strictly-feasible start: the midpoint of the (widened) bounds, scaled
+    # so y^T w = 1. Using the layer's widened bounds keeps the start strictly interior.
+    w_mid = (layer.wl + layer.wu) / 2.0
+    denom = float(y @ w_mid)
+    if denom <= 0:
+        raise ValueError(
+            "Denominator outcomes y must have positive dot product with the "
+            "midpoint of the sensitivity bounds."
+        )
+    x0 = np.append(w_mid / denom, 1.0 / denom)
+
+    return problem.solve(BarrierSolver(settings=settings), x0=x0)

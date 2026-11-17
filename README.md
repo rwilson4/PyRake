@@ -297,6 +297,11 @@ estimator.plot_sensitivity()
 
 ```
 
+[USAGE.md](USAGE.md) is a fuller guide, covering joint calibration of
+treatment and control groups, treatment effects, ratio estimators,
+and linear combinations of estimators. It is also available at
+runtime via `pyrake.usage()`.
+
 ## Development
 I used ChatGPT to write the original commit (it did a pretty good
 job!)
