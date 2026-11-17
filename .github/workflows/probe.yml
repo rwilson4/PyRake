@@ -37,3 +37,20 @@ jobs:
         do
           uv run python scripts/probe_weak_duality.py "$t"
         done
+    - name: Primal-dual probe
+      env:
+        CVXIUM_PERF_BASELINE: ""
+        PYTHONPATH: "."
+        MPLBACKEND: Agg
+      run: |
+        mkdir -p pd_probe
+        for t in \
+          test.calibration.test_frontier.ExternalValidityVarianceFrontierTest.test_trace_returns_a_monotone_frontier \
+          test.calibration.test_knee_fallback.KneeFallbackTest.test_knee_attaches_the_frontier
+        do
+          uv run python scripts/probe_primal_dual.py "$t" "pd_probe/${t##*.}.json"
+        done
+    - uses: actions/upload-artifact@v4
+      with:
+        name: pd-probe
+        path: pd_probe/
