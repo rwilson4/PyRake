@@ -208,3 +208,7 @@ module = "test.*"
 disallow_untyped_defs = false
 disallow_incomplete_defs = false
 check_untyped_defs = false
+
+# Diagnostic only: test the fix for rwilson4/Cvxium#21 before it is released.
+[tool.uv.sources]
+cvxium = { git = "https://github.com/rwilson4/Cvxium", rev = "59e9f840586b1b368ac52e5fe3921065921d8eb6" }

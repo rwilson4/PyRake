@@ -149,16 +149,12 @@ wheels = [
 [[package]]
 name = "cvxium"
 version = "1.0.0"
-source = { registry = "https://pypi.org/simple" }
+source = { git = "https://github.com/rwilson4/Cvxium?rev=59e9f840586b1b368ac52e5fe3921065921d8eb6#59e9f840586b1b368ac52e5fe3921065921d8eb6" }
 dependencies = [
     { name = "matplotlib" },
     { name = "numpy" },
     { name = "scipy" },
     { name = "typing-extensions" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/55/9a/5e1d3754010e1d07cabbb567602678a2261d361ea7e5f9d3e891d624e3a5/cvxium-1.0.0.tar.gz", hash = "sha256:e591e33f4698592f60eabe2749dec91296f3e8b9e8643753fa7e228e39073484", size = 376449, upload-time = "2026-11-08T19:06:53.544Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/a2/d8/87b176f6e7543b9a447ec68eef4429aab2106e2d56b786a07d0e608002ac/cvxium-1.0.0-py3-none-any.whl", hash = "sha256:4bfa380855b680eaa2de9eafdf1fa8f4ef985fa41a218a11c495168a5ccaabde", size = 406028, upload-time = "2026-11-08T19:06:51.632Z" },
 ]
 
 [[package]]
@@ -851,7 +847,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "cvxium", specifier = ">=1.0.0,<2" },
+    { name = "cvxium", git = "https://github.com/rwilson4/Cvxium?rev=59e9f840586b1b368ac52e5fe3921065921d8eb6" },
     { name = "matplotlib", specifier = ">=3.10.1,<4" },
     { name = "numpy", specifier = ">=2.2.5,<3" },
     { name = "pandas", specifier = ">=2.3.1,<3" },

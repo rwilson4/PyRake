@@ -13,8 +13,8 @@
   "test.calibration.test_convergence.FullStepsPastQuadraticConvergenceTest.test_an_infeasible_calibration_also_takes_full_steps": [
     2,
     7,
-    55,
-    66
+    57,
+    65
   ],
   "test.calibration.test_convergence.NewtonStepBudgetTest.test_a_feasible_calibration_stays_within_budget": [
     2,
@@ -25,8 +25,8 @@
   "test.calibration.test_convergence.NewtonStepBudgetTest.test_an_infeasible_calibration_stays_within_budget": [
     2,
     7,
-    55,
-    66
+    57,
+    65
   ],
   "test.calibration.test_frontier.EfficientFrontierTest.test_ipm_default_x0_clamped_to_max_weight": [
     57
@@ -302,7 +302,7 @@
   ],
   "test.calibration.test_frontier.FromCalibratorTest.test_both_engines_trace_the_same_frontier": {
     "solves": 22,
-    "total": 851,
+    "total": 840,
     "max": 86
   },
   "test.calibration.test_frontier.KneeSpaceIsRememberedTest.test_an_explicit_knee_space_still_wins": [
@@ -675,8 +675,8 @@
   ],
   "test.calibration.test_frontier_seam.PastTheSeamTest.test_a_band_below_the_floor_is_not_a_frontier_point": {
     "solves": 64,
-    "total": 3282,
-    "max": 232
+    "total": 3092,
+    "max": 85
   },
   "test.calibration.test_frontier_seam.PastTheSeamTest.test_a_band_past_the_seam_is_relabelled_with_its_relaxed_rows": [
     2,
@@ -715,43 +715,43 @@
   ],
   "test.calibration.test_knee_fallback.KneeFallbackTest.test_a_failed_rebuild_still_restores_the_band": {
     "solves": 46,
-    "total": 1412,
+    "total": 1409,
     "max": 61
   },
   "test.calibration.test_knee_fallback.KneeFallbackTest.test_a_failed_sweep_degrades_to_the_requested_band": {
     "solves": 21,
-    "total": 833,
-    "max": 60
+    "total": 845,
+    "max": 62
   },
   "test.calibration.test_knee_fallback.KneeFallbackTest.test_a_failed_sweep_still_restores_the_band": {
     "solves": 21,
-    "total": 833,
-    "max": 60
+    "total": 845,
+    "max": 62
   },
   "test.calibration.test_knee_fallback.KneeFallbackTest.test_a_joint_infeasibility_has_nothing_past_the_seam": {
     "solves": 37,
-    "total": 1302,
+    "total": 1299,
     "max": 61
   },
   "test.calibration.test_knee_fallback.KneeFallbackTest.test_a_newton_failure_degrades_rather_than_escaping": {
     "solves": 21,
-    "total": 833,
-    "max": 60
+    "total": 845,
+    "max": 62
   },
   "test.calibration.test_knee_fallback.KneeFallbackTest.test_an_unattainable_band_is_reported_as_such": {
     "solves": 50,
-    "total": 1453,
+    "total": 1450,
     "max": 61
   },
   "test.calibration.test_knee_fallback.KneeFallbackTest.test_knee_attaches_the_frontier": {
     "solves": 50,
-    "total": 1453,
+    "total": 1450,
     "max": 61
   },
   "test.calibration.test_knee_fallback.KneeFallbackTest.test_knee_buys_effective_sample_size_when_1_5_is_unreachable": {
     "solves": 71,
-    "total": 2286,
-    "max": 61
+    "total": 2295,
+    "max": 62
   },
   "test.calibration.test_knee_fallback.KneeFallbackTest.test_knee_never_tightens_past_the_conventional_band": {
     "solves": 24,
@@ -760,17 +760,17 @@
   },
   "test.calibration.test_knee_fallback.KneeFallbackTest.test_no_knee_still_asks_for_an_attainable_band": {
     "solves": 79,
-    "total": 2646,
+    "total": 2640,
     "max": 61
   },
   "test.calibration.test_knee_fallback.KneeFallbackTest.test_plain_fallback_traces_nothing": {
     "solves": 21,
-    "total": 833,
-    "max": 60
+    "total": 845,
+    "max": 62
   },
   "test.calibration.test_knee_fallback.KneeFallbackTest.test_the_calibrator_keeps_its_own_band": {
     "solves": 50,
-    "total": 1453,
+    "total": 1450,
     "max": 61
   },
   "test.calibration.test_knee_fallback.KneeFallbackTest.test_the_conventional_band_keeps_the_cascades_own_label": [
@@ -811,14 +811,14 @@
   ],
   "test.calibration.test_knee_fallback.KneeFallbackTest.test_the_requested_space_reaches_the_root_find": {
     "solves": 71,
-    "total": 2585,
+    "total": 2579,
     "max": 61
   },
   "test.calibration.test_logging.CascadeNarrationTest.test_an_infeasible_stage_says_so_rather_than_going_quiet": [
     2,
     7,
-    55,
-    66
+    57,
+    65
   ],
   "test.calibration.test_logging.CascadeNarrationTest.test_cvxium_lands_in_the_same_file_under_its_stage": [
     2,
@@ -871,7 +871,7 @@
     "per_solve": [
       2,
       0,
-      60
+      52
     ],
     "tolerance": 0.12
   },
@@ -909,13 +909,13 @@
   "test.calibration.test_rake.JointCalibratorFallbackTest.test_sad": {
     "per_solve": [
       2,
-      49
+      47
     ],
     "tolerance": 0.15
   },
   "test.calibration.test_rake.JointCalibratorFallbackTest.test_sad_drives_internal_imbalance_to_minimum": [
     2,
-    48
+    39
   ],
   "test.calibration.test_rake.JointCalibratorMaxWeightTest.test_an_uncapped_block_solves_as_if_its_cap_were_slack": [
     2,
@@ -941,8 +941,8 @@
   ],
   "test.calibration.test_rake.JointCalibratorRelaxationTest.test_a_band_below_the_floor_is_widened_to_it": {
     "solves": 22,
-    "total": 1303,
-    "max": 89
+    "total": 1308,
+    "max": 87
   },
   "test.calibration.test_rake.JointCalibratorRelaxationTest.test_a_band_too_tight_for_the_attainable_rows_is_widened": [
     0,
@@ -958,7 +958,7 @@
     59,
     65,
     58,
-    59,
+    58,
     64,
     59,
     66,
@@ -967,7 +967,7 @@
   "test.calibration.test_rake.JointCalibratorRelaxationTest.test_empty_level_relaxes_only_its_own_rows": [
     2,
     0,
-    78,
+    75,
     87
   ],
   "test.calibration.test_rake.JointCalibratorRelaxationTest.test_feasible_band_is_reported_as_requested": [
@@ -983,14 +983,14 @@
   "test.calibration.test_rake.JointCalibratorRelaxationTest.test_relaxation_continues_to_the_design_effect": [
     2,
     0,
-    78,
+    75,
     0,
-    87
+    88
   ],
   "test.calibration.test_rake.JointCalibratorRelaxationTest.test_the_distance_chooses_how_tied_rows_share_the_excess": [
     2,
-    40,
-    21
+    41,
+    31
   ],
   "test.calibration.test_rake.RakeCrossEngineTest.test_ipm_default_x0_applies_and_clamps_to_max_weight": [
     61
@@ -1084,7 +1084,7 @@
   ],
   "test.calibration.test_rake.RakeSolveTest.test_solve_huber_2_M50_p5_phi2_0": [
     55,
-    12
+    13
   ],
   "test.calibration.test_rake.RakeSolveTest.test_solve_huber_3_M500_p100_phi2_5": [
     97,
