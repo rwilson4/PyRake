@@ -20,7 +20,7 @@ from typing import Any
 
 import numpy as np
 from cvxium import BarrierSolver, PrimalDualSolver
-from cvxium.problems.result import PrimalDualDiagnostics
+from cvxium.problems.result import BarrierDiagnostics, PrimalDualDiagnostics
 
 records: list[dict[str, Any]] = []
 
@@ -52,6 +52,8 @@ def _outcome(result: Any) -> dict[str, Any]:
         except Exception:  # noqa: BLE001 - absent on feasibility results
             out[name] = None
     diagnostics = result.diagnostics
+    if isinstance(diagnostics, BarrierDiagnostics):
+        out["inner_nits"] = list(diagnostics.inner_nits)
     if isinstance(diagnostics, PrimalDualDiagnostics):
         out["gaps"] = _floats(diagnostics.surrogate_gaps)
         out["r_pri"] = _floats(diagnostics.primal_residual_norms)

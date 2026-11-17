@@ -715,43 +715,43 @@
   ],
   "test.calibration.test_knee_fallback.KneeFallbackTest.test_a_failed_rebuild_still_restores_the_band": {
     "solves": 46,
-    "total": 2131,
-    "max": 803
+    "total": 1370,
+    "max": 70
   },
   "test.calibration.test_knee_fallback.KneeFallbackTest.test_a_failed_sweep_degrades_to_the_requested_band": {
     "solves": 21,
-    "total": 833,
-    "max": 62
+    "total": 830,
+    "max": 60
   },
   "test.calibration.test_knee_fallback.KneeFallbackTest.test_a_failed_sweep_still_restores_the_band": {
     "solves": 21,
-    "total": 833,
-    "max": 62
+    "total": 830,
+    "max": 60
   },
   "test.calibration.test_knee_fallback.KneeFallbackTest.test_a_joint_infeasibility_has_nothing_past_the_seam": {
     "solves": 37,
-    "total": 2022,
-    "max": 803
+    "total": 1261,
+    "max": 70
   },
   "test.calibration.test_knee_fallback.KneeFallbackTest.test_a_newton_failure_degrades_rather_than_escaping": {
     "solves": 21,
-    "total": 833,
-    "max": 62
+    "total": 830,
+    "max": 60
   },
   "test.calibration.test_knee_fallback.KneeFallbackTest.test_an_unattainable_band_is_reported_as_such": {
     "solves": 50,
-    "total": 2172,
-    "max": 803
+    "total": 1411,
+    "max": 70
   },
   "test.calibration.test_knee_fallback.KneeFallbackTest.test_knee_attaches_the_frontier": {
     "solves": 50,
-    "total": 2172,
-    "max": 803
+    "total": 1411,
+    "max": 70
   },
   "test.calibration.test_knee_fallback.KneeFallbackTest.test_knee_buys_effective_sample_size_when_1_5_is_unreachable": {
     "solves": 71,
-    "total": 3005,
-    "max": 803
+    "total": 2241,
+    "max": 70
   },
   "test.calibration.test_knee_fallback.KneeFallbackTest.test_knee_never_tightens_past_the_conventional_band": {
     "solves": 24,
@@ -760,18 +760,18 @@
   },
   "test.calibration.test_knee_fallback.KneeFallbackTest.test_no_knee_still_asks_for_an_attainable_band": {
     "solves": 79,
-    "total": 4085,
-    "max": 803
+    "total": 2563,
+    "max": 70
   },
   "test.calibration.test_knee_fallback.KneeFallbackTest.test_plain_fallback_traces_nothing": {
     "solves": 21,
-    "total": 833,
-    "max": 62
+    "total": 830,
+    "max": 60
   },
   "test.calibration.test_knee_fallback.KneeFallbackTest.test_the_calibrator_keeps_its_own_band": {
     "solves": 50,
-    "total": 2172,
-    "max": 803
+    "total": 1411,
+    "max": 70
   },
   "test.calibration.test_knee_fallback.KneeFallbackTest.test_the_conventional_band_keeps_the_cascades_own_label": [
     10,
@@ -811,8 +811,8 @@
   ],
   "test.calibration.test_knee_fallback.KneeFallbackTest.test_the_requested_space_reaches_the_root_find": {
     "solves": 71,
-    "total": 4022,
-    "max": 803
+    "total": 2500,
+    "max": 70
   },
   "test.calibration.test_logging.CascadeNarrationTest.test_an_infeasible_stage_says_so_rather_than_going_quiet": [
     2,

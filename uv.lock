@@ -149,7 +149,7 @@ wheels = [
 [[package]]
 name = "cvxium"
 version = "1.0.0"
-source = { git = "https://github.com/rwilson4/Cvxium?rev=b292c64ee9c3d22d27280d142bd3031f6ba9e127#b292c64ee9c3d22d27280d142bd3031f6ba9e127" }
+source = { git = "https://github.com/rwilson4/Cvxium?rev=3d4a35e137cc2ea16bab7683f0c0198cb6428381#3d4a35e137cc2ea16bab7683f0c0198cb6428381" }
 dependencies = [
     { name = "matplotlib" },
     { name = "numpy" },
@@ -847,7 +847,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "cvxium", git = "https://github.com/rwilson4/Cvxium?rev=b292c64ee9c3d22d27280d142bd3031f6ba9e127" },
+    { name = "cvxium", git = "https://github.com/rwilson4/Cvxium?rev=3d4a35e137cc2ea16bab7683f0c0198cb6428381" },
     { name = "matplotlib", specifier = ">=3.10.1,<4" },
     { name = "numpy", specifier = ">=2.2.5,<3" },
     { name = "pandas", specifier = ">=2.3.1,<3" },
