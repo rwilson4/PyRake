@@ -1,0 +1,39 @@
+name: Weak-duality probe
+
+# Diagnostic for the macOS/Linux iteration-count split; not meant to merge.
+on:
+  pull_request:
+    branches: [ master ]
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: astral-sh/setup-uv@v4
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    - run: uv sync
+    - name: CPU and BLAS
+      run: |
+        lscpu | grep -E "Model name|Flags" | cut -c1-200
+        uv run python -c "import numpy; numpy.show_config()"
+    - name: Probe
+      env:
+        CVXIUM_PERF_BASELINE: ""
+        PROBE_ALL: "1"
+        PYTHONPATH: "."
+        MPLBACKEND: Agg
+      run: |
+        for t in \
+          test.calibration.test_rake.JointCalibratorFallbackTest.test_ambivalent_external_only_minimizes_external \
+          test.calibration.test_rake.JointCalibratorFallbackTest.test_sad \
+          test.calibration.test_knee_fallback.KneeFallbackTest.test_plain_fallback_traces_nothing \
+          test.calibration.test_frontier.ExternalValidityVarianceFrontierTest.test_trace_returns_a_monotone_frontier
+        do
+          uv run python scripts/probe_weak_duality.py "$t"
+        done
