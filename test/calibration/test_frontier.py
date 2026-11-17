@@ -423,8 +423,11 @@ class ExternalValidityVarianceFrontierTest(unittest.TestCase):
             Z2=frontier.Z2,
             Z3=frontier.Z3,
             Z4=frontier.Z4,
-            nu1=frontier.Z1.mean(axis=0),
-            nu2=frontier.Z2.mean(axis=0),
+            # Computed exactly as ``diagnose`` computes the imbalance, so the band is
+            # met to the bit; ``mean`` sums in a different order than the BLAS
+            # matmul and leaves ~1e-16 on some platforms.
+            nu1=frontier.Z1.T @ np.ones(self.M1) / self.M1,
+            nu2=frontier.Z2.T @ np.ones(self.M2) / self.M2,
             min_weight1=frontier.min_weight1,
             min_weight2=frontier.min_weight2,
         )
