@@ -46,7 +46,9 @@ jobs:
         mkdir -p pd_probe
         for t in \
           test.calibration.test_frontier.ExternalValidityVarianceFrontierTest.test_trace_returns_a_monotone_frontier \
-          test.calibration.test_knee_fallback.KneeFallbackTest.test_knee_attaches_the_frontier
+          test.calibration.test_knee_fallback.KneeFallbackTest.test_knee_attaches_the_frontier \
+          test.calibration.test_rake.JointCalibratorFallbackTest.test_ambivalent \
+          test.calibration.test_rake.JointCalibratorFallbackTest.test_sad_drives_internal_imbalance_to_minimum
         do
           uv run python scripts/probe_primal_dual.py "$t" "pd_probe/${t##*.}.json"
         done
