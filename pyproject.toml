@@ -209,6 +209,6 @@ disallow_untyped_defs = false
 disallow_incomplete_defs = false
 check_untyped_defs = false
 
-# Diagnostic only: test the fix for rwilson4/Cvxium#21 before it is released.
+# Diagnostic only: test the fixes for rwilson4/Cvxium#21 and #22 before release.
 [tool.uv.sources]
-cvxium = { git = "https://github.com/rwilson4/Cvxium", rev = "59e9f840586b1b368ac52e5fe3921065921d8eb6" }
+cvxium = { git = "https://github.com/rwilson4/Cvxium", rev = "b292c64ee9c3d22d27280d142bd3031f6ba9e127" }
