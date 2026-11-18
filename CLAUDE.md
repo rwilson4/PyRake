@@ -73,20 +73,24 @@ explain why in the commit message. Counts below 8 iterations are not
 guarded, and known-bimodal tests are listed under the baseline's
 `__ignore__` key.
 
-The baseline is generated on macOS, and CI runs Ubuntu on varying
-hardware. Most counts agree everywhere. The exception is the family
-that runs the JointCalibrator cascade's linear-objective barrier solves:
-all of `test_knee_fallback.py` and `test_frontier_seam.py`, plus the
-`JointCalibratorFallbackTest` and `JointCalibratorRelaxationTest`
-classes. Those solves often stop when a high-t centering step fails on
-an ill-conditioned Newton system, and which step fails depends on the
-BLAS and CPU, so counts move by a centering step or so between machines
-([Cvxium #20](https://github.com/rwilson4/Cvxium/issues/20)). Their
-baseline entries carry `"tolerance": 0.4` rather than the default band;
-regeneration preserves it. Narrow the band once #20 is fixed. A new
-test that trips the guard on CI but not locally is probably another case
-of this: confirm that the counts differ by whole centering steps, then
-give its entry the same band rather than adding it to `__ignore__`.
+The baseline is generated on macOS (Accelerate); CI runs Ubuntu
+(OpenBLAS) on mixed hardware. The JointCalibrator cascade's
+linear-objective barrier solves often stop when a high-t centering step
+fails on an ill-conditioned Newton system
+([Cvxium #20](https://github.com/rwilson4/Cvxium/issues/20)), and which
+step fails depends on the BLAS's rounding. Two settings in `ci.yml`
+make Linux reproducible: `OPENBLAS_NUM_THREADS=1`, since multi-threaded
+reductions sum in a run-dependent order, and `OPENBLAS_CORETYPE=Haswell`,
+since OpenBLAS otherwise picks different kernels on different CPUs.
+With them, every runner computes identically.
+
+What remains is a fixed difference between Accelerate and OpenBLAS, of
+about one centering step in seven tests. Their baseline entries carry a
+`"tolerance"` sized to that difference (0.2 to 0.4); regeneration
+preserves it. Narrow or drop these once #20 is fixed. If a test starts
+tripping the guard on CI but not locally, reproduce it with those two
+variables set before widening anything. A band is the right fix only
+when the counts differ deterministically by whole centering steps.
 
 ### Test conventions
 

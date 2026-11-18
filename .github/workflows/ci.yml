@@ -8,6 +8,13 @@ on:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+  # Make solver iteration counts reproducible across GitHub's mixed runners, so
+  # the perf guard compares like with like. Multi-threaded OpenBLAS sums in a
+  # run-dependent order, and its per-CPU kernels (e.g. Zen 3 vs AVX-512) round
+  # differently; either moves an ill-conditioned barrier solve by a centering
+  # step. One thread and one kernel family fix both. See CLAUDE.md.
+  OPENBLAS_NUM_THREADS: '1'
+  OPENBLAS_CORETYPE: 'Haswell'
 
 jobs:
   test:
