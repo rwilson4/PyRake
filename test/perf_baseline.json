@@ -1,8 +1,18 @@
 {
   "__ignore__": [
     "test.calibration.test_frontier.ExternalValidityVarianceFrontierTest.test_effective_sample_size_matches_the_variance_objective",
+    "test.calibration.test_knee_fallback.KneeFallbackTest.test_a_failed_rebuild_still_restores_the_band",
+    "test.calibration.test_knee_fallback.KneeFallbackTest.test_a_joint_infeasibility_has_nothing_past_the_seam",
+    "test.calibration.test_knee_fallback.KneeFallbackTest.test_an_unattainable_band_is_reported_as_such",
+    "test.calibration.test_knee_fallback.KneeFallbackTest.test_knee_attaches_the_frontier",
+    "test.calibration.test_knee_fallback.KneeFallbackTest.test_knee_buys_effective_sample_size_when_1_5_is_unreachable",
+    "test.calibration.test_knee_fallback.KneeFallbackTest.test_no_knee_still_asks_for_an_attainable_band",
+    "test.calibration.test_knee_fallback.KneeFallbackTest.test_the_calibrator_keeps_its_own_band",
+    "test.calibration.test_knee_fallback.KneeFallbackTest.test_the_requested_space_reaches_the_root_find",
     "test.calibration.test_rake.InfeasibleExternalValidityTest.test_fallback_weights_are_a_real_weighting",
-    "test.calibration.test_rake.InfeasibleExternalValidityTest.test_just_feasible_problem_still_solves_0_pd"
+    "test.calibration.test_rake.InfeasibleExternalValidityTest.test_just_feasible_problem_still_solves_0_pd",
+    "test.calibration.test_rake.JointCalibratorFallbackTest.test_ambivalent",
+    "test.calibration.test_rake.JointCalibratorFallbackTest.test_sad_drives_internal_imbalance_to_minimum"
   ],
   "test.calibration.test_convergence.FullStepsPastQuadraticConvergenceTest.test_a_feasible_calibration_takes_full_steps_once_it_may": [
     2,
@@ -13,8 +23,8 @@
   "test.calibration.test_convergence.FullStepsPastQuadraticConvergenceTest.test_an_infeasible_calibration_also_takes_full_steps": [
     2,
     7,
-    55,
-    66
+    57,
+    65
   ],
   "test.calibration.test_convergence.NewtonStepBudgetTest.test_a_feasible_calibration_stays_within_budget": [
     2,
@@ -25,8 +35,8 @@
   "test.calibration.test_convergence.NewtonStepBudgetTest.test_an_infeasible_calibration_stays_within_budget": [
     2,
     7,
-    55,
-    66
+    57,
+    65
   ],
   "test.calibration.test_frontier.EfficientFrontierTest.test_ipm_default_x0_clamped_to_max_weight": [
     57
@@ -81,7 +91,7 @@
   },
   "test.calibration.test_frontier.ExternalValidityVarianceFrontierTest.test_an_explicit_label_still_wins_over_the_variance_space": [
     10,
-    64,
+    16,
     16,
     10,
     10,
@@ -93,12 +103,12 @@
     11
   ],
   "test.calibration.test_frontier.ExternalValidityVarianceFrontierTest.test_diagnose_flags_the_binding_covariates": [
-    21,
+    22,
     16
   ],
   "test.calibration.test_frontier.ExternalValidityVarianceFrontierTest.test_ess_remains_the_default_variance_space": [
     10,
-    64,
+    16,
     16,
     10,
     10,
@@ -110,17 +120,17 @@
     11
   ],
   "test.calibration.test_frontier.ExternalValidityVarianceFrontierTest.test_imbalance_corner_beats_the_variance_corner_on_imbalance": [
-    21,
+    22,
     16,
     10
   ],
   "test.calibration.test_frontier.ExternalValidityVarianceFrontierTest.test_imbalance_corner_drops_the_augmenting_phi": [
-    21,
+    22,
     16
   ],
   "test.calibration.test_frontier.ExternalValidityVarianceFrontierTest.test_min_variance_at_improves_a_dominated_corner": [
     10,
-    64,
+    16,
     16,
     10,
     10,
@@ -134,7 +144,7 @@
   ],
   "test.calibration.test_frontier.ExternalValidityVarianceFrontierTest.test_plot_draws_the_interpolant_not_the_polyline": [
     10,
-    64,
+    16,
     16,
     10,
     10,
@@ -147,7 +157,7 @@
   ],
   "test.calibration.test_frontier.ExternalValidityVarianceFrontierTest.test_plot_in_vif_space_is_labelled_for_the_design_effect": [
     10,
-    64,
+    16,
     16,
     10,
     10,
@@ -160,7 +170,7 @@
   ],
   "test.calibration.test_frontier.ExternalValidityVarianceFrontierTest.test_plot_is_labelled_in_ess_and_inverted": [
     10,
-    64,
+    16,
     16,
     10,
     10,
@@ -173,7 +183,7 @@
   ],
   "test.calibration.test_frontier.ExternalValidityVarianceFrontierTest.test_plot_maps_the_band_across_the_reciprocal": [
     10,
-    64,
+    16,
     16,
     10,
     10,
@@ -186,7 +196,7 @@
   ],
   "test.calibration.test_frontier.ExternalValidityVarianceFrontierTest.test_plot_rejects_a_variance_space_it_does_not_know": [
     10,
-    64,
+    16,
     16,
     10,
     10,
@@ -199,17 +209,17 @@
   ],
   "test.calibration.test_frontier.ExternalValidityVarianceFrontierTest.test_solve_with_bounds_respects_the_band": [
     10,
-    21,
+    22,
     10
   ],
   "test.calibration.test_frontier.ExternalValidityVarianceFrontierTest.test_the_refined_knee_does_not_depend_on_the_grid": {
     "solves": 38,
-    "total": 510,
-    "max": 64
+    "total": 414,
+    "max": 16
   },
   "test.calibration.test_frontier.ExternalValidityVarianceFrontierTest.test_the_refined_knee_is_a_real_solve": [
     10,
-    64,
+    16,
     16,
     10,
     10,
@@ -221,7 +231,7 @@
   ],
   "test.calibration.test_frontier.ExternalValidityVarianceFrontierTest.test_the_shaded_region_follows_the_drawn_curve": [
     10,
-    64,
+    16,
     16,
     10,
     10,
@@ -234,7 +244,7 @@
   ],
   "test.calibration.test_frontier.ExternalValidityVarianceFrontierTest.test_the_two_variance_spaces_are_reciprocal_mirrors": [
     10,
-    64,
+    16,
     16,
     10,
     10,
@@ -247,7 +257,7 @@
   ],
   "test.calibration.test_frontier.ExternalValidityVarianceFrontierTest.test_the_vif_panel_runs_the_other_way_across_the_page": [
     10,
-    64,
+    16,
     16,
     10,
     10,
@@ -260,7 +270,7 @@
   ],
   "test.calibration.test_frontier.ExternalValidityVarianceFrontierTest.test_tighter_balance_costs_effective_sample_size": [
     10,
-    64,
+    16,
     16,
     10,
     10,
@@ -273,7 +283,7 @@
   ],
   "test.calibration.test_frontier.ExternalValidityVarianceFrontierTest.test_trace_returns_a_monotone_frontier": [
     10,
-    64,
+    16,
     16,
     10,
     10,
@@ -286,7 +296,7 @@
   ],
   "test.calibration.test_frontier.ExternalValidityVarianceFrontierTest.test_trace_returns_the_labelled_results_class": [
     10,
-    64,
+    16,
     16,
     10,
     10,
@@ -302,12 +312,12 @@
   ],
   "test.calibration.test_frontier.FromCalibratorTest.test_both_engines_trace_the_same_frontier": {
     "solves": 22,
-    "total": 851,
+    "total": 799,
     "max": 86
   },
   "test.calibration.test_frontier.KneeSpaceIsRememberedTest.test_an_explicit_knee_space_still_wins": [
     10,
-    64,
+    16,
     16,
     10,
     10,
@@ -318,7 +328,7 @@
   ],
   "test.calibration.test_frontier.KneeSpaceIsRememberedTest.test_plot_annotates_the_space_the_frontier_remembers": [
     10,
-    64,
+    16,
     16,
     10,
     10,
@@ -327,7 +337,7 @@
     10,
     10,
     10,
-    64,
+    16,
     16,
     10,
     10,
@@ -338,7 +348,7 @@
   ],
   "test.calibration.test_frontier.KneeSpaceIsRememberedTest.test_se_is_the_default": [
     10,
-    64,
+    16,
     16,
     11,
     10,
@@ -349,7 +359,7 @@
   ],
   "test.calibration.test_frontier.KneeSpaceIsRememberedTest.test_trace_records_what_it_was_asked_for": [
     10,
-    64,
+    16,
     16,
     11,
     10,
@@ -359,16 +369,16 @@
     11
   ],
   "test.calibration.test_frontier.MinimumImbalanceCornerTest.test_a_corner_that_cannot_be_resolved_is_kept_but_said_out_loud": [
-    21
+    22
   ],
   "test.calibration.test_frontier.MinimumImbalanceCornerTest.test_the_corner_is_the_least_variance_point_at_its_own_band": [
-    21,
+    22,
     16,
     16
   ],
   "test.calibration.test_frontier.MinimumImbalanceCornerTest.test_the_corner_still_sits_at_the_tight_end": [
     10,
-    64,
+    16,
     16,
     10,
     10,
@@ -378,17 +388,17 @@
     10,
     11,
     11,
-    21,
+    22,
     16
   ],
   "test.calibration.test_frontier.MinimumImbalanceCornerTest.test_the_slack_is_absolute_not_a_fraction_of_the_minimum": [
-    21,
+    22,
     16,
     15
   ],
   "test.calibration.test_frontier.PlotMarksTheRefinedKneeTest.test_a_declined_refinement_draws_no_crosshair": [
     10,
-    64,
+    16,
     16,
     10,
     10,
@@ -399,7 +409,7 @@
   ],
   "test.calibration.test_frontier.PlotMarksTheRefinedKneeTest.test_a_knee_without_duals_falls_back_to_the_secant": [
     10,
-    64,
+    16,
     16,
     10,
     10,
@@ -412,12 +422,12 @@
   ],
   "test.calibration.test_frontier.PlotMarksTheRefinedKneeTest.test_a_plain_trace_marks_the_refined_knee": {
     "solves": 22,
-    "total": 344,
-    "max": 64
+    "total": 248,
+    "max": 16
   },
   "test.calibration.test_frontier.PlotMarksTheRefinedKneeTest.test_an_off_grid_knee_still_gets_its_tangent": [
     10,
-    64,
+    16,
     16,
     10,
     10,
@@ -430,7 +440,7 @@
   ],
   "test.calibration.test_frontier.PlotMarksTheRefinedKneeTest.test_an_unrefined_frontier_still_marks_the_sampled_knee": [
     10,
-    64,
+    16,
     16,
     10,
     10,
@@ -441,7 +451,7 @@
   ],
   "test.calibration.test_frontier.PlotMarksTheRefinedKneeTest.test_refine_knee_false_returns_the_bare_sweep": [
     10,
-    64,
+    16,
     16,
     10,
     10,
@@ -452,7 +462,7 @@
   ],
   "test.calibration.test_frontier.PlotMarksTheRefinedKneeTest.test_the_crosshair_follows_the_variance_space": [
     10,
-    64,
+    16,
     16,
     10,
     10,
@@ -465,7 +475,7 @@
   ],
   "test.calibration.test_frontier.PlotMarksTheRefinedKneeTest.test_the_crosshair_sits_on_the_refined_knee": [
     10,
-    64,
+    16,
     16,
     10,
     10,
@@ -478,7 +488,7 @@
   ],
   "test.calibration.test_frontier.PlotMarksTheRefinedKneeTest.test_the_tangent_is_the_refined_knees_own_slope": [
     10,
-    64,
+    16,
     16,
     10,
     10,
@@ -491,12 +501,12 @@
   ],
   "test.calibration.test_frontier.PlotMarksTheRefinedKneeTest.test_trace_refines_in_the_space_it_records": {
     "solves": 25,
-    "total": 440,
-    "max": 64
+    "total": 296,
+    "max": 16
   },
   "test.calibration.test_frontier.RefinementProbesReachTheReportTest.test_every_property_reports_the_same_points": [
     10,
-    64,
+    16,
     16,
     10,
     10,
@@ -509,7 +519,7 @@
   ],
   "test.calibration.test_frontier.RefinementProbesReachTheReportTest.test_the_probes_are_drawn": [
     10,
-    64,
+    16,
     16,
     10,
     10,
@@ -522,7 +532,7 @@
   ],
   "test.calibration.test_frontier.RefinementProbesReachTheReportTest.test_the_probes_are_in_the_reported_frontier": [
     10,
-    64,
+    16,
     16,
     10,
     10,
@@ -535,7 +545,7 @@
   ],
   "test.calibration.test_frontier.StandardErrorVarianceSpaceTest.test_plot_rejects_a_variance_space_it_does_not_know": [
     10,
-    64,
+    16,
     16,
     10,
     10,
@@ -548,7 +558,7 @@
   ],
   "test.calibration.test_frontier.StandardErrorVarianceSpaceTest.test_the_certified_band_is_transformed_rather_than_refitted": [
     10,
-    64,
+    16,
     16,
     10,
     10,
@@ -561,7 +571,7 @@
   ],
   "test.calibration.test_frontier.StandardErrorVarianceSpaceTest.test_the_knee_crosshair_lands_at_the_root_of_its_vif": [
     10,
-    64,
+    16,
     16,
     10,
     10,
@@ -574,7 +584,7 @@
   ],
   "test.calibration.test_frontier.StandardErrorVarianceSpaceTest.test_the_se_curve_is_the_root_of_the_vif_curve": [
     10,
-    64,
+    16,
     16,
     10,
     10,
@@ -587,7 +597,7 @@
   ],
   "test.calibration.test_frontier.StandardErrorVarianceSpaceTest.test_the_se_panel_is_labelled_for_the_standard_error": [
     10,
-    64,
+    16,
     16,
     10,
     10,
@@ -600,7 +610,7 @@
   ],
   "test.calibration.test_frontier.StandardErrorVarianceSpaceTest.test_the_se_panel_runs_the_same_way_as_the_vif_panel": [
     10,
-    64,
+    16,
     16,
     10,
     10,
@@ -613,7 +623,7 @@
   ],
   "test.calibration.test_frontier.TangentSlopeTest.test_corners_report_no_slope": [
     10,
-    47,
+    17,
     16,
     11,
     11,
@@ -628,7 +638,7 @@
   ],
   "test.calibration.test_frontier.TangentSlopeTest.test_slopes_are_negative_where_known": [
     10,
-    47,
+    17,
     16,
     11,
     11,
@@ -643,7 +653,7 @@
   ],
   "test.calibration.test_frontier.TangentSlopeTest.test_slopes_match_a_finite_difference": [
     10,
-    47,
+    17,
     16,
     11,
     11,
@@ -660,7 +670,7 @@
   ],
   "test.calibration.test_frontier.TangentSlopeTest.test_slopes_unlock_the_tangent_bound": [
     10,
-    47,
+    17,
     16,
     11,
     11,
@@ -675,8 +685,8 @@
   ],
   "test.calibration.test_frontier_seam.PastTheSeamTest.test_a_band_below_the_floor_is_not_a_frontier_point": {
     "solves": 64,
-    "total": 3282,
-    "max": 232
+    "total": 3002,
+    "max": 85
   },
   "test.calibration.test_frontier_seam.PastTheSeamTest.test_a_band_past_the_seam_is_relabelled_with_its_relaxed_rows": [
     2,
@@ -686,18 +696,18 @@
   ],
   "test.calibration.test_frontier_seam.PastTheSeamTest.test_a_frontier_that_stops_at_the_seam": [
     11,
-    31,
-    24,
-    49,
+    29,
+    11,
     13,
-    16,
-    14,
     12,
-    18
+    13,
+    14,
+    11,
+    11
   ],
   "test.calibration.test_knee_fallback.KneeFallbackTest.test_a_deliberate_relaxation_says_so": [
     10,
-    29,
+    14,
     13,
     10,
     10,
@@ -715,67 +725,67 @@
   ],
   "test.calibration.test_knee_fallback.KneeFallbackTest.test_a_failed_rebuild_still_restores_the_band": {
     "solves": 46,
-    "total": 1412,
-    "max": 61
+    "total": 1370,
+    "max": 70
   },
   "test.calibration.test_knee_fallback.KneeFallbackTest.test_a_failed_sweep_degrades_to_the_requested_band": {
     "solves": 21,
-    "total": 833,
+    "total": 830,
     "max": 60
   },
   "test.calibration.test_knee_fallback.KneeFallbackTest.test_a_failed_sweep_still_restores_the_band": {
     "solves": 21,
-    "total": 833,
+    "total": 830,
     "max": 60
   },
   "test.calibration.test_knee_fallback.KneeFallbackTest.test_a_joint_infeasibility_has_nothing_past_the_seam": {
     "solves": 37,
-    "total": 1302,
-    "max": 61
+    "total": 1261,
+    "max": 70
   },
   "test.calibration.test_knee_fallback.KneeFallbackTest.test_a_newton_failure_degrades_rather_than_escaping": {
     "solves": 21,
-    "total": 833,
+    "total": 830,
     "max": 60
   },
   "test.calibration.test_knee_fallback.KneeFallbackTest.test_an_unattainable_band_is_reported_as_such": {
     "solves": 50,
-    "total": 1453,
-    "max": 61
+    "total": 1411,
+    "max": 70
   },
   "test.calibration.test_knee_fallback.KneeFallbackTest.test_knee_attaches_the_frontier": {
     "solves": 50,
-    "total": 1453,
-    "max": 61
+    "total": 1411,
+    "max": 70
   },
   "test.calibration.test_knee_fallback.KneeFallbackTest.test_knee_buys_effective_sample_size_when_1_5_is_unreachable": {
     "solves": 71,
-    "total": 2286,
-    "max": 61
+    "total": 2241,
+    "max": 70
   },
   "test.calibration.test_knee_fallback.KneeFallbackTest.test_knee_never_tightens_past_the_conventional_band": {
     "solves": 24,
-    "total": 254,
-    "max": 29
+    "total": 239,
+    "max": 14
   },
   "test.calibration.test_knee_fallback.KneeFallbackTest.test_no_knee_still_asks_for_an_attainable_band": {
     "solves": 79,
-    "total": 2646,
-    "max": 61
+    "total": 2563,
+    "max": 70
   },
   "test.calibration.test_knee_fallback.KneeFallbackTest.test_plain_fallback_traces_nothing": {
     "solves": 21,
-    "total": 833,
+    "total": 830,
     "max": 60
   },
   "test.calibration.test_knee_fallback.KneeFallbackTest.test_the_calibrator_keeps_its_own_band": {
     "solves": 50,
-    "total": 1453,
-    "max": 61
+    "total": 1411,
+    "max": 70
   },
   "test.calibration.test_knee_fallback.KneeFallbackTest.test_the_conventional_band_keeps_the_cascades_own_label": [
     10,
-    29,
+    14,
     13,
     10,
     10,
@@ -793,7 +803,7 @@
   ],
   "test.calibration.test_knee_fallback.KneeFallbackTest.test_the_reported_band_does_not_assume_equal_groups": [
     10,
-    22,
+    14,
     17,
     10,
     10,
@@ -811,14 +821,14 @@
   ],
   "test.calibration.test_knee_fallback.KneeFallbackTest.test_the_requested_space_reaches_the_root_find": {
     "solves": 71,
-    "total": 2585,
-    "max": 61
+    "total": 2500,
+    "max": 70
   },
   "test.calibration.test_logging.CascadeNarrationTest.test_an_infeasible_stage_says_so_rather_than_going_quiet": [
     2,
     7,
-    55,
-    66
+    57,
+    65
   ],
   "test.calibration.test_logging.CascadeNarrationTest.test_cvxium_lands_in_the_same_file_under_its_stage": [
     2,
@@ -871,7 +881,7 @@
     "per_solve": [
       2,
       0,
-      60
+      52
     ],
     "tolerance": 0.12
   },
@@ -909,13 +919,13 @@
   "test.calibration.test_rake.JointCalibratorFallbackTest.test_sad": {
     "per_solve": [
       2,
-      49
+      47
     ],
     "tolerance": 0.15
   },
   "test.calibration.test_rake.JointCalibratorFallbackTest.test_sad_drives_internal_imbalance_to_minimum": [
     2,
-    48
+    39
   ],
   "test.calibration.test_rake.JointCalibratorMaxWeightTest.test_an_uncapped_block_solves_as_if_its_cap_were_slack": [
     2,
@@ -941,8 +951,8 @@
   ],
   "test.calibration.test_rake.JointCalibratorRelaxationTest.test_a_band_below_the_floor_is_widened_to_it": {
     "solves": 22,
-    "total": 1303,
-    "max": 89
+    "total": 1308,
+    "max": 87
   },
   "test.calibration.test_rake.JointCalibratorRelaxationTest.test_a_band_too_tight_for_the_attainable_rows_is_widened": [
     0,
@@ -958,7 +968,7 @@
     59,
     65,
     58,
-    59,
+    58,
     64,
     59,
     66,
@@ -967,7 +977,7 @@
   "test.calibration.test_rake.JointCalibratorRelaxationTest.test_empty_level_relaxes_only_its_own_rows": [
     2,
     0,
-    78,
+    75,
     87
   ],
   "test.calibration.test_rake.JointCalibratorRelaxationTest.test_feasible_band_is_reported_as_requested": [
@@ -983,14 +993,14 @@
   "test.calibration.test_rake.JointCalibratorRelaxationTest.test_relaxation_continues_to_the_design_effect": [
     2,
     0,
-    78,
+    75,
     0,
-    87
+    88
   ],
   "test.calibration.test_rake.JointCalibratorRelaxationTest.test_the_distance_chooses_how_tied_rows_share_the_excess": [
     2,
-    40,
-    21
+    41,
+    31
   ],
   "test.calibration.test_rake.RakeCrossEngineTest.test_ipm_default_x0_applies_and_clamps_to_max_weight": [
     61
@@ -1084,7 +1094,7 @@
   ],
   "test.calibration.test_rake.RakeSolveTest.test_solve_huber_2_M50_p5_phi2_0": [
     55,
-    12
+    13
   ],
   "test.calibration.test_rake.RakeSolveTest.test_solve_huber_3_M500_p100_phi2_5": [
     97,

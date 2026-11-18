@@ -73,6 +73,18 @@ explain why in the commit message. Counts below 8 iterations are not
 guarded, and known-bimodal tests are listed under the baseline's
 `__ignore__` key.
 
+The baseline is generated on macOS, and CI runs Ubuntu. Most counts
+agree across the two, but the knee-fallback tests and two
+`JointCalibratorFallbackTest` cases do not: a linear-objective barrier
+solve stops when a high-t centering step fails on a numerically
+singular Hessian, and which step that is depends on the BLAS, so the
+platforms differ by one centering step
+([Cvxium #20](https://github.com/rwilson4/Cvxium/issues/20)). Those
+tests are in `__ignore__`; revisit them once #20 is fixed. A new test
+that trips the guard on CI but not locally is probably another case
+of this. Confirm that the platforms differ by whole centering steps
+before ignoring it.
+
 ### Test conventions
 
 The test suite uses `unittest.TestCase` classes, run by pytest; test
