@@ -1,10 +1,20 @@
 [project]
-name = "pyrake"
+# Published as pyrake-survey (the name pyrake on PyPI belongs to an unrelated
+# 2016 build tool, which installs a module named snake); imported as pyrake.
+name = "pyrake-survey"
 version = "0.2.0"
-description = "Balancing Weights and Raking"
+description = "Survey calibration and balancing weights, with estimators for means and treatment effects"
 authors = [{ name = "Bob Wilson", email = "bob.wilson@convexanalytics.com" }]
 requires-python = ">=3.11,<4"
 readme = "README.md"
+license = { file = "LICENSE.txt" }
+keywords = ["survey", "calibration", "raking", "balancing-weights", "causal-inference"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: Apache Software License",
+    "Topic :: Scientific/Engineering :: Mathematics",
+    "Intended Audience :: Science/Research",
+]
 dependencies = [
     "numpy>=2.2.5,<3",
     "scipy>=1.15.2,<2",
@@ -13,6 +23,9 @@ dependencies = [
     "seaborn>=0.13.2,<0.14",
     "cvxium>=1.0.2,<2",
 ]
+
+[project.urls]
+Source = "https://github.com/rwilson4/PyRake"
 
 [dependency-groups]
 dev = [
@@ -25,6 +38,8 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
+# The distribution name no longer matches the package directory.
+packages = ["pyrake"]
 force-include = {"USAGE.md" = "pyrake/USAGE.md"}
 
 [tool.hatch.build.targets.sdist]

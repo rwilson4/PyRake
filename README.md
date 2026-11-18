@@ -256,8 +256,10 @@ American Statistical Association.
 ## Installation
 
 ```bash
-pip install .
+pip install pyrake-survey
 ```
+
+The package installs as `pyrake-survey` and imports as `pyrake`.
 
 ## Example Usage
 ### Calibration

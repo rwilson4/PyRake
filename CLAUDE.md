@@ -93,6 +93,25 @@ tripping the guard on CI but not locally, reproduce it with those two
 variables set before widening anything. A band is the right fix only
 when the counts differ deterministically by whole centering steps.
 
+### Releasing
+
+PyRake is published to PyPI as **`pyrake-survey`** and imported as
+`pyrake`. The name `pyrake` on PyPI belongs to an unrelated 2016 build
+tool, which installs a module named `snake`, so the two don't clash.
+Pushing a `v*` tag runs `.github/workflows/publish.yml`, which builds
+with `uv build` and uploads through PyPI trusted publishing. To
+release:
+
+1. Bump `version` in `pyproject.toml`, run `uv lock`, and commit that
+   to master.
+2. Tag *that* commit and push the tag: `git tag vX.Y.Z && git push
+   origin vX.Y.Z`. The workflow fails if the tag and the version
+   disagree, since a tag pushed before the bump would build the old
+   version, which PyPI then rejects as a duplicate.
+
+PyPI versions can't be replaced, so check the build first with `uv
+build` and an install of the wheel into a clean environment.
+
 ### Test conventions
 
 The test suite uses `unittest.TestCase` classes, run by pytest; test
