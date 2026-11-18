@@ -6,3 +6,5 @@ __pycache__
 dist/
 # Written by the Cvxium perf guard while regenerating the baseline
 test/perf_baseline.json.lock
+# Sphinx build output
+docs/_build/

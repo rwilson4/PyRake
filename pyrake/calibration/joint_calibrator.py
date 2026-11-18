@@ -612,26 +612,23 @@ class JointCalibrator(Rake):
     Notes
     -----
     This is really just a wrapper around Rake. Let:
-    - w = [w1; w2]
-    - v = [v1; v2],
-    - M = M1 + M2
-            -                                        -
-           |   (M / M1) * X1ᵀ             0           |
-    - Xᵀ = |          0               (M / M2) * X2ᵀ  |
-           |  -(M / M1) * X3ᵀ         (M / M2) * X4ᵀ  |
-            -                                        -
-    - mu = [mu1; mu2; 0]
-             -                                        -
-            |   (M / M1) * Z1ᵀ             0           |
-    - Zᵀ =  |          0               (M / M2) * Z2ᵀ  |
-            |  -(M / M1) * Z3ᵀ         (M / M2) * Z4ᵀ  |
-             -                                        -
-    - nu = [nu1; nu2; 0]
+    - w = [w1; w2] and v = [v1; v2], with M = M1 + M2;
+    - mu = [mu1; mu2; 0] and nu = [nu1; nu2; 0];
     - psi = a vector with q1 entries of psi1, followed by q2 entries of psi2, followed
       by q3 entries of psi3, where q1, q2, and q3 are the numbers of columns in Z1, Z2,
-      and Z3, respectively.
+      and Z3, respectively;
     - min_weight = a vector with M1 entries of min_weight1, followed by M2 entries of
-      min_weight2, where M1 and M2 are the lengths of w1 and w2, respectively.
+      min_weight2, where M1 and M2 are the lengths of w1 and w2, respectively;
+    and stack the covariates as
+              _                                        _
+             |   (M / M1) * X1ᵀ             0           |
+        Xᵀ = |          0               (M / M2) * X2ᵀ  |
+             |_ -(M / M1) * X3ᵀ         (M / M2) * X4ᵀ _|
+    and
+              _                                        _
+             |   (M / M1) * Z1ᵀ             0           |
+        Zᵀ = |          0               (M / M2) * Z2ᵀ  |
+             |_ -(M / M1) * Z3ᵀ         (M / M2) * Z4ᵀ _|
 
     Then the problem is equivalent to:
        minimize    D(w, v)
@@ -644,9 +641,8 @@ class JointCalibrator(Rake):
     wish to approximately balance some covariates for internal validity only, in which
     case they would specify Z3 and Z4 only, not X1, X2, X3, X4, Z1, or Z2. Then Zᵀ would
     just be:
-          -                                        -
-         |  -(M / M1) * Z3ᵀ        (M / M2) * Z4ᵀ   |
-          -                                        -
+          _                                       _
+         |_ -(M / M1) * Z3ᵀ        (M / M2) * Z4ᵀ _|
 
     Due to a technical limitation in Rake, we *require* at least one equality constraint
     in the optimization problem. Thankfully, we typically want to constrain the mean

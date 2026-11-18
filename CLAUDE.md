@@ -93,6 +93,33 @@ tripping the guard on CI but not locally, reproduce it with those two
 variables set before widening anything. A band is the right fix only
 when the counts differ deterministically by whole centering steps.
 
+### Documentation
+
+The docs site (https://convexanalytics.com/pyrake/) is a Sphinx project
+in `docs/` with the pydata theme. The landing page's quickstart is a
+doctest, the usage guide is USAGE.md included through MyST, and the API
+pages are autodoc.
+
+```bash
+cd docs && uv run make html SPHINXOPTS="-W --keep-going"   # warnings are errors
+cd docs && uv run make doctest                             # the quickstart
+```
+
+Docstrings stay in plain-text style: display equations and lists sit
+directly under the prose, with no blank lines. A hook in `docs/conf.py`,
+shared with Cvxium, translates them to reStructuredText at build time.
+Draw ASCII-art matrices with underscores and pipes (`_  _` on top,
+`|_  _|` on the bottom), not dashes: a border line that starts with `-`
+reads as a list item. Keep a matrix out of a list item; introduce it
+with a line of prose instead. If a docstring breaks the `-W` build, fix
+the docstring or the hook rather than loosening `-W`.
+
+`.github/workflows/deploy_docs.yml` builds and doctests on every change
+to `docs/`, `pyrake/` or USAGE.md, and deploys over rsync from master
+once the `DOCS_HOST`, `DOCS_USER`, and `DOCS_DEPLOY_KEY` secrets exist.
+The key's `rrsync` forced command on the server fixes the destination,
+`/srv/docs/convexanalytics/pyrake`.
+
 ### Releasing
 
 PyRake is published to PyPI as **`pyrake-survey`** and imported as

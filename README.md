@@ -116,7 +116,7 @@ uniform (that is, all entries of v are ones). As the name implies,
 PyRake can be used to calculate Raking weights, if we set $` \phi `$
 to be large enough that the variance constraint is not active.
 
-Like Raking, Entropy Balancing (Hainmuller, 2012) uses KL divergence
+Like Raking, Entropy Balancing (Hainmueller, 2012) uses KL divergence
 as the distance metric and omits the variance constraint. An
 additional constraint is applied: $` 1^T w = 1^T v`$. This constraint
 can be accommodated by adding an extra column to X having all ones;
@@ -240,7 +240,7 @@ totals are known" (1940). Annals of Mathematical Statistics.
 Daniel G. Horvitz and Donovan J. Thompson, "A generalization of sampling
 without replacement from a finite universe" (1952). Taylor & Francis.
 
-Jens Hainmuller, "Entropy balancing for causal effects: A multivariate
+Jens Hainmueller, "Entropy balancing for causal effects: A multivariate
 reweighting method to produce balanced samples in observational
 studies" (2012). Political Analysis.
 
@@ -260,6 +260,8 @@ pip install pyrake-survey
 ```
 
 The package installs as `pyrake-survey` and imports as `pyrake`.
+Documentation, including the API reference and the usage guide, is at
+https://convexanalytics.com/pyrake/.
 
 ## Example Usage
 ### Calibration
