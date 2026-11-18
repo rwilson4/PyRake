@@ -267,17 +267,26 @@ logistic function of age, up-weights older respondents increasingly
 steeply, much as the response mechanism down-weights them; the
 minimum-design-effect weights are, apart from the lower bound, linear
 in the calibration covariates, so they cannot. If the 65+ share
-matters, it belongs in `X`. The legend's imbalance score summarizes
-each weighting; see {func}`~pyrake.plot_balance` for its definition.
+matters, it belongs in `X`.
+
+This is the bias side of the tradeoff the next section makes explicit,
+caught on a covariate we happen to be able to check. The legend's
+imbalance score summarizes each weighting; see
+{func}`~pyrake.plot_balance` for its definition.
 
 No balance plot can show `engaged`, whose population share we do not
 know. There the two calibrated weightings differ too, unseen.
 
 ## The efficient frontier
 
-Staying close to the baseline keeps what the propensity model knows
-about `engaged`; minimizing the design effect keeps the variance down.
-Between those two extremes lies a family of weights solving
+An estimator's mean squared error is its squared bias plus its
+variance, and the two weightings so far each attend to one term. The
+baseline weights are our best guess at weights that remove bias, so
+distance from them stands in for bias that calibration cannot check,
+such as that from `engaged` or the 65+ share. The design effect stands
+in for variance. We may well accept a small increase in bias for a
+large reduction in variance. Between the two extremes lies a family of
+weights solving
 
 $$
 \begin{array}{ll}
@@ -340,7 +349,9 @@ also label the two corners:
 The frontier is steep near the baseline: moving a little away from it
 cuts the design effect from 1.80 to 1.33, three quarters of the
 reduction available. Past the knee, further variance reduction costs
-ever more distance. Every weighting on the curve balances age, urban,
+ever more distance. The knee is where the trade stops being cheap: a
+small increase in bias buys a large reduction in variance up to it,
+and not beyond. Every weighting on the curve balances age, urban,
 and income exactly; the curve trades off only what the weights do
 beyond that.
 
@@ -385,14 +396,23 @@ upward toward an over-engaged sample, by nearly two standard errors.
 The knee sits between: it gives up a small part of the correction for
 an interval about 11% narrower.
 
-That narrowing is less than Kish's design effect promises, since
-$\sqrt{1.334 / 1.800} \approx 0.86$. The design effect describes an
+That narrowing is less than Kish's design effect suggests, since
+$\sqrt{1.334 / 1.800} \approx 0.86$: the design effect describes an
 outcome unrelated to the weights, and here part of the weights'
-variation tracks `engaged`, which does drive the outcome. It is a
-guide to precision, not an exact account of it. Bear in mind, too,
-that this is one simulated survey: the differences between the
-estimates are of the order of their standard errors, so they
-illustrate the mechanism rather than measure it.
+variation tracks `engaged`, which drives the outcome. That is
+expected, and it is no reason to choose weights by interval width
+instead. The design effect, like the balance constraints and the
+distance from the baseline, depends only on the covariates, so the
+whole frontier, and the choice of a point on it, can be settled before
+anyone looks at an outcome. That is a legitimate design-based choice.
+Picking the weights that make a particular outcome's interval
+narrowest uses the outcome to choose the analysis, which is p-hacking.
+(The table above uses the outcome only because this is a simulation,
+to show the consequences of a choice already made.)
+
+Bear in mind, too, that this is one simulated survey: the differences
+between the estimates are of the order of their standard errors, so
+they illustrate the mechanism rather than measure it.
 
 The frontier makes the tradeoff explicit, but cannot settle it: its
 horizontal axis measures distance from the baseline, not bias. How far
@@ -409,6 +429,9 @@ the calibration covariates. A few guidelines:
   credible. If the baseline encodes information you trust, stay closer
   to it; if it is little more than a guess, move toward the minimum
   design effect.
+- **Choose before you look.** Settle the covariates, the baseline,
+  and the point on the frontier using the covariates alone, then
+  estimate. The same weights then serve every outcome in the survey.
 - **Keep the lower bound.** `min_weight=M / N` rules out implied
   propensity scores above 1, which no respondent can have, and
   {class}`~pyrake.SIPWEstimator` requires propensity scores in (0, 1].
