@@ -73,17 +73,20 @@ explain why in the commit message. Counts below 8 iterations are not
 guarded, and known-bimodal tests are listed under the baseline's
 `__ignore__` key.
 
-The baseline is generated on macOS, and CI runs Ubuntu. Most counts
-agree across the two, but the knee-fallback tests and two
-`JointCalibratorFallbackTest` cases do not: a linear-objective barrier
-solve stops when a high-t centering step fails on a numerically
-singular Hessian, and which step that is depends on the BLAS, so the
-platforms differ by one centering step
-([Cvxium #20](https://github.com/rwilson4/Cvxium/issues/20)). Those
-tests are in `__ignore__`; revisit them once #20 is fixed. A new test
-that trips the guard on CI but not locally is probably another case
-of this. Confirm that the platforms differ by whole centering steps
-before ignoring it.
+The baseline is generated on macOS, and CI runs Ubuntu on varying
+hardware. Most counts agree everywhere. The exception is the family
+that runs the JointCalibrator cascade's linear-objective barrier solves:
+all of `test_knee_fallback.py` and `test_frontier_seam.py`, plus the
+`JointCalibratorFallbackTest` and `JointCalibratorRelaxationTest`
+classes. Those solves often stop when a high-t centering step fails on
+an ill-conditioned Newton system, and which step fails depends on the
+BLAS and CPU, so counts move by a centering step or so between machines
+([Cvxium #20](https://github.com/rwilson4/Cvxium/issues/20)). Their
+baseline entries carry `"tolerance": 0.4` rather than the default band;
+regeneration preserves it. Narrow the band once #20 is fixed. A new
+test that trips the guard on CI but not locally is probably another case
+of this: confirm that the counts differ by whole centering steps, then
+give its entry the same band rather than adding it to `__ignore__`.
 
 ### Test conventions
 
