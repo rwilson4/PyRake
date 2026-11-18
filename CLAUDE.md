@@ -85,8 +85,9 @@ since OpenBLAS otherwise picks different kernels on different CPUs.
 With them, every runner computes identically.
 
 What remains is a fixed difference between Accelerate and OpenBLAS, of
-about one centering step in seven tests. Their baseline entries carry a
-`"tolerance"` sized to that difference (0.2 to 0.4); regeneration
+about one centering step in six tests (four in `test_knee_fallback.py`,
+two in `JointCalibratorFallbackTest`). Their baseline entries carry a
+`"tolerance"` of 0.2 or 0.25, sized to that difference; regeneration
 preserves it. Narrow or drop these once #20 is fixed. If a test starts
 tripping the guard on CI but not locally, reproduce it with those two
 variables set before widening anything. A band is the right fix only

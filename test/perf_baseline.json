@@ -676,8 +676,7 @@
   "test.calibration.test_frontier_seam.PastTheSeamTest.test_a_band_below_the_floor_is_not_a_frontier_point": {
     "solves": 64,
     "total": 3002,
-    "max": 85,
-    "tolerance": 0.4
+    "max": 85
   },
   "test.calibration.test_frontier_seam.PastTheSeamTest.test_a_band_past_the_seam_is_relabelled_with_its_relaxed_rows": [
     2,
