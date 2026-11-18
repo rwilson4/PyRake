@@ -123,7 +123,10 @@ point estimate and a confidence interval:
     5.640 (5.494, 5.786)
 
 The calibrated estimate moves toward the population mean, and its
-interval covers it. The :doc:`user_guides/usage` covers joint
+interval covers it. :doc:`user_guides/population_mean` works through
+the choice of weights for a population mean in more depth, including
+the efficient frontier between staying close to baseline weights and
+minimizing the design effect. The :doc:`user_guides/usage` covers joint
 calibration of treatment and control groups, treatment effects,
 ratios, linear combinations of estimators, and sensitivity analysis;
 ``pyrake.usage()`` returns the same guide.
