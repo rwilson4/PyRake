@@ -303,8 +303,6 @@ and linear combinations of estimators. It is also available at
 runtime via `pyrake.usage()`.
 
 ## Development
-I used ChatGPT to write the original commit (it did a pretty good
-job!)
 
 ### Architecture
 We use [uv](https://docs.astral.sh/uv/) to manage dependencies. Test
