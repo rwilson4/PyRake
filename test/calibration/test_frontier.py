@@ -6,7 +6,7 @@ import time
 import unittest
 from dataclasses import replace
 from typing import Any, Literal, cast
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -14,6 +14,8 @@ import numpy.typing as npt
 import pytest
 from cvxium import (
     FrontierPoint,
+    NewtonStepError,
+    OptimizationError,
     ProblemInfeasibleError,
     SolveResult,
     SolveStatus,
@@ -833,6 +835,94 @@ class MinimumImbalanceCornerTest(unittest.TestCase):
 
         self.assertEqual(len(np.asarray(corner.solution)), frontier.M1 + frontier.M2)
         self.assertTrue(any("anchors the chord" in line for line in logs.output))
+
+    def test_a_primal_dual_breakdown_falls_back_to_the_barrier(self) -> None:
+        """A Newton step the primal-dual method cannot take must not end the trace."""
+        frontier = self._frontier()
+        expected = frontier.minimize_objective(1)
+        frontier = self._frontier()
+        broken = MagicMock()
+        broken.return_value.solve.side_effect = NewtonStepError(
+            "H is not positive definite"
+        )
+        with (
+            patch("pyrake.calibration.frontier.PrimalDualSolver", broken),
+            self.assertLogs("pyrake.calibration.frontier", level="INFO") as logs,
+        ):
+            corner = frontier.minimize_objective(1)
+
+        self.assertTrue(broken.return_value.solve.called)
+        self.assertTrue(any("barrier method" in line for line in logs.output))
+        np.testing.assert_allclose(
+            frontier.evaluate_objectives(np.asarray(corner.solution)),
+            frontier.evaluate_objectives(np.asarray(expected.solution)),
+            rtol=1e-2,
+            atol=1e-3,
+        )
+
+    def test_a_breakdown_in_both_solvers_says_what_failed(self) -> None:
+        """If the barrier fails too, the error names the program and both causes."""
+        frontier = self._frontier()
+        broken = MagicMock()
+        broken.return_value.solve.side_effect = NewtonStepError(
+            "H is not positive definite"
+        )
+        also_broken = MagicMock()
+        also_broken.return_value.solve.side_effect = NewtonStepError(
+            "Hessian is not strictly positive definite."
+        )
+        with (
+            patch("pyrake.calibration.frontier.PrimalDualSolver", broken),
+            patch("pyrake.calibration.frontier.BarrierSolver", also_broken),
+            self.assertRaises(OptimizationError) as raised,
+        ):
+            frontier.minimize_objective(1, x0=np.ones(frontier.M1 + frontier.M2))
+
+        message = str(raised.exception)
+        self.assertIn("smallest external imbalance", message)
+        self.assertIn("H is not positive definite", message)
+        self.assertIn("Hessian is not strictly positive definite", message)
+        self.assertIn("always feasible", message)
+
+    def test_a_survey_whose_corner_broke_the_primal_dual_method(self) -> None:
+        """A small simulated A/B-test survey on which the primal-dual corner raised.
+
+        The responses depend on age, urbanicity and, in the treated arm only, heavy use
+        of the platform, so each arm is unbalanced and differently so. Whether the
+        primal-dual solve breaks down here depends on the BLAS's rounding; the trace
+        must succeed either way.
+
+        """
+        rng = np.random.default_rng(1)
+        N, n = 20_000, 300
+        age = rng.uniform(18, 80, N)
+        urban = (rng.random(N) < 0.6).astype(float)
+        heavy = (rng.random(N) < expit(1.0 - 0.06 * (age - 30))).astype(float)
+        female = (rng.random(N) < 0.5).astype(float)
+        treated = rng.random(N) < 0.5
+        X = np.column_stack([age, urban, heavy, female])
+        mu, sigma = X.mean(axis=0), X.std(axis=0)
+
+        def survey(arm: npt.NDArray[np.bool_], b: float) -> npt.NDArray[np.int64]:
+            idx = rng.choice(np.flatnonzero(arm), n, replace=False)
+            eta = -0.3 - 0.04 * (age[idx] - 45) + 0.5 * urban[idx] + b * heavy[idx]
+            return idx[rng.random(n) < expit(eta)]
+
+        control, treatment = survey(~treated, 0.0), survey(treated, 1.0)
+        Z1, Z2 = X[control] / sigma, X[treatment] / sigma
+        frontier = ExternalValidityVarianceFrontier(
+            Z1=Z1,
+            Z2=Z2,
+            Z3=Z1,
+            Z4=Z2,
+            nu1=mu / sigma,
+            nu2=mu / sigma,
+            min_weight1=0.0,
+            min_weight2=0.0,
+        )
+        results = frontier.trace(num_points=6, refine_knee=False)
+
+        self.assertLess(min(results.imbalances), 1e-2 * max(results.imbalances))
 
 
 class FromCalibratorTest(unittest.TestCase):
