@@ -344,8 +344,11 @@ def plot_balance(
                 "`imbalance_pval_threshold` should be strictly positive and <= 1.0"
             )
 
+        # 0.0 - x rather than -x: a perfectly balanced method's mean is 0.0, and its
+        # negation, -0.0, would print in the legend as "-0".
         imbalance = df_balance.groupby("Method")["log_pval"].apply(
-            lambda log_pvals: -np.mean(
+            lambda log_pvals: 0.0
+            - np.mean(
                 np.where(
                     log_pvals <= np.log(imbalance_pval_threshold),
                     log_pvals,
@@ -542,7 +545,9 @@ def plot_balance_2_sample(
             )
 
         imbalance = df_balance.groupby("Method")["abs_delta"].apply(
-            lambda group: -np.mean(
+            # 0.0 - x rather than -x, as in plot_balance, so balance prints as "0".
+            lambda group: 0.0
+            - np.mean(
                 np.where(
                     (log_pval := np.log(2.0) + stats.norm.logsf(group))
                     <= np.log(imbalance_pval_threshold),
