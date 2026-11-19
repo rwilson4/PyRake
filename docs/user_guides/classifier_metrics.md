@@ -416,7 +416,9 @@ Three gaps this guide works around rather than closes:
   linearizes the ratio, $z_i = (a_i - \hat{R} b_i) / \bar{b}_w$ for
   numerator $a$ and denominator $b$, and computes the variance from the
   residuals of a weighted regression of $z$ on the calibration
-  covariates (Deville and Särndal, 1992; see the {doc}`../references`). In 40 repeated draws of this
+  covariates (Deville, J.-C., and Särndal, C.-E., "Calibration
+  Estimators in Survey Sampling," *Journal of the American Statistical
+  Association*, 87(418), 1992). In 40 repeated draws of this
   example's holdout set (not shown), the current intervals covered
   about right for precision but reported roughly twice the actual
   standard error for recall at high thresholds, where the score bands

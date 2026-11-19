@@ -8,10 +8,6 @@ References
    Observational Studies of Human Populations." *Journal of the Royal
    Statistical Society, Series A*, Vol. 128, No. 2, 1965, pp. 234–266.
 
-.. [DS92] Deville, J.-C., and Särndal, C.-E. "Calibration Estimators
-   in Survey Sampling." *Journal of the American Statistical
-   Association*, Vol. 87, No. 418, 1992, pp. 376–382.
-
 .. [DS40] Deming, W. E., and Stephan, F. F. "On a Least Squares
    Adjustment of a Sampled Frequency Table When the Expected Marginal
    Totals are Known." *The Annals of Mathematical Statistics*, Vol. 11,
