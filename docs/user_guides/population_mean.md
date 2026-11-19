@@ -206,8 +206,12 @@ exact rather than approximate balance. Full citations are on the
 With the mean weight constrained, as it is by default, any baseline
 that is a linear combination of the columns of $X$ and a constant gives
 the same weights as a baseline of zero. Expanding
-$\frac{1}{M} \| w - v \|_2^2 = \frac{1}{M} \| w \|_2^2
-- \frac{2}{M} v^T w + \frac{1}{M} \| v \|_2^2$,
+
+$$
+\frac{1}{M} \| w - v \|_2^2 = \frac{1}{M} \| w \|_2^2
+- \frac{2}{M} v^T w + \frac{1}{M} \| v \|_2^2,
+$$
+
 the middle term is fixed by the balance constraints whenever $v$ lies
 in that span. In particular, `SquaredL2()` with its default uniform
 baseline also minimizes the design effect. A baseline only shapes
