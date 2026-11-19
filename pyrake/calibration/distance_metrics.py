@@ -292,8 +292,11 @@ class KLDivergence(Distance):
 
     Notes
     -----
-    Requires strictly positive weights (and baseline); the code does not check this, and
-    nonpositive inputs propagate nan through the logarithm.
+    The domain is w > 0 (the baseline must be strictly positive too). ``evaluate`` is
+    +inf outside it, which a line search reads as a rejected step, and
+    ``btls_keep_in_domain`` bounds a step by the distance to the boundary, so a solver
+    that minimizes over unconstrained w, such as the barrier method's dual evaluation,
+    never steps out of it. ``gradient`` and ``hessian_diagonal`` assume w > 0.
 
     """
 
@@ -308,9 +311,12 @@ class KLDivergence(Distance):
         Returns
         -------
          d : float
-            The divergence (1 / M) Σᵢ (wᵢ log(wᵢ / vᵢ) - wᵢ + vᵢ).
+            The divergence (1 / M) Σᵢ (wᵢ log(wᵢ / vᵢ) - wᵢ + vᵢ), or +inf when any
+            wᵢ ≤ 0.
 
         """
+        if np.any(w <= 0.0):
+            return np.inf
         M = len(w)
         v = self.v
         if v is None:
@@ -355,6 +361,32 @@ class KLDivergence(Distance):
         """
         M = len(w)
         return (1.0 / M) / w
+
+    def btls_keep_in_domain(
+        self,
+        w: npt.NDArray[np.float64],
+        dw: npt.NDArray[np.float64],
+    ) -> float:
+        """Find the largest step along dw that keeps w + α dw > 0.
+
+        Parameters
+        ----------
+         w : npt.NDArray[np.float64]
+            Current point, strictly positive, of length M.
+         dw : npt.NDArray[np.float64]
+            Step direction, of length M.
+
+        Returns
+        -------
+         alpha : float
+            min over dwᵢ < 0 of -wᵢ / dwᵢ, the step at which the first weight reaches
+            zero, or +inf when no component decreases.
+
+        """
+        decreasing = dw < 0.0
+        if not np.any(decreasing):
+            return np.inf
+        return float(np.min(-w[decreasing] / dw[decreasing]))
 
 
 class Huber(Distance):
