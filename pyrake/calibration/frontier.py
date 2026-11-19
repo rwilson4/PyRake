@@ -2009,7 +2009,27 @@ class ExternalValidityVarianceFrontier(MultiObjectiveOptimizer):
                 LinearInequalityConstraintLayer(A=A_ext, cu=cu_ext),
             ],
         )
-        res = problem.solve(PrimalDualSolver(), x0=self._augment(x0))
+        try:
+            res = problem.solve(PrimalDualSolver(), x0=self._augment(x0))
+        except (NewtonStepError, BacktrackingLineSearchError) as e:
+            # The primal-dual method's KKT system can lose definiteness near
+            # this linear program's optimum on ordinary data (one in three
+            # simulated surveys of a few thousand respondents); the barrier
+            # method's centering steps do not. Primal-dual stays first because
+            # it is the faster of the two where it succeeds.
+            logger.info(
+                "Primal-dual solve of the minimum-imbalance corner raised %s; "
+                "retrying with the barrier method.",
+                e,
+            )
+            # Cold, the barrier's own Phase I can stall on this linear program
+            # too, so start it from the least-variance weights, which meet the
+            # internal band with room to spare and leave the external bands
+            # slack once ``_augment`` pads φ.
+            start = (
+                np.asarray(self.minimize_objective(0).solution) if x0 is None else x0
+            )
+            res = problem.solve(BarrierSolver(), x0=self._augment(start))
         # Not an ``assert``: stripped under ``-O``, a wrong-length solution
         # would make the slice below drop a real weight instead of phi, and
         # every objective downstream would be quietly wrong.
