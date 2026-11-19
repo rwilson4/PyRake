@@ -200,9 +200,51 @@ def _process_docstring(app, what, name, obj, options, lines) -> None:
     lines[:] = _translate_plain_text(lines)
 
 
+# -- Top-level names ---------------------------------------------------------
+#
+# Users import everything from ``pyrake``, so the guides and docstrings refer
+# to ``pyrake.Rake``. Autodoc documents each object where it is defined, as
+# ``pyrake.calibration.rake.Rake``, and only that name is a link target.
+# Resolve the top-level name to the defining one, member suffix and all, so
+# ``pyrake.JointCalibrator.solve_with_fallback`` finds the method too, and an
+# inherited method is found on the class that defines it.
+
+
+def _resolve_top_level_name(app, env, node, contnode):
+    if node.get("refdomain") != "py":
+        return None
+    parts = node.get("reftarget", "").split(".")
+    if len(parts) < 2 or parts[0] != "pyrake":
+        return None
+    import pyrake
+
+    obj = getattr(pyrake, parts[1], None)
+    module = getattr(obj, "__module__", None)
+    qualname = getattr(obj, "__qualname__", None)
+    if module is None or qualname is None or module == "pyrake":
+        return None
+    if len(parts) > 2 and isinstance(obj, type):
+        # An inherited member is documented on the class that defines it.
+        owner = next((k for k in obj.__mro__ if parts[2] in vars(k)), obj)
+        module, qualname = owner.__module__, owner.__qualname__
+    target = ".".join([module, qualname, *parts[2:]])
+    return env.get_domain("py").resolve_xref(
+        env, node["refdoc"], app.builder, node["reftype"], target, node, contnode
+    )
+
+
+# Fail the -W build on a link into PyRake that resolves nowhere. Only PyRake's
+# own names are checked: the docstrings' type fields ("optional",
+# "npt.NDArray", "list_like") produce hundreds of unresolvable references that
+# are prose, not links.
+nitpicky = True
+nitpick_ignore_regex = [(r"py:.*", r"(?!pyrake\.).*")]
+
+
 def setup(app) -> None:
     # Before napoleon (priority 500), which needs the NumPy sections intact.
     app.connect("autodoc-process-docstring", _process_docstring, priority=400)
+    app.connect("missing-reference", _resolve_top_level_name)
 
 
 # -- Options for HTML output -------------------------------------------------
