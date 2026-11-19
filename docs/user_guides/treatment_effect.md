@@ -335,11 +335,14 @@ more sample.
 
 {func}`~pyrake.solve_with_knee_fallback` turns that into a rule. It
 traces a coarse frontier and calibrates at the looser of Cochran's
-band and the knee, so it never pays past the knee for balance. It
-exists for surveys where Cochran's band sits far out on the flat end of
-the frontier; its documentation describes one where meeting the
-tightest attainable band left an effective sample of 164, against 448
-at the knee. Here it picks the knee:
+band and the knee. Cochran's band is enough balance, so it never asks
+for more, however cheap more would be; and it never pays past the knee
+to reach Cochran's band, taking the effective sample instead. In
+practice reaching that band often costs a large share of the sample:
+the function's documentation describes a survey where the tightest
+attainable band left an effective sample of 164, against 448 at the
+knee. Here the knee is the looser of the two, so that is where it
+calibrates:
 
 ```{doctest}
 >>> knee = pyrake.solve_with_knee_fallback(calibrator)
@@ -442,20 +445,21 @@ Only external validity moves it there. The joint weights' target,
 covariate an imbalance a simple random sample might show; exact
 balance would remove the rest, at the price the frontier shows.
 
-The knee did not pay here. It bought about 9% more effective sample
-(4,111 against 3,773) and an interval 3% narrower, for a bias of 0.07,
-two standard errors. In mean squared error that is more than three
-times worse than Cochran's band. The frontier measures what balance costs, not what imbalance
-does: the bias from an imbalance is the imbalance times how strongly
-that covariate modifies the outcomes, and here age and heavy use modify
-the effect itself. A covariate unrelated to the outcomes could be left
-unbalanced for free. The frontier's horizontal axis cannot tell the two
-apart.
+The knee bought about 9% more effective sample (4,111 against 3,773)
+and an interval 3% narrower, and its target moved 0.07 from the
+population effect, about two standard errors. (The other simulated
+surveys of this population we tried, seeds 1, 3, and 4, showed the same
+pattern.) The frontier prices balance in effective sample size; it
+cannot say what a given imbalance does to the estimate. That is the
+imbalance times how strongly the covariate modifies the outcomes, and
+here age and heavy use modify the effect itself, so loosening their
+balance shows up in the target. A covariate unrelated to the outcomes
+could be left unbalanced at no cost in bias.
 
-This is not luck of the draw. In the other simulated surveys of this
-population we tried, seeds 1, 3, and 4, the joint target was within
-0.025 of the population effect every time, and the knee's 0.07 to 0.08
-above it.
+So the knee is a default, not a verdict. If you weigh bias more
+heavily than it does, trace the frontier, pick a band, and calibrate at
+it with {meth}`~pyrake.JointCalibrator.solve_with_fallback`, as the
+joint weights above do at Cochran's band.
 
 A few guidelines:
 
@@ -463,12 +467,11 @@ A few guidelines:
   effect. {meth}`~pyrake.JointCalibrator.solve_with_fallback` relaxes
   external validity before internal validity, and its status says
   which it had to give up.
-- **Read the frontier before taking the knee.** The knee is a good
-  default when Cochran's band would cost much of the sample, which is
-  the trap {func}`~pyrake.solve_with_knee_fallback` exists to avoid.
-  When the band is cheap, as here, and the covariates plausibly modify
-  the effect, the knee's extra precision can cost more in bias than it
-  saves in variance.
+- **Price the band with the frontier.**
+  {func}`~pyrake.solve_with_knee_fallback` never asks for more balance
+  than Cochran's band and never pays past the knee for it. The frontier
+  shows what that trade gives up, so you can choose a different band
+  when the covariates are strong effect modifiers.
 - **Choose before you look.** The frontier, the band, and the weights
   depend only on the covariates, so settle them before estimating any
   effect, and use the same weights for every outcome in the study.
