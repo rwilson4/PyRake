@@ -15,6 +15,7 @@ import pytest
 from cvxium import (
     FrontierPoint,
     NewtonStepError,
+    OptimizationError,
     ProblemInfeasibleError,
     SolveResult,
     SolveStatus,
@@ -858,6 +859,30 @@ class MinimumImbalanceCornerTest(unittest.TestCase):
             rtol=1e-2,
             atol=1e-3,
         )
+
+    def test_a_breakdown_in_both_solvers_says_what_failed(self) -> None:
+        """If the barrier fails too, the error names the program and both causes."""
+        frontier = self._frontier()
+        broken = MagicMock()
+        broken.return_value.solve.side_effect = NewtonStepError(
+            "H is not positive definite"
+        )
+        also_broken = MagicMock()
+        also_broken.return_value.solve.side_effect = NewtonStepError(
+            "Hessian is not strictly positive definite."
+        )
+        with (
+            patch("pyrake.calibration.frontier.PrimalDualSolver", broken),
+            patch("pyrake.calibration.frontier.BarrierSolver", also_broken),
+            self.assertRaises(OptimizationError) as raised,
+        ):
+            frontier.minimize_objective(1, x0=np.ones(frontier.M1 + frontier.M2))
+
+        message = str(raised.exception)
+        self.assertIn("smallest external imbalance", message)
+        self.assertIn("H is not positive definite", message)
+        self.assertIn("Hessian is not strictly positive definite", message)
+        self.assertIn("always feasible", message)
 
     def test_a_survey_whose_corner_broke_the_primal_dual_method(self) -> None:
         """A small simulated A/B-test survey on which the primal-dual corner raised.

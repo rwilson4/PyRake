@@ -2029,7 +2029,34 @@ class ExternalValidityVarianceFrontier(MultiObjectiveOptimizer):
             start = (
                 np.asarray(self.minimize_objective(0).solution) if x0 is None else x0
             )
-            res = problem.solve(BarrierSolver(), x0=self._augment(start))
+            try:
+                res = problem.solve(BarrierSolver(), x0=self._augment(start))
+            except (
+                NewtonStepError,
+                BacktrackingLineSearchError,
+                OptimizationError,
+                ProblemInfeasibleError,
+            ) as barrier_error:
+                # The program is always feasible (any weights meeting the
+                # internal band give some φ), so this is numerical, and the
+                # caller needs to know it is not a statement about the bands.
+                raise OptimizationError(
+                    "Could not locate the tight end of the external-validity/"
+                    "variance frontier: the linear program for the smallest "
+                    "external imbalance attainable with internal validity "
+                    "held failed numerically in both solvers (primal-dual: "
+                    f"{type(e).__name__}: {e}; barrier: "
+                    f"{type(barrier_error).__name__}: {barrier_error}). That "
+                    "program is always feasible, so this says nothing about "
+                    "whether a band can be met; "
+                    "JointCalibrator.solve_with_fallback at a chosen band does "
+                    "not depend on it.",
+                    suboptimality=float("inf"),
+                    last_iterate=np.asarray(
+                        getattr(barrier_error, "last_iterate", start),
+                        dtype=np.float64,
+                    ),
+                ) from barrier_error
         # Not an ``assert``: stripped under ``-O``, a wrong-length solution
         # would make the slice below drop a real weight instead of phi, and
         # every objective downstream would be quietly wrong.
