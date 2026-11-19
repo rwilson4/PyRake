@@ -405,3 +405,39 @@ To summarize:
   wherever labeling was concentrated.
 - **Report the sensitivity.** The weights cannot see selection on
   the label. Say how large a $\Gamma$ the conclusion survives.
+
+## Future work
+
+Three gaps this guide works around rather than closes:
+
+- **A variance that credits the calibration.** The intervals here use
+  {class}`~pyrake.SIPWEstimator`'s variance, which treats the weights
+  as fixed. The standard alternative for calibration estimators
+  linearizes the ratio, $z_i = (a_i - \hat{R} b_i) / \bar{b}_w$ for
+  numerator $a$ and denominator $b$, and computes the variance from the
+  residuals of a weighted regression of $z$ on the calibration
+  covariates (Deville and Särndal, 1992; see the {doc}`../references`). In 40 repeated draws of this
+  example's holdout set (not shown), the current intervals covered
+  about right for precision but reported roughly twice the actual
+  standard error for recall at high thresholds, where the score bands
+  pin down the flagged share. The residual variance should remove most
+  of that gap.
+- **Simultaneous bands for the whole curve.** The bands are pointwise.
+  A bootstrap of the largest standardized deviation across thresholds,
+  $\max_t |\hat{\theta}^*(t) - \hat{\theta}(t)| / \widehat{\mathrm{se}}^*(t)$,
+  would give a band that covers the whole curve with the stated
+  probability. {meth}`~pyrake.RatioEstimator.resample` resamples with
+  the weights held fixed; a faithful bootstrap would re-solve the
+  calibration in each replicate, which costs a {class}`~pyrake.Rake`
+  solve per replicate.
+- **Label shift with a known prevalence.** When labeling depends on
+  the label, feature weights cannot correct it. If the population
+  prevalence is known, or can be bounded, from another source, it is a
+  calibration target like any other: $Y$ is observed for every labeled
+  unit, so it can be a column of `X` with its population mean in `mu`.
+  This guide does not yet show it, or check how well it works when
+  selection depends on both the features and the label. Relatedly,
+  {meth}`~pyrake.RatioEstimator.sensitivity_analysis` ignores
+  `outcome_proxies`, so a known prevalence cannot yet narrow the
+  sensitivity bounds the way it can for
+  {class}`~pyrake.SIPWEstimator`.
