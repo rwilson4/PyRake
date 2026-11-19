@@ -7,6 +7,15 @@ then minimizing Kish's design effect, traces the efficient frontier
 between the two, checks covariate balance, and estimates the population
 mean with each set of weights.
 
+:doc:`treatment_effect` is a tutorial for a randomized experiment
+measured by a survey. It calibrates the treatment and control groups
+together with :class:`~pyrake.JointCalibrator`, for internal validity
+(the groups balanced against each other) and external validity (each
+balanced against the population), traces the external
+validity-variance frontier and its knee, and estimates the treatment
+effect with :class:`~pyrake.SimpleDifferenceEstimator`, including a
+sensitivity analysis.
+
 The usage guide is a set of recipes for the two main workflows:
 calibrating weights, whether for a single sample with
 :class:`~pyrake.Rake` or for treatment and control groups jointly with
@@ -20,4 +29,5 @@ an A/B test. ``pyrake.usage()`` returns the same text.
    :maxdepth: 1
 
    population_mean
+   treatment_effect
    usage
