@@ -21,7 +21,7 @@ dependencies = [
     "matplotlib>=3.10.1,<4",
     "pandas>=2.3.1,<3",
     "seaborn>=0.13.2,<0.14",
-    "cvxium>=1.0.2,<2",
+    "cvxium>=1.1.0,<2",
 ]
 
 [project.urls]
