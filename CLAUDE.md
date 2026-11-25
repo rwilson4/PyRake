@@ -70,28 +70,28 @@ cvxium is imported; set the variable to an empty string to disable
 it. If a change intentionally alters iteration counts, regenerate
 with `CVXIUM_PERF_BASELINE_WRITE=1 uv run python -m pytest` and
 explain why in the commit message. Counts below 8 iterations are not
-guarded, and known-bimodal tests are listed under the baseline's
-`__ignore__` key.
+guarded. A test whose counts are not reproducible run to run can be
+listed under the baseline's `__ignore__` key; none is.
 
-The baseline is generated on macOS (Accelerate); CI runs Ubuntu
-(OpenBLAS) on mixed hardware. The JointCalibrator cascade's
-linear-objective barrier solves often stop when a high-t centering step
-fails on an ill-conditioned Newton system
-([Cvxium #20](https://github.com/rwilson4/Cvxium/issues/20)), and which
-step fails depends on the BLAS's rounding. Two settings in `ci.yml`
-make Linux reproducible: `OPENBLAS_NUM_THREADS=1`, since multi-threaded
-reductions sum in a run-dependent order, and `OPENBLAS_CORETYPE=Haswell`,
-since OpenBLAS otherwise picks different kernels on different CPUs.
-With them, every runner computes identically.
+Generate the baseline as CI runs it: Linux, Python 3.11, and the two
+settings in `ci.yml`, `OPENBLAS_NUM_THREADS=1` (multi-threaded reductions
+sum in a run-dependent order) and `OPENBLAS_CORETYPE=Haswell` (OpenBLAS
+otherwise picks different kernels on different CPUs).
 
-What remains is a fixed difference between Accelerate and OpenBLAS, of
-about one centering step in six tests (four in `test_knee_fallback.py`,
-two in `JointCalibratorFallbackTest`). Their baseline entries carry a
-`"tolerance"` of 0.2 or 0.25, sized to that difference; regeneration
-preserves it. Narrow or drop these once #20 is fixed. If a test starts
-tripping the guard on CI but not locally, reproduce it with those two
-variables set before widening anything. A band is the right fix only
-when the counts differ deterministically by whole centering steps.
+Before Cvxium 1.1.0, the JointCalibrator cascade's linear-objective
+barrier solves often stopped when a high-t centering step failed on an
+inaccurate Newton direction ([Cvxium #24](https://github.com/rwilson4/Cvxium/issues/24),
+the cause of [#20](https://github.com/rwilson4/Cvxium/issues/20)), and which
+step failed depended on the BLAS's rounding. Seven entries carried a
+`"tolerance"` band for a fixed Accelerate/OpenBLAS difference, and three
+tests sat in `__ignore__`. With 1.1.0 the counts match across platforms:
+the suite passes against the Linux baseline on macOS (arm64,
+Accelerate) with no bands and no ignore list, twice in a row. So the
+bands and the ignore list are gone. If a test starts tripping the guard
+on one platform only, reproduce it with the two variables set first. A
+`"tolerance"` band (regeneration preserves it) is the right fix only
+when the counts differ deterministically by whole centering steps, and
+`__ignore__` only when they differ from run to run.
 
 ### Documentation
 

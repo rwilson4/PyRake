@@ -1,9 +1,4 @@
 {
-  "__ignore__": [
-    "test.calibration.test_frontier.ExternalValidityVarianceFrontierTest.test_effective_sample_size_matches_the_variance_objective",
-    "test.calibration.test_rake.InfeasibleExternalValidityTest.test_fallback_weights_are_a_real_weighting",
-    "test.calibration.test_rake.InfeasibleExternalValidityTest.test_just_feasible_problem_still_solves_0_pd"
-  ],
   "test.calibration.test_convergence.FullStepsPastQuadraticConvergenceTest.test_a_feasible_calibration_takes_full_steps_once_it_may": [
     0,
     6,
@@ -101,6 +96,19 @@
   "test.calibration.test_frontier.ExternalValidityVarianceFrontierTest.test_diagnose_flags_the_binding_covariates": [
     17,
     18
+  ],
+  "test.calibration.test_frontier.ExternalValidityVarianceFrontierTest.test_effective_sample_size_matches_the_variance_objective": [
+    10,
+    16,
+    18,
+    10,
+    10,
+    10,
+    10,
+    10,
+    10,
+    11,
+    11
   ],
   "test.calibration.test_frontier.ExternalValidityVarianceFrontierTest.test_ess_remains_the_default_variance_space": [
     10,
@@ -745,14 +753,12 @@
   "test.calibration.test_knee_fallback.KneeFallbackTest.test_a_failed_sweep_degrades_to_the_requested_band": {
     "solves": 21,
     "total": 949,
-    "max": 67,
-    "tolerance": 0.2
+    "max": 67
   },
   "test.calibration.test_knee_fallback.KneeFallbackTest.test_a_failed_sweep_still_restores_the_band": {
     "solves": 21,
     "total": 949,
-    "max": 67,
-    "tolerance": 0.2
+    "max": 67
   },
   "test.calibration.test_knee_fallback.KneeFallbackTest.test_a_joint_infeasibility_has_nothing_past_the_seam": {
     "solves": 37,
@@ -762,8 +768,7 @@
   "test.calibration.test_knee_fallback.KneeFallbackTest.test_a_newton_failure_degrades_rather_than_escaping": {
     "solves": 21,
     "total": 949,
-    "max": 67,
-    "tolerance": 0.2
+    "max": 67
   },
   "test.calibration.test_knee_fallback.KneeFallbackTest.test_an_unattainable_band_is_reported_as_such": {
     "solves": 50,
@@ -793,8 +798,7 @@
   "test.calibration.test_knee_fallback.KneeFallbackTest.test_plain_fallback_traces_nothing": {
     "solves": 21,
     "total": 949,
-    "max": 67,
-    "tolerance": 0.2
+    "max": 67
   },
   "test.calibration.test_knee_fallback.KneeFallbackTest.test_the_calibrator_keeps_its_own_band": {
     "solves": 50,
@@ -889,19 +893,31 @@
   "test.calibration.test_rake.FloatCoercionTest.test_rake_solves_with_object_dtype": [
     22
   ],
+  "test.calibration.test_rake.InfeasibleExternalValidityTest.test_fallback_weights_are_a_real_weighting": [
+    0,
+    0,
+    73,
+    1,
+    55,
+    72,
+    71,
+    0,
+    39
+  ],
+  "test.calibration.test_rake.InfeasibleExternalValidityTest.test_just_feasible_problem_still_solves_0_pd": [
+    41
+  ],
   "test.calibration.test_rake.InfeasibleExternalValidityTest.test_just_feasible_problem_still_solves_1_ipm": {
     "per_solve": [
       91
-    ],
-    "tolerance": 0.2
+    ]
   },
   "test.calibration.test_rake.JointCalibratorFallbackTest.test_ambivalent": {
     "per_solve": [
       0,
       0,
       75
-    ],
-    "tolerance": 0.2
+    ]
   },
   "test.calibration.test_rake.JointCalibratorFallbackTest.test_ambivalent_external_only_minimizes_external": [
     0,
@@ -939,8 +955,7 @@
     "per_solve": [
       0,
       53
-    ],
-    "tolerance": 0.25
+    ]
   },
   "test.calibration.test_rake.JointCalibratorMaxWeightTest.test_an_uncapped_block_solves_as_if_its_cap_were_slack": [
     0,
